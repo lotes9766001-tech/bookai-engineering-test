@@ -1,0 +1,475 @@
+:root {
+  font-family: Inter, 'Noto Sans TC', system-ui, sans-serif;
+  color: #172033;
+  background: #f5f7fb;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at top left, #dbeafe, #f8fafc 42%, #eef2ff);
+}
+
+.auth-card {
+  width: min(440px, 92vw);
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 28px;
+  padding: 34px;
+  box-shadow: 0 24px 80px #1e293b22;
+}
+
+.logo {
+  width: 54px;
+  height: 54px;
+  border-radius: 18px;
+  background: #111827;
+  color: white;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  margin-bottom: 18px;
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.auth-card p {
+  color: #64748b;
+}
+
+input,
+select {
+  width: 100%;
+  border: 1px solid #dbe2ea;
+  border-radius: 14px;
+  padding: 13px 14px;
+  background: white;
+  margin: 6px 0;
+  font-size: 15px;
+}
+
+button {
+  border: 0;
+  border-radius: 14px;
+  background: #1e3a8a;
+  color: white;
+  padding: 12px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+button:hover {
+  filter: brightness(.96);
+}
+
+.link {
+  background: transparent;
+  color: #1e3a8a;
+}
+
+.hint {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 10px;
+}
+
+.error {
+  background: #fee2e2;
+  color: #991b1b;
+  border-radius: 12px;
+  padding: 10px;
+  margin: 8px 0;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+
+aside {
+  background: #0f172a;
+  color: white;
+  padding: 22px;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.brand {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.brand span {
+  display: block;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 15px;
+  background: #2563eb;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
+}
+
+.company-select {
+  background: #172554;
+  color: white;
+  border-color: #334155;
+  margin-bottom: 16px;
+}
+
+nav {
+  display: grid;
+  gap: 7px;
+  overflow: auto;
+}
+
+nav button,
+.logout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  color: #cbd5e1;
+  text-align: left;
+  justify-content: flex-start;
+}
+
+nav button.active,
+nav button:hover {
+  background: #1e293b;
+  color: white;
+}
+
+.logout {
+  margin-top: auto;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 22px;
+}
+
+.header h1,
+.title h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.header p,
+.title p {
+  color: #64748b;
+  margin: 6px 0 0;
+}
+
+main {
+  padding: 28px;
+  overflow: auto;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+}
+
+.card,
+.panel {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 24px;
+  padding: 20px;
+  box-shadow: 0 10px 30px #0f172a0b;
+}
+
+.card span {
+  font-size: 14px;
+  color: #64748b;
+}
+
+.card strong {
+  display: block;
+  font-size: 28px;
+  margin-top: 10px;
+}
+
+.card small {
+  color: #64748b;
+}
+
+.panel-grid {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr;
+  gap: 16px;
+}
+
+.panel h2 {
+  margin-top: 0;
+}
+
+.summary li {
+  margin: 12px 0;
+}
+
+.platform-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.platform {
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  padding: 15px;
+  background: #f8fafc;
+}
+
+.platform b,
+.platform span {
+  display: block;
+}
+
+.platform span {
+  font-size: 12px;
+  color: #64748b;
+  margin: 5px 0 12px;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 22px;
+  padding: 14px;
+  margin: 18px 0;
+}
+
+.form button {
+  margin: 6px 0;
+}
+
+.table-wrap {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 22px;
+  overflow: auto;
+  margin-top: 16px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  text-align: left;
+  border-bottom: 1px solid #edf2f7;
+  padding: 13px 15px;
+  font-size: 14px;
+}
+
+th {
+  background: #f8fafc;
+  color: #475569;
+}
+
+.notice {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #9a3412;
+  border-radius: 18px;
+  padding: 16px;
+  margin-top: 18px;
+}
+
+.loading,
+.locked {
+  display: grid;
+  place-items: center;
+  min-height: 70vh;
+  text-align: center;
+}
+
+/* 手機版：改成完整可見的 App 式選單 */
+@media (max-width: 720px) {
+  .app {
+    display: block;
+    min-height: 100vh;
+  }
+
+  aside {
+    position: relative;
+    top: 0;
+    z-index: 20;
+    height: auto;
+    padding: 14px;
+    border-bottom: 1px solid #1e293b;
+  }
+
+  .brand {
+    margin-bottom: 10px;
+  }
+
+  .brand b {
+    font-size: 18px;
+  }
+
+  .brand span {
+    font-size: 11px;
+  }
+
+  .mark {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+  }
+
+  .company-select {
+    margin-bottom: 12px;
+    padding: 10px 12px;
+    font-size: 14px;
+  }
+
+  nav {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    overflow: visible;
+  }
+
+  nav button {
+    width: 100%;
+    min-width: 0;
+    justify-content: center;
+    white-space: nowrap;
+    padding: 11px 10px;
+    border-radius: 16px;
+    font-size: 13px;
+  }
+
+  nav button svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .logout {
+    width: 100%;
+    margin-top: 10px;
+    justify-content: center;
+    padding: 11px 10px;
+    border-radius: 16px;
+    font-size: 13px;
+  }
+
+  main {
+    padding: 16px;
+  }
+
+  .header {
+    display: block;
+    margin-bottom: 16px;
+  }
+
+  .header h1,
+  .title h1 {
+    font-size: 26px;
+    line-height: 1.2;
+  }
+
+  .header p,
+  .title p {
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .grid,
+  .panel-grid,
+  .platform-grid,
+  .form {
+    grid-template-columns: 1fr;
+  }
+
+  .card,
+  .panel {
+    border-radius: 20px;
+    padding: 16px;
+  }
+
+  .card strong {
+    font-size: 24px;
+  }
+
+  .form {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .form label {
+    display: grid;
+    gap: 6px;
+  }
+
+  .form label span {
+    font-size: 13px;
+    font-weight: 700;
+    color: #475569;
+    padding-left: 4px;
+  }
+
+  input,
+  select {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  button {
+    padding: 12px 14px;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+  }
+
+  table {
+    min-width: 760px;
+  }
+
+  th,
+  td {
+    white-space: nowrap;
+    font-size: 13px;
+  }
+
+  .notice {
+    font-size: 14px;
+    line-height: 1.6;
+  }
+}

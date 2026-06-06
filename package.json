@@ -1,0 +1,39 @@
+{
+  "name": "bookai-commerce-erp-hub",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install && npm --prefix client install && npm --prefix server install",
+    "dev": "concurrently \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "start": "npm --prefix server start",
+    "build": "npm --prefix client run build",
+    "seed": "npm --prefix server run seed",
+    "backup:db": "node scripts/backup-db.js",
+    "health": "node scripts/health-check.js",
+    "smoke": "node scripts/smoke-test.js",
+    "smoke:clean": "node scripts/smoke-clean.js",
+    "rbac:smoke": "node scripts/rbac-smoke-test.js"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.0.2",
+    "concurrently": "^9.1.2",
+    "vite": "^8.0.14"
+  },
+  "dependencies": {
+    "axios": "^1.16.1",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "lucide-react": "^1.17.0",
+    "nanoid": "^5.1.11",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "recharts": "^3.8.1",
+    "sqlite3": "^6.0.1",
+    "uuid": "^14.0.0"
+  }
+}

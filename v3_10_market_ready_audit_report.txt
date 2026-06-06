@@ -1,0 +1,164 @@
+
+==============================
+BookAI v3.10 市場測試前一次性總檢查
+==============================
+
+==============================
+1. 基礎檔案檢查
+==============================
+✅ SQLite 存在：/Users/boss/Desktop/BookAI_Commerce_ERP_Hub_v1_0/server/bookai.sqlite
+✅ server/index.js 存在
+✅ client/src/main.jsx 存在
+✅ scripts/health-check.js 存在
+
+==============================
+2. 資料表檢查
+==============================
+✅ 資料表存在：users
+✅ 資料表存在：companies
+✅ 資料表存在：company_users
+✅ 資料表存在：products
+✅ 資料表存在：job_sites
+✅ 資料表存在：job_site_payments
+✅ 資料表存在：inventory_movements
+✅ 資料表存在：audit_logs
+✅ 資料表存在：job_site_estimate_items
+
+==============================
+3. job_sites 欄位檢查
+==============================
+✅ job_sites.id
+✅ job_sites.company_id
+✅ job_sites.name
+✅ job_sites.site_name
+✅ job_sites.client_name
+✅ job_sites.client_phone
+✅ job_sites.address
+✅ job_sites.project_type
+✅ job_sites.quote_amount
+✅ job_sites.subtotal_amount
+✅ job_sites.tax_amount
+✅ job_sites.total_amount
+✅ job_sites.estimate_cost_total
+✅ job_sites.received_amount
+✅ job_sites.material_cost
+✅ job_sites.labor_cost
+✅ job_sites.outsourced_cost
+✅ job_sites.misc_cost
+✅ job_sites.food_cost
+✅ job_sites.status
+✅ job_sites.note
+
+==============================
+4. job_site_estimate_items 欄位檢查
+==============================
+✅ job_site_estimate_items.id
+✅ job_site_estimate_items.company_id
+✅ job_site_estimate_items.job_site_id
+✅ job_site_estimate_items.work_type
+✅ job_site_estimate_items.item_name
+✅ job_site_estimate_items.quantity
+✅ job_site_estimate_items.unit_price
+✅ job_site_estimate_items.amount
+✅ job_site_estimate_items.cost_amount
+⚠️ job_site_estimate_items 沒有 unit_cost，之後所有計算應以 cost_amount 為主
+
+==============================
+5. 案場主表成本 vs 明細成本一致性
+==============================
+#51｜測試｜冷氣工程｜報價 NT$ 38,500｜明細報價 NT$ 38,500｜主表明細成本 NT$ 31,000｜明細成本 NT$ 31,000
+#37｜嶺東科大｜冷氣工程｜報價 NT$ 49,200｜明細報價 NT$ 42,900｜主表明細成本 NT$ 31,000｜明細成本 NT$ 31,000
+#35｜南屯店面整修工程｜冷氣工程｜報價 NT$ 40,700｜明細報價 NT$ 40,700｜主表明細成本 NT$ 31,000｜明細成本 NT$ 31,000
+✅ 有明細成本的案場，主表 estimate_cost_total 與明細 cost_amount 合計一致
+✅ 沒有發現「有明細報價但明細成本為 0」的案場
+⚠️ 1 個案場：案場 quote_amount 與明細 amount 合計不一致
+  - #37 嶺東科大｜案場報價 NT$ 49,200｜明細報價 NT$ 42,900
+⚠️ 17 個案場目前沒有估價明細，可能是舊測試案場或手動報價案場
+
+==============================
+6. 工種統計
+==============================
+裝修工程｜案場 14｜明細 0｜明細報價 NT$ 0｜明細成本 NT$ 0｜⚪ 無明細
+油漆工程｜案場 3｜明細 0｜明細報價 NT$ 0｜明細成本 NT$ 0｜⚪ 無明細
+冷氣工程｜案場 3｜明細 23｜明細報價 NT$ 122,100｜明細成本 NT$ 93,000｜✅ 有明細成本
+
+==============================
+7. 指定測試案場：v3.10 / 計算測試
+==============================
+⚠️ 找不到 v3.10 或 計算測試案場
+
+==============================
+8. 最新 40 筆估價明細
+==============================
+{"id":73,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"高樓危險施工","quantity":0,"unit_price":3000,"amount":0,"cost_amount":0,"note":""}
+{"id":72,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"冷媒補充","quantity":0,"unit_price":2500,"amount":0,"cost_amount":0,"note":""}
+{"id":71,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"舊機拆除","quantity":0,"unit_price":1500,"amount":0,"cost_amount":0,"note":""}
+{"id":70,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"排水管延伸","quantity":0,"unit_price":300,"amount":0,"cost_amount":0,"note":""}
+{"id":69,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"室外機架","quantity":0,"unit_price":2500,"amount":0,"cost_amount":0,"note":""}
+{"id":68,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"洗洞費","quantity":0,"unit_price":1200,"amount":0,"cost_amount":0,"note":""}
+{"id":67,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"銅管追加","quantity":0,"unit_price":700,"amount":0,"cost_amount":0,"note":""}
+{"id":66,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"標準安裝","quantity":1,"unit_price":3500,"amount":3500,"cost_amount":2000,"note":""}
+{"id":65,"company_id":6,"job_site_id":51,"work_type":"冷氣工程","item_name":"冷氣主機 / 室內機","quantity":1,"unit_price":35000,"amount":35000,"cost_amount":29000,"note":""}
+{"id":27,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"高樓危險施工","quantity":0,"unit_price":3000,"amount":0,"cost_amount":0,"note":""}
+{"id":26,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"冷媒補充","quantity":0,"unit_price":2500,"amount":0,"cost_amount":0,"note":""}
+{"id":25,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"舊機拆除","quantity":0,"unit_price":1500,"amount":0,"cost_amount":0,"note":""}
+{"id":24,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"排水管延伸","quantity":0,"unit_price":300,"amount":0,"cost_amount":0,"note":""}
+{"id":23,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"室外機架","quantity":1,"unit_price":2500,"amount":2500,"cost_amount":0,"note":""}
+{"id":22,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"洗洞費","quantity":1,"unit_price":1200,"amount":1200,"cost_amount":0,"note":""}
+{"id":21,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"銅管追加","quantity":1,"unit_price":700,"amount":700,"cost_amount":0,"note":""}
+{"id":20,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"標準安裝","quantity":1,"unit_price":3500,"amount":3500,"cost_amount":2000,"note":""}
+{"id":19,"company_id":9,"job_site_id":37,"work_type":"冷氣工程","item_name":"冷氣主機 / 室內機","quantity":1,"unit_price":35000,"amount":35000,"cost_amount":29000,"note":""}
+{"id":16,"company_id":9,"job_site_id":35,"work_type":"冷氣工程","item_name":"排水管延伸","quantity":1,"unit_price":300,"amount":300,"cost_amount":0,"note":""}
+{"id":15,"company_id":9,"job_site_id":35,"work_type":"冷氣工程","item_name":"洗洞費","quantity":1,"unit_price":1200,"amount":1200,"cost_amount":0,"note":""}
+{"id":14,"company_id":9,"job_site_id":35,"work_type":"冷氣工程","item_name":"銅管追加","quantity":1,"unit_price":700,"amount":700,"cost_amount":0,"note":""}
+{"id":13,"company_id":9,"job_site_id":35,"work_type":"冷氣工程","item_name":"標準安裝","quantity":1,"unit_price":3500,"amount":3500,"cost_amount":2000,"note":""}
+{"id":12,"company_id":9,"job_site_id":35,"work_type":"冷氣工程","item_name":"冷氣主機 / 室內機","quantity":1,"unit_price":35000,"amount":35000,"cost_amount":29000,"note":""}
+{"id":11,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"高樓危險施工","quantity":0,"unit_price":3000,"amount":0,"cost_amount":0,"note":""}
+{"id":10,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"冷媒補充","quantity":0,"unit_price":2500,"amount":0,"cost_amount":0,"note":""}
+{"id":9,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"舊機拆除","quantity":0,"unit_price":1500,"amount":0,"cost_amount":0,"note":""}
+{"id":8,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"排水管延伸","quantity":0,"unit_price":300,"amount":0,"cost_amount":0,"note":""}
+{"id":7,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"室外機架","quantity":0,"unit_price":2500,"amount":0,"cost_amount":0,"note":""}
+{"id":6,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"洗洞費","quantity":0,"unit_price":1200,"amount":0,"cost_amount":0,"note":""}
+{"id":5,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"銅管追加","quantity":0,"unit_price":700,"amount":0,"cost_amount":0,"note":""}
+{"id":4,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"標準安裝","quantity":1,"unit_price":3500,"amount":3500,"cost_amount":2000,"note":""}
+{"id":3,"company_id":9,"job_site_id":34,"work_type":"冷氣工程","item_name":"冷氣主機 / 室內機","quantity":1,"unit_price":35000,"amount":35000,"cost_amount":29000,"note":""}
+{"id":1,"company_id":9,"job_site_id":33,"work_type":"冷氣工程","item_name":"冷氣主機 / 室內機","quantity":1,"unit_price":35000,"amount":35000,"cost_amount":29000,"note":"v3.8a API 測試：冷氣主機"}
+⚠️ 6 筆估價明細有報價但成本 0
+
+==============================
+9. 後端 estimate-items 程式檢查
+==============================
+✅ refreshJobSiteEstimateTotals 存在
+✅ refresh 有 SUM(amount)
+✅ refresh 有 SUM(cost_amount)
+✅ refresh 有寫回 estimate_cost_total
+✅ POST estimate-items 存在
+✅ PUT estimate-items 存在
+✅ DELETE estimate-items 存在
+✅ 後端有 cost_amount 字樣
+✅ 刪除案場會處理 estimate items
+
+==============================
+10. 前端 main.jsx 程式檢查
+==============================
+✅ 沒有 async async
+✅ normalizePayload 支援 estimate_cost_total
+✅ calc(site) 支援 estimate_cost_total
+✅ 複製文字支援 cost_amount
+✅ copyJobSiteText 是 async
+✅ 報價複製存在
+✅ 請款複製存在
+✅ 結案複製存在
+
+==============================
+11. health-check.js 是否漏檢新核心欄位
+==============================
+⚠️ health-check.js 尚未檢查 job_sites.estimate_cost_total，建議 v3.10-5 補上
+⚠️ health-check.js 尚未檢查 job_site_estimate_items，建議 v3.10-5 補上
+
+==============================
+12. 一次性診斷總結
+==============================
+❌ 嚴重問題數：0
+⚠️ 警告問題數：7
+⚠️ 可進行功能測試，但建議修完警告後再封市場測試版。

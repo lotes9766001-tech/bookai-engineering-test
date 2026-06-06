@@ -1,0 +1,53 @@
+# dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# build output
+client/dist/
+dist/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+server/.env
+client/.env
+
+# database backups
+backups/
+
+# logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# macOS
+.DS_Store
+
+# temporary files
+.tmp/
+temp/
+.cache/
+
+# editor
+.vscode/
+.idea/
+
+# SQLite local database files
+server/*.sqlite
+server/*.sqlite-shm
+server/*.sqlite-wal
+server/*.sqlite.bak*
+server/data/*.db
+
+# local backup code snapshots
+*.bak*
+client/src/*.bak*
+server/*.bak*
+scripts/*.bak*
+
+# ngrok local binary/archive
+ngrok*
+*.zip

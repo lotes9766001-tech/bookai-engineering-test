@@ -1,0 +1,2078 @@
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import { nanoid } from 'nanoid';
+import { db, initDb, audit } from './db.js';
+import { plans, hasFeature } from './plans.js';
+import { platforms } from './platforms.js';
+
+initDb();
+
+const app = express();
+
+const PORT = process.env.PORT || 5050;
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+
+app.use(cors());
+app.use(express.json());
+
+function sign(user) {
+  return jwt.sign(
+    {
+      id: user.id,
+      email: user.email
+    },
+    JWT_SECRET,
+    {
+      expiresIn: '7d'
+    }
+  );
+}
+
+function auth(req, res, next) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+
+  if (!token) {
+    return res.status(401).json({ error: '未登入' });
+  }
+
+  try {
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch {
+    return res.status(401).json({ error: '登入已過期' });
+  }
+}
+
+function company(req, res, next) {
+  const companyId = Number(req.params.companyId || req.query.companyId || req.body.companyId);
+
+  if (!companyId) {
+    return res.status(400).json({ error: '缺少 companyId' });
+  }
+
+  const row = db.prepare(`
+    SELECT
+      c.*,
+      cu.role
+    FROM companies c
+    JOIN company_users cu ON cu.company_id = c.id
+    WHERE c.id = ?
+      AND cu.user_id = ?
+  `).get(companyId, req.user.id);
+
+  if (!row) {
+    return res.status(403).json({ error: '沒有公司權限' });
+  }
+
+  req.company = row;
+  next();
+}
+
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    const role = req.company?.role || 'viewer';
+
+    if (allowedRoles.includes(role)) {
+      return next();
+    }
+
+    return res.status(403).json({
+      error: '你的角色沒有權限執行此操作',
+      role,
+      requiredRoles: allowedRoles
+    });
+  };
+}
+
+const requireFeature = (feature) => (req, res, next) => {
+  if (!hasFeature(req.company.plan, feature)) {
+    return res.status(403).json({
+      error: '此功能需要升級方案',
+      feature
+    });
+  }
+
+  next();
+};
+
+function calcTransaction(t) {
+  const gross = Number(t.grossAmount || 0);
+  const fee = Number(t.platformFee || 0);
+  const discount = Number(t.discountAmount || 0);
+  const shipping = Number(t.shippingFee || 0);
+  const refund = Number(t.refundAmount || 0);
+  const cogs = Number(t.costOfGoodsSold || 0);
+
+  const net = gross - fee - discount - refund + shipping;
+  const profit = gross - fee - discount - refund - cogs;
+  const tax = Number(
+    t.taxAmount ?? Math.round((gross / 1.05 * 0.05) * 100) / 100
+  );
+
+  return {
+    net,
+    profit,
+    tax
+  };
+}
+
+function seedCompanyDefaults(companyId) {
+  const accounts = [
+    ['1101', '現金', 'asset'],
+    ['1102', '銀行存款', 'asset'],
+    ['1201', '應收帳款', 'asset'],
+    ['1301', '商品存貨', 'asset'],
+    ['2101', '應付帳款', 'liability'],
+    ['3101', '業主資本', 'equity'],
+    ['4101', '銷貨收入', 'revenue'],
+    ['5101', '商品成本', 'expense'],
+    ['5201', '平台手續費', 'expense'],
+    ['5901', '雜項費用', 'expense']
+  ];
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO accounts (
+      company_id,
+      code,
+      name,
+      type
+    )
+    VALUES (?,?,?,?)
+  `);
+
+  accounts.forEach((a) => stmt.run(companyId, ...a));
+}
+
+app.get('/api/health', (_, res) => {
+  res.json({
+    ok: true,
+    name: 'BookAI Commerce ERP Hub'
+  });
+});
+
+app.post('/api/auth/register', (req, res) => {
+  const {
+    name,
+    email,
+    password,
+    companyName,
+    taxId,
+    industry,
+    companyAddress,
+    address,
+    plan = 'business'
+  } = req.body;
+
+  if (!email || !password || !companyName) {
+    return res.status(400).json({ error: '請填寫必要欄位' });
+  }
+
+  const finalAddress = companyAddress || address || '';
+  const hash = bcrypt.hashSync(password, 10);
+
+  try {
+    const user = db.prepare(`
+      INSERT INTO users (
+        name,
+        email,
+        password_hash
+      )
+      VALUES (?,?,?)
+    `).run(name || '使用者', email, hash);
+
+    const companyRow = db.prepare(`
+      INSERT INTO companies (
+        name,
+        tax_id,
+        industry,
+        companyAddress,
+        address,
+        plan,
+        owner_id
+      )
+      VALUES (?,?,?,?,?,?,?)
+    `).run(
+      companyName,
+      taxId || '',
+      industry || '',
+      finalAddress,
+      finalAddress,
+      plan,
+      user.lastInsertRowid
+    );
+
+    db.prepare(`
+      INSERT INTO company_users (
+        company_id,
+        user_id,
+        role
+      )
+      VALUES (?,?,?)
+    `).run(companyRow.lastInsertRowid, user.lastInsertRowid, 'owner');
+
+    seedCompanyDefaults(companyRow.lastInsertRowid);
+
+    audit(companyRow.lastInsertRowid, user.lastInsertRowid, 'register', '建立帳號與公司');
+
+    const newUser = db.prepare(`
+      SELECT
+        id,
+        name,
+        email
+      FROM users
+      WHERE id = ?
+    `).get(user.lastInsertRowid);
+
+    res.json({
+      token: sign(newUser),
+      user: newUser,
+      companyId: companyRow.lastInsertRowid
+    });
+  } catch (e) {
+    res.status(400).json({
+      error: '帳號可能已存在',
+      detail: e.message
+    });
+  }
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body;
+
+  const user = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE email = ?
+  `).get(email);
+
+  if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    return res.status(401).json({ error: '帳號或密碼錯誤' });
+  }
+
+  const safe = {
+    id: user.id,
+    name: user.name,
+    email: user.email
+  };
+
+  res.json({
+    token: sign(safe),
+    user: safe
+  });
+});
+
+app.get('/api/me', auth, (req, res) => {
+  const user = db.prepare(`
+    SELECT
+      id,
+      name,
+      email
+    FROM users
+    WHERE id = ?
+  `).get(req.user.id);
+
+  const companies = db.prepare(`
+    SELECT
+      c.*,
+      cu.role
+    FROM companies c
+    JOIN company_users cu ON cu.company_id = c.id
+    WHERE cu.user_id = ?
+  `).all(req.user.id);
+
+  res.json({
+    user,
+    companies,
+    plans
+  });
+});
+
+app.get('/api/plans', (_, res) => {
+  res.json(plans);
+});
+
+app.patch('/api/companies/:companyId/plan', auth, company, (req, res) => {
+  const { plan } = req.body;
+
+  if (!plans[plan]) {
+    return res.status(400).json({ error: '未知方案' });
+  }
+
+  db.prepare(`
+    UPDATE companies
+    SET plan = ?
+    WHERE id = ?
+  `).run(plan, req.company.id);
+
+  audit(req.company.id, req.user.id, 'plan_changed', plan);
+
+  res.json({
+    ok: true,
+    plan
+  });
+});
+
+app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
+  const income = db.prepare(`
+    SELECT COALESCE(SUM(gross_amount),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const fees = db.prepare(`
+    SELECT COALESCE(SUM(platform_fee),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const cogs = db.prepare(`
+    SELECT COALESCE(SUM(cost_of_goods_sold),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const vouchers = db.prepare(`
+    SELECT COALESCE(SUM(amount),0) total
+    FROM vouchers
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const invoicesPending = db.prepare(`
+    SELECT COUNT(*) count
+    FROM invoices
+    WHERE company_id = ?
+      AND status != 'issued'
+  `).get(req.company.id).count;
+
+  const txCount = db.prepare(`
+    SELECT COUNT(*) count
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).count;
+
+  const revenueByPlatform = db.prepare(`
+    SELECT
+      platform_key name,
+      SUM(gross_amount) value
+    FROM transactions
+    WHERE company_id = ?
+    GROUP BY platform_key
+  `).all(req.company.id);
+
+  const lowStock = db.prepare(`
+    SELECT COUNT(*) count
+    FROM products
+    WHERE company_id = ?
+      AND stock <= safety_stock
+  `).get(req.company.id).count;
+
+  res.json({
+    revenue: income,
+    expenses: fees + cogs + vouchers,
+    netProfit: income - fees - cogs - vouchers,
+    cogs,
+    fees,
+    txCount,
+    invoicesPending,
+    revenueByPlatform,
+    lowStock
+  });
+});
+
+// ===============================
+// 工程業案場中心 API
+// ===============================
+
+try {
+  db.prepare("ALTER TABLE job_sites ADD COLUMN client_phone TEXT").run();
+  console.log("✅ job_sites 已新增 client_phone 欄位");
+} catch (err) {
+  if (!String(err.message || "").includes("duplicate column name")) {
+    console.error("新增 client_phone 欄位失敗：", err.message);
+  }
+}
+
+
+app.get('/api/companies/:companyId/jobsites', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      COALESCE(site_name, name) AS siteName,
+      COALESCE(client_name, '') AS clientName,
+      COALESCE(client_phone, '') AS clientPhone,
+      COALESCE(address, '') AS address,
+      COALESCE(project_type, '') AS projectType,
+      COALESCE(area_pings, 0) AS areaPings,
+      COALESCE(price_per_ping, 0) AS pricePerPing,
+      COALESCE(food_cost, 0) AS foodCost,
+      COALESCE(quote_amount, 0) AS quoteAmount,
+      COALESCE(tax_mode, 'not_taxed') AS taxMode,
+      COALESCE(tax_rate, 0.05) AS taxRate,
+      COALESCE(subtotal_amount, quote_amount, 0) AS subtotalAmount,
+      COALESCE(tax_amount, 0) AS taxAmount,
+      COALESCE(total_amount, quote_amount, 0) AS totalAmount,
+      COALESCE((
+        SELECT SUM(jsp.amount)
+        FROM job_site_payments jsp
+        WHERE jsp.company_id = job_sites.company_id
+          AND jsp.job_site_id = job_sites.id
+      ), 0) AS receivedAmount,
+      COALESCE(material_cost, 0) AS materialCost,
+      COALESCE(labor_cost, 0) AS laborCost,
+      COALESCE(outsourced_cost, 0) AS outsourcedCost,
+      COALESCE(misc_cost, 0) AS miscCost,
+      COALESCE(status, '已報價') AS status,
+      COALESCE(note, '') AS note,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_sites
+    WHERE company_id = ?
+    ORDER BY id DESC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const {
+    siteName,
+    name,
+    clientName,
+    clientPhone,
+    address,
+    projectType,
+    areaPings,
+    areaPing,
+    paintAreaPing,
+    pricePerPing,
+    paintPricePerPing,
+    foodCost,
+    quoteAmount,
+    receivedAmount,
+    materialCost,
+    laborCost,
+    outsourcedCost,
+    miscCost,
+    taxMode,
+    taxRate,
+    subtotalAmount,
+    taxAmount,
+    totalAmount,
+    status,
+    note
+  } = req.body;
+
+  const finalSiteName = siteName || name || '';
+
+  if (!finalSiteName.trim()) {
+    return res.status(400).json({ error: '請輸入案場名稱' });
+  }
+
+  const row = db.prepare(`
+    INSERT INTO job_sites (
+      company_id,
+      name,
+      site_name,
+      client_name,
+      client_phone,
+      address,
+      project_type,
+      area_pings,
+      price_per_ping,
+      food_cost,
+      quote_amount,
+      tax_mode,
+      tax_rate,
+      subtotal_amount,
+      tax_amount,
+      total_amount,
+      received_amount,
+      material_cost,
+      labor_cost,
+      outsourced_cost,
+      misc_cost,
+      status,
+      note,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(
+    req.company.id,
+    finalSiteName.trim(),
+    finalSiteName.trim(),
+    clientName || '',
+    clientPhone || '',
+    address || '',
+    projectType || '',
+    Number(areaPings ?? areaPing ?? paintAreaPing ?? 0),
+    Number(pricePerPing ?? paintPricePerPing ?? 0),
+    Number(foodCost || 0),
+    Number(quoteAmount || totalAmount || 0),
+    taxMode || 'not_taxed',
+    Number(taxRate ?? 0.05),
+    Number(subtotalAmount ?? quoteAmount ?? totalAmount ?? 0),
+    Number(taxAmount || 0),
+    Number(totalAmount ?? quoteAmount ?? 0),
+    Number(receivedAmount || 0),
+    Number(materialCost || 0),
+    Number(laborCost || 0),
+    Number(outsourcedCost || 0),
+    Number(miscCost || 0),
+    status || '已報價',
+    note || ''
+  );
+
+  audit(req.company.id, req.user.id, 'jobsite_created', String(row.lastInsertRowid));
+
+  const created = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      COALESCE(site_name, name) AS siteName,
+      COALESCE(client_name, '') AS clientName,
+      COALESCE(client_phone, '') AS clientPhone,
+      COALESCE(address, '') AS address,
+      COALESCE(project_type, '') AS projectType,
+      COALESCE(area_pings, 0) AS areaPings,
+      COALESCE(price_per_ping, 0) AS pricePerPing,
+      COALESCE(food_cost, 0) AS foodCost,
+      COALESCE(quote_amount, 0) AS quoteAmount,
+      COALESCE(tax_mode, 'not_taxed') AS taxMode,
+      COALESCE(tax_rate, 0.05) AS taxRate,
+      COALESCE(subtotal_amount, quote_amount, 0) AS subtotalAmount,
+      COALESCE(tax_amount, 0) AS taxAmount,
+      COALESCE(total_amount, quote_amount, 0) AS totalAmount,
+      COALESCE((
+        SELECT SUM(jsp.amount)
+        FROM job_site_payments jsp
+        WHERE jsp.company_id = job_sites.company_id
+          AND jsp.job_site_id = job_sites.id
+      ), 0) AS receivedAmount,
+      COALESCE(material_cost, 0) AS materialCost,
+      COALESCE(labor_cost, 0) AS laborCost,
+      COALESCE(outsourced_cost, 0) AS outsourcedCost,
+      COALESCE(misc_cost, 0) AS miscCost,
+      COALESCE(status, '已報價') AS status,
+      COALESCE(note, '') AS note,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_sites
+    WHERE id = ?
+      AND company_id = ?
+  `).get(row.lastInsertRowid, req.company.id);
+
+  res.json(created);
+});
+
+
+app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+
+  if (!jobsiteId) {
+    return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  const {
+    siteName,
+    name,
+    clientName,
+    clientPhone,
+    address,
+    projectType,
+    areaPings,
+    areaPing,
+    paintAreaPing,
+    pricePerPing,
+    paintPricePerPing,
+    foodCost,
+    quoteAmount,
+    receivedAmount,
+    materialCost,
+    laborCost,
+    outsourcedCost,
+    miscCost,
+    taxMode,
+    taxRate,
+    subtotalAmount,
+    taxAmount,
+    totalAmount,
+    status,
+    note
+  } = req.body;
+
+  const finalSiteName = siteName || name || '';
+
+  if (!finalSiteName.trim()) {
+    return res.status(400).json({ error: '請輸入案場名稱' });
+  }
+
+  const result = db.prepare(`
+    UPDATE job_sites
+    SET
+      name = ?,
+      site_name = ?,
+      client_name = ?,
+      client_phone = ?,
+      address = ?,
+      project_type = ?,
+      area_pings = ?,
+      price_per_ping = ?,
+      food_cost = ?,
+      quote_amount = ?,
+      tax_mode = ?,
+      tax_rate = ?,
+      subtotal_amount = ?,
+      tax_amount = ?,
+      total_amount = ?,
+      received_amount = ?,
+      material_cost = ?,
+      labor_cost = ?,
+      outsourced_cost = ?,
+      misc_cost = ?,
+      status = ?,
+      note = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(
+    finalSiteName.trim(),
+    finalSiteName.trim(),
+    clientName || '',
+    clientPhone || '',
+    address || '',
+    projectType || '',
+    Number(areaPings ?? areaPing ?? paintAreaPing ?? 0),
+    Number(pricePerPing ?? paintPricePerPing ?? 0),
+    Number(foodCost || 0),
+    Number(quoteAmount || totalAmount || 0),
+    taxMode || 'not_taxed',
+    Number(taxRate ?? 0.05),
+    Number(subtotalAmount ?? quoteAmount ?? totalAmount ?? 0),
+    Number(taxAmount || 0),
+    Number(totalAmount ?? quoteAmount ?? 0),
+    Number(receivedAmount || 0),
+    Number(materialCost || 0),
+    Number(laborCost || 0),
+    Number(outsourcedCost || 0),
+    Number(miscCost || 0),
+    status || '已報價',
+    note || '',
+    jobsiteId,
+    req.company.id
+  );
+
+  if (result.changes === 0) {
+    return res.status(404).json({
+      error: '找不到此案場，或你沒有權限修改'
+    });
+  }
+
+  audit(req.company.id, req.user.id, 'jobsite_updated', String(jobsiteId));
+
+  const updated = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      COALESCE(site_name, name) AS siteName,
+      COALESCE(client_name, '') AS clientName,
+      COALESCE(client_phone, '') AS clientPhone,
+      COALESCE(address, '') AS address,
+      COALESCE(project_type, '') AS projectType,
+      COALESCE(area_pings, 0) AS areaPings,
+      COALESCE(price_per_ping, 0) AS pricePerPing,
+      COALESCE(food_cost, 0) AS foodCost,
+      COALESCE(quote_amount, 0) AS quoteAmount,
+      COALESCE(tax_mode, 'not_taxed') AS taxMode,
+      COALESCE(tax_rate, 0.05) AS taxRate,
+      COALESCE(subtotal_amount, quote_amount, 0) AS subtotalAmount,
+      COALESCE(tax_amount, 0) AS taxAmount,
+      COALESCE(total_amount, quote_amount, 0) AS totalAmount,
+      COALESCE((
+        SELECT SUM(jsp.amount)
+        FROM job_site_payments jsp
+        WHERE jsp.company_id = job_sites.company_id
+          AND jsp.job_site_id = job_sites.id
+      ), 0) AS receivedAmount,
+      COALESCE(material_cost, 0) AS materialCost,
+      COALESCE(labor_cost, 0) AS laborCost,
+      COALESCE(outsourced_cost, 0) AS outsourcedCost,
+      COALESCE(misc_cost, 0) AS miscCost,
+      COALESCE(status, '已報價') AS status,
+      COALESCE(note, '') AS note,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_sites
+    WHERE id = ?
+      AND company_id = ?
+  `).get(jobsiteId, req.company.id);
+
+  res.json(updated);
+});
+
+app.delete('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+
+  if (!jobsiteId) {
+    return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  const result = db.prepare(`
+    DELETE FROM job_sites
+    WHERE id = ?
+      AND company_id = ?
+  `).run(jobsiteId, req.company.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({
+      error: '找不到此案場，或你沒有權限刪除'
+    });
+  }
+
+  audit(req.company.id, req.user.id, 'jobsite_deleted', String(jobsiteId));
+
+  res.json({ ok: true });
+});
+
+
+
+// ===============================
+// v3.8a 案場估價明細 API
+// ===============================
+
+function calculateEstimateAmount(quantity, unitPrice) {
+  return Number(quantity || 0) * Number(unitPrice || 0);
+}
+
+function refreshJobSiteEstimateTotals(companyId, jobsiteId) {
+  const totals = db.prepare(`
+    SELECT
+      COALESCE(SUM(amount), 0) AS estimateTotal,
+      COALESCE(SUM(cost_amount), 0) AS estimateCostTotal
+    FROM job_site_estimate_items
+    WHERE company_id = ?
+      AND job_site_id = ?
+  `).get(companyId, jobsiteId);
+
+  const jobsite = db.prepare(`
+    SELECT
+      tax_mode,
+      tax_rate,
+      material_cost,
+      labor_cost,
+      outsourced_cost,
+      misc_cost
+    FROM job_sites
+    WHERE id = ?
+      AND company_id = ?
+  `).get(jobsiteId, companyId);
+
+  const taxMode = jobsite?.tax_mode || 'not_taxed';
+  const taxRate = Number(jobsite?.tax_rate ?? 0.05);
+  const estimateTotal = Number(totals.estimateTotal || 0);
+
+  let subtotalAmount = estimateTotal;
+  let taxAmount = 0;
+  let totalAmount = estimateTotal;
+
+  if (taxMode === 'tax_excluded') {
+    subtotalAmount = estimateTotal;
+    taxAmount = Math.round(subtotalAmount * taxRate);
+    totalAmount = subtotalAmount + taxAmount;
+  } else if (taxMode === 'tax_included') {
+    totalAmount = estimateTotal;
+    subtotalAmount = taxRate > 0 ? Math.round(totalAmount / (1 + taxRate)) : totalAmount;
+    taxAmount = totalAmount - subtotalAmount;
+  } else {
+    subtotalAmount = estimateTotal;
+    taxAmount = 0;
+    totalAmount = estimateTotal;
+  }
+
+  db.prepare(`
+    UPDATE job_sites
+    SET
+      quote_amount = ?,
+      subtotal_amount = ?,
+      tax_amount = ?,
+      total_amount = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(
+    totalAmount,
+    subtotalAmount,
+    taxAmount,
+    totalAmount,
+    jobsiteId,
+    companyId
+  );
+
+  return {
+    estimateTotal,
+    estimateCostTotal: Number(totals.estimateCostTotal || 0),
+    subtotalAmount,
+    taxAmount,
+    totalAmount,
+    taxMode,
+    taxRate
+  };
+}
+
+app.get('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, company, (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+
+  if (!jobsiteId) {
+    return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限查看估價明細' });
+  }
+
+  const items = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      job_site_id AS jobSiteId,
+      work_type AS workType,
+      item_category AS itemCategory,
+      item_name AS itemName,
+      quantity,
+      unit,
+      unit_price AS unitPrice,
+      amount,
+      cost_amount AS costAmount,
+      note,
+      sort_order AS sortOrder,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_site_estimate_items
+    WHERE company_id = ?
+      AND job_site_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(req.company.id, jobsiteId);
+
+  const totals = refreshJobSiteEstimateTotals(req.company.id, jobsiteId);
+
+  res.json({
+    items,
+    totals
+  });
+});
+
+app.post('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+
+  if (!jobsiteId) {
+    return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限新增估價明細' });
+  }
+
+  const {
+    workType,
+    itemCategory,
+    itemName,
+    quantity,
+    unit,
+    unitPrice,
+    amount,
+    costAmount,
+    note,
+    sortOrder
+  } = req.body || {};
+
+  const finalItemName = String(itemName || '').trim();
+
+  if (!finalItemName) {
+    return res.status(400).json({ error: '請輸入估價項目名稱' });
+  }
+
+  const finalQuantity = Number(quantity || 0);
+  const finalUnitPrice = Number(unitPrice || 0);
+  const finalAmount = amount === undefined || amount === null
+    ? calculateEstimateAmount(finalQuantity, finalUnitPrice)
+    : Number(amount || 0);
+
+  const row = db.prepare(`
+    INSERT INTO job_site_estimate_items (
+      company_id,
+      job_site_id,
+      work_type,
+      item_category,
+      item_name,
+      quantity,
+      unit,
+      unit_price,
+      amount,
+      cost_amount,
+      note,
+      sort_order,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(
+    req.company.id,
+    jobsiteId,
+    workType || jobsite.project_type || '',
+    itemCategory || 'estimate',
+    finalItemName,
+    finalQuantity,
+    unit || '',
+    finalUnitPrice,
+    finalAmount,
+    Number(costAmount || 0),
+    note || '',
+    Number(sortOrder || 0)
+  );
+
+  const totals = refreshJobSiteEstimateTotals(req.company.id, jobsiteId);
+
+  audit(req.company.id, req.user.id, 'jobsite_estimate_item_created', String(row.lastInsertRowid));
+
+  const item = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      job_site_id AS jobSiteId,
+      work_type AS workType,
+      item_category AS itemCategory,
+      item_name AS itemName,
+      quantity,
+      unit,
+      unit_price AS unitPrice,
+      amount,
+      cost_amount AS costAmount,
+      note,
+      sort_order AS sortOrder,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_site_estimate_items
+    WHERE id = ?
+      AND company_id = ?
+  `).get(row.lastInsertRowid, req.company.id);
+
+  res.json({
+    item,
+    totals
+  });
+});
+
+app.put('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+  const itemId = Number(req.params.itemId);
+
+  if (!jobsiteId || !itemId) {
+    return res.status(400).json({ error: '缺少 jobsiteId 或 itemId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯估價明細' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id
+    FROM job_site_estimate_items
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).get(itemId, jobsiteId, req.company.id);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此估價明細' });
+  }
+
+  const {
+    workType,
+    itemCategory,
+    itemName,
+    quantity,
+    unit,
+    unitPrice,
+    amount,
+    costAmount,
+    note,
+    sortOrder
+  } = req.body || {};
+
+  const finalItemName = String(itemName || '').trim();
+
+  if (!finalItemName) {
+    return res.status(400).json({ error: '請輸入估價項目名稱' });
+  }
+
+  const finalQuantity = Number(quantity || 0);
+  const finalUnitPrice = Number(unitPrice || 0);
+  const finalAmount = amount === undefined || amount === null
+    ? calculateEstimateAmount(finalQuantity, finalUnitPrice)
+    : Number(amount || 0);
+
+  db.prepare(`
+    UPDATE job_site_estimate_items
+    SET
+      work_type = ?,
+      item_category = ?,
+      item_name = ?,
+      quantity = ?,
+      unit = ?,
+      unit_price = ?,
+      amount = ?,
+      cost_amount = ?,
+      note = ?,
+      sort_order = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).run(
+    workType || jobsite.project_type || '',
+    itemCategory || 'estimate',
+    finalItemName,
+    finalQuantity,
+    unit || '',
+    finalUnitPrice,
+    finalAmount,
+    Number(costAmount || 0),
+    note || '',
+    Number(sortOrder || 0),
+    itemId,
+    jobsiteId,
+    req.company.id
+  );
+
+  const totals = refreshJobSiteEstimateTotals(req.company.id, jobsiteId);
+
+  audit(req.company.id, req.user.id, 'jobsite_estimate_item_updated', String(itemId));
+
+  const item = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      job_site_id AS jobSiteId,
+      work_type AS workType,
+      item_category AS itemCategory,
+      item_name AS itemName,
+      quantity,
+      unit,
+      unit_price AS unitPrice,
+      amount,
+      cost_amount AS costAmount,
+      note,
+      sort_order AS sortOrder,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_site_estimate_items
+    WHERE id = ?
+      AND company_id = ?
+  `).get(itemId, req.company.id);
+
+  res.json({
+    item,
+    totals
+  });
+});
+
+app.delete('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+  const itemId = Number(req.params.itemId);
+
+  if (!jobsiteId || !itemId) {
+    return res.status(400).json({ error: '缺少 jobsiteId 或 itemId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限刪除估價明細' });
+  }
+
+  const result = db.prepare(`
+    DELETE FROM job_site_estimate_items
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).run(itemId, jobsiteId, req.company.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: '找不到此估價明細' });
+  }
+
+  const totals = refreshJobSiteEstimateTotals(req.company.id, jobsiteId);
+
+  audit(req.company.id, req.user.id, 'jobsite_estimate_item_deleted', String(itemId));
+
+  res.json({
+    ok: true,
+    totals
+  });
+});
+
+
+// ===============================
+// 案場收款紀錄 API
+// ===============================
+
+function ensureJobSite(companyId, jobsiteId) {
+  return db.prepare(`
+    SELECT *
+    FROM job_sites
+    WHERE id = ?
+      AND company_id = ?
+  `).get(jobsiteId, companyId);
+}
+
+function refreshJobSiteReceivedAmount(companyId, jobsiteId) {
+  const total = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM job_site_payments
+    WHERE company_id = ?
+      AND job_site_id = ?
+  `).get(companyId, jobsiteId).total;
+
+  db.prepare(`
+    UPDATE job_sites
+    SET
+      received_amount = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(total, jobsiteId, companyId);
+
+  return total;
+}
+
+app.get('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company, (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+
+  if (!jobsiteId) {
+    return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限查看' });
+  }
+
+  const payments = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      job_site_id AS jobSiteId,
+      amount,
+      payment_date AS paymentDate,
+      method,
+      note,
+      created_at AS createdAt
+    FROM job_site_payments
+    WHERE company_id = ?
+      AND job_site_id = ?
+    ORDER BY payment_date DESC, id DESC
+  `).all(req.company.id, jobsiteId);
+
+  res.json(payments);
+});
+
+app.post('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+
+  if (!jobsiteId) {
+    return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限新增收款' });
+  }
+
+  const {
+    amount,
+    paymentDate,
+    method,
+    note
+  } = req.body;
+
+  const finalAmount = Number(amount || 0);
+
+  if (finalAmount <= 0) {
+    return res.status(400).json({ error: '收款金額必須大於 0' });
+  }
+
+  const row = db.prepare(`
+    INSERT INTO job_site_payments (
+      company_id,
+      job_site_id,
+      amount,
+      payment_date,
+      method,
+      note,
+      created_at
+    )
+    VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)
+  `).run(
+    req.company.id,
+    jobsiteId,
+    finalAmount,
+    paymentDate || new Date().toISOString().slice(0, 10),
+    method || '現金',
+    note || ''
+  );
+
+  const receivedAmount = refreshJobSiteReceivedAmount(req.company.id, jobsiteId);
+
+  audit(req.company.id, req.user.id, 'jobsite_payment_created', String(row.lastInsertRowid));
+
+  const payment = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      job_site_id AS jobSiteId,
+      amount,
+      payment_date AS paymentDate,
+      method,
+      note,
+      created_at AS createdAt
+    FROM job_site_payments
+    WHERE id = ?
+      AND company_id = ?
+  `).get(row.lastInsertRowid, req.company.id);
+
+  res.json({
+    payment,
+    receivedAmount
+  });
+});
+
+
+app.put('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+  const paymentId = Number(req.params.paymentId);
+  const { amount, paymentDate, method, note } = req.body || {};
+
+  if (!jobsiteId || !paymentId) {
+    return res.status(400).json({ error: '缺少 jobsiteId 或 paymentId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯收款' });
+  }
+
+  const finalAmount = Number(amount || 0);
+
+  if (finalAmount <= 0) {
+    return res.status(400).json({ error: '收款金額必須大於 0' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id
+    FROM job_site_payments
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).get(paymentId, jobsiteId, req.company.id);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此收款紀錄' });
+  }
+
+  db.prepare(`
+    UPDATE job_site_payments
+    SET
+      amount = ?,
+      payment_date = ?,
+      method = ?,
+      note = ?
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).run(
+    finalAmount,
+    paymentDate || new Date().toISOString().slice(0, 10),
+    method || '現金',
+    note || '',
+    paymentId,
+    jobsiteId,
+    req.company.id
+  );
+
+  const receivedAmount = refreshJobSiteReceivedAmount(req.company.id, jobsiteId);
+
+  audit(req.company.id, req.user.id, 'jobsite_payment_updated', String(paymentId));
+
+  const payment = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      job_site_id AS jobSiteId,
+      amount,
+      payment_date AS paymentDate,
+      method,
+      note,
+      created_at AS createdAt
+    FROM job_site_payments
+    WHERE id = ?
+      AND company_id = ?
+  `).get(paymentId, req.company.id);
+
+  res.json({
+    payment,
+    receivedAmount
+  });
+});
+
+app.delete('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+  const jobsiteId = Number(req.params.jobsiteId);
+  const paymentId = Number(req.params.paymentId);
+
+  if (!jobsiteId || !paymentId) {
+    return res.status(400).json({ error: '缺少 jobsiteId 或 paymentId' });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限刪除收款' });
+  }
+
+  const result = db.prepare(`
+    DELETE FROM job_site_payments
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).run(paymentId, jobsiteId, req.company.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: '找不到此收款紀錄' });
+  }
+
+  const receivedAmount = refreshJobSiteReceivedAmount(req.company.id, jobsiteId);
+
+  audit(req.company.id, req.user.id, 'jobsite_payment_deleted', String(paymentId));
+
+  res.json({
+    ok: true,
+    receivedAmount
+  });
+});
+
+app.get('/api/platforms', (_, res) => {
+  res.json(platforms);
+});
+
+app.get('/api/companies/:companyId/integrations', auth, company, (req, res) => {
+  const connected = db.prepare(`
+    SELECT *
+    FROM platform_accounts
+    WHERE company_id = ?
+  `).all(req.company.id);
+
+  res.json(
+    platforms.map((p) => ({
+      ...p,
+      account: connected.find((c) => c.platform_key === p.platformKey) || null
+    }))
+  );
+});
+
+app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, company, (req, res) => {
+  const p = platforms.find((x) => x.platformKey === req.params.platformKey);
+
+  if (!p) {
+    return res.status(404).json({ error: '未知平台' });
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO platform_accounts (
+      company_id,
+      platform_key,
+      status
+    )
+    VALUES (?,?,?)
+  `).run(
+    req.company.id,
+    p.platformKey,
+    p.status === 'planned' ? 'planned' : 'mock'
+  );
+
+  audit(req.company.id, req.user.id, 'integration_connected', p.platformKey);
+
+  res.json({ ok: true });
+});
+
+app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, company, (req, res) => {
+  const p = platforms.find((x) => x.platformKey === req.params.platformKey);
+
+  if (!p) {
+    return res.status(404).json({ error: '未知平台' });
+  }
+
+  const count = 2 + Math.floor(Math.random() * 4);
+  const inserted = [];
+
+  for (let i = 0; i < count; i++) {
+    const gross = 300 + Math.floor(Math.random() * 2600);
+    const fee = Math.round(
+      gross * (
+        p.category === 'food_delivery'
+          ? 0.28
+          : p.category === 'marketplace'
+            ? 0.08
+            : 0.03
+      )
+    );
+
+    const discount = Math.random() > 0.6 ? 50 : 0;
+    const shipping = p.category === 'marketplace' ? 60 : 0;
+    const refund = 0;
+    const cogs = Math.round(gross * (p.category === 'food_delivery' ? 0.35 : 0.48));
+
+    const { net, profit, tax } = calcTransaction({
+      grossAmount: gross,
+      platformFee: fee,
+      discountAmount: discount,
+      shippingFee: shipping,
+      refundAmount: refund,
+      costOfGoodsSold: cogs
+    });
+
+    const orderId = `${p.platformKey.toUpperCase()}-${nanoid(8)}`;
+
+    const row = db.prepare(`
+      INSERT INTO transactions (
+        company_id,
+        platform_key,
+        channel_type,
+        external_order_id,
+        gross_amount,
+        platform_fee,
+        discount_amount,
+        shipping_fee,
+        refund_amount,
+        net_amount,
+        tax_amount,
+        cost_of_goods_sold,
+        platform_profit,
+        items_json
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      req.company.id,
+      p.platformKey,
+      p.category,
+      orderId,
+      gross,
+      fee,
+      discount,
+      shipping,
+      refund,
+      net,
+      tax,
+      cogs,
+      profit,
+      JSON.stringify([
+        {
+          name: '示範商品',
+          qty: 1,
+          price: gross,
+          cost: cogs
+        }
+      ])
+    );
+
+    inserted.push({
+      id: row.lastInsertRowid,
+      orderId,
+      gross,
+      net,
+      profit
+    });
+  }
+
+  db.prepare(`
+    INSERT OR REPLACE INTO platform_accounts (
+      company_id,
+      platform_key,
+      status,
+      last_sync_at
+    )
+    VALUES (?,?,?,CURRENT_TIMESTAMP)
+  `).run(req.company.id, p.platformKey, 'mock');
+
+  audit(req.company.id, req.user.id, 'integration_sync', `${p.platformKey} ${count}筆`);
+
+  res.json({
+    ok: true,
+    inserted
+  });
+});
+
+app.get('/api/companies/:companyId/transactions', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM transactions
+    WHERE company_id = ?
+    ORDER BY occurred_at DESC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/transactions', auth, company, (req, res) => {
+  const t = req.body;
+  const { net, profit, tax } = calcTransaction(t);
+
+  const row = db.prepare(`
+    INSERT INTO transactions (
+      company_id,
+      platform_key,
+      channel_type,
+      external_order_id,
+      gross_amount,
+      platform_fee,
+      discount_amount,
+      shipping_fee,
+      refund_amount,
+      net_amount,
+      tax_amount,
+      cost_of_goods_sold,
+      platform_profit,
+      payment_status,
+      order_status,
+      items_json
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    req.company.id,
+    t.platformKey || 'manual',
+    t.channelType || 'manual',
+    t.externalOrderId || nanoid(8),
+    t.grossAmount || 0,
+    t.platformFee || 0,
+    t.discountAmount || 0,
+    t.shippingFee || 0,
+    t.refundAmount || 0,
+    net,
+    tax,
+    t.costOfGoodsSold || 0,
+    profit,
+    t.paymentStatus || 'paid',
+    t.orderStatus || 'completed',
+    JSON.stringify(t.items || [])
+  );
+
+  audit(req.company.id, req.user.id, 'transaction_created', String(row.lastInsertRowid));
+
+  res.json({
+    id: row.lastInsertRowid,
+    ...t,
+    netAmount: net,
+    taxAmount: tax,
+    platformProfit: profit
+  });
+});
+
+app.get('/api/companies/:companyId/invoices', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM invoices
+    WHERE company_id = ?
+    ORDER BY created_at DESC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/invoices', auth, company, (req, res) => {
+  const b = req.body;
+  const amount = Number(b.amountExclTax || 0);
+  const tax = Math.round(amount * 0.05 * 100) / 100;
+  const incl = amount + tax;
+  const invoiceNo = b.invoiceNo || `BK-${Date.now()}`;
+
+  const row = db.prepare(`
+    INSERT INTO invoices (
+      company_id,
+      invoice_no,
+      invoice_type,
+      buyer_name,
+      buyer_tax_id,
+      amount_excl_tax,
+      tax_amount,
+      amount_incl_tax,
+      status,
+      issued_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    req.company.id,
+    invoiceNo,
+    b.invoiceType || 'B2C',
+    b.buyerName || '',
+    b.buyerTaxId || '',
+    amount,
+    tax,
+    incl,
+    b.status || 'draft',
+    b.status === 'issued' ? new Date().toISOString() : null
+  );
+
+  audit(req.company.id, req.user.id, 'invoice_created', invoiceNo);
+
+  res.json({
+    id: row.lastInsertRowid,
+    invoiceNo,
+    taxAmount: tax,
+    amountInclTax: incl
+  });
+});
+
+app.get('/api/companies/:companyId/products', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM products
+    WHERE company_id = ?
+    ORDER BY id DESC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/products', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const p = req.body;
+
+  const row = db.prepare(`
+    INSERT INTO products (
+      company_id,
+      sku,
+      name,
+      category,
+      unit,
+      price,
+      cost,
+      stock,
+      safety_stock,
+      supplier,
+      storage_location,
+      note
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    req.company.id,
+    p.sku || '',
+    p.name || '',
+    p.category || '',
+    p.unit || '',
+    Number(p.price || 0),
+    Number(p.cost || 0),
+    Number(p.stock || 0),
+    Number(p.safetyStock ?? p.safety_stock ?? 5),
+    p.supplier || '',
+    p.storageLocation || p.storage_location || '',
+    p.note || ''
+  );
+
+  res.json({
+    id: row.lastInsertRowid,
+    ...p
+  });
+});
+
+
+app.get('/api/companies/:companyId/inventory-movements', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      im.id,
+      im.company_id AS companyId,
+      im.product_id AS productId,
+      im.job_site_id AS jobSiteId,
+      im.movement_type AS movementType,
+      im.quantity,
+      im.before_stock AS beforeStock,
+      im.after_stock AS afterStock,
+      im.unit_cost AS unitCost,
+      im.note,
+      im.created_at AS createdAt,
+      p.name AS productName,
+      p.sku AS productSku,
+      p.unit AS unit,
+      js.site_name AS jobSiteName
+    FROM inventory_movements im
+    LEFT JOIN products p ON p.id = im.product_id
+    LEFT JOIN job_sites js ON js.id = im.job_site_id
+    WHERE im.company_id = ?
+    ORDER BY im.id DESC
+    LIMIT 100
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/inventory-movements', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const {
+    productId,
+    jobSiteId,
+    movementType,
+    quantity,
+    note
+  } = req.body;
+
+  const finalProductId = Number(productId || 0);
+  const finalQuantity = Number(quantity || 0);
+
+  if (!finalProductId) {
+    return res.status(400).json({ error: '請選擇材料 / 工具' });
+  }
+
+  if (finalQuantity <= 0) {
+    return res.status(400).json({ error: '數量必須大於 0' });
+  }
+
+  const product = db.prepare(`
+    SELECT *
+    FROM products
+    WHERE id = ?
+      AND company_id = ?
+  `).get(finalProductId, req.company.id);
+
+  if (!product) {
+    return res.status(404).json({ error: '找不到此材料 / 工具' });
+  }
+
+  const type = movementType || '進貨入庫';
+  const beforeStock = Number(product.stock || 0);
+  let afterStock = beforeStock;
+
+  if (type === '進貨入庫') {
+    afterStock = beforeStock + finalQuantity;
+  } else if (type === '案場用料') {
+    afterStock = beforeStock - finalQuantity;
+  } else if (type === '退料回庫') {
+    afterStock = beforeStock + finalQuantity;
+  } else if (type === '報廢損耗') {
+    afterStock = beforeStock - finalQuantity;
+  } else if (type === '盤點調整') {
+    afterStock = finalQuantity;
+  } else {
+    return res.status(400).json({ error: '不支援的庫存異動類型' });
+  }
+
+  if (afterStock < 0) {
+    return res.status(400).json({ error: '庫存不足，無法扣到負數' });
+  }
+
+  const finalJobSiteId = jobSiteId ? Number(jobSiteId) : null;
+
+  if ((type === '案場用料' || type === '退料回庫') && !finalJobSiteId) {
+    return res.status(400).json({
+      error: type === '案場用料'
+        ? '案場用料必須選擇關聯案場，才能正確同步案場材料費'
+        : '退料回庫必須選擇關聯案場，才能正確扣回案場材料費'
+    });
+  }
+
+  if (type === '盤點調整' && finalQuantity < 0) {
+    return res.status(400).json({ error: '盤點調整後庫存不可小於 0' });
+  }
+
+  if (finalJobSiteId) {
+    const jobsite = db.prepare(`
+      SELECT id
+      FROM job_sites
+      WHERE id = ?
+        AND company_id = ?
+    `).get(finalJobSiteId, req.company.id);
+
+    if (!jobsite) {
+      return res.status(404).json({ error: '找不到此案場編號，或此案場不屬於目前公司' });
+    }
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare(`
+      UPDATE products
+      SET stock = ?
+      WHERE id = ?
+        AND company_id = ?
+    `).run(afterStock, finalProductId, req.company.id);
+
+    const unitCost = Number(product.cost || 0);
+    const movementCost = finalQuantity * unitCost;
+
+    if (finalJobSiteId && type === '案場用料') {
+      db.prepare(`
+        UPDATE job_sites
+        SET
+          material_cost = COALESCE(material_cost, 0) + ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND company_id = ?
+      `).run(movementCost, finalJobSiteId, req.company.id);
+    }
+
+    if (finalJobSiteId && type === '退料回庫') {
+      db.prepare(`
+        UPDATE job_sites
+        SET
+          material_cost = MAX(COALESCE(material_cost, 0) - ?, 0),
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+          AND company_id = ?
+      `).run(movementCost, finalJobSiteId, req.company.id);
+    }
+
+    const row = db.prepare(`
+      INSERT INTO inventory_movements (
+        company_id,
+        product_id,
+        job_site_id,
+        movement_type,
+        quantity,
+        before_stock,
+        after_stock,
+        unit_cost,
+        note,
+        created_at
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+    `).run(
+      req.company.id,
+      finalProductId,
+      finalJobSiteId,
+      type,
+      finalQuantity,
+      beforeStock,
+      afterStock,
+      unitCost,
+      note || ''
+    );
+
+    return row.lastInsertRowid;
+  });
+
+  const movementId = tx();
+
+  audit(req.company.id, req.user.id, 'inventory_movement_created', String(movementId));
+
+  const movement = db.prepare(`
+    SELECT
+      im.id,
+      im.company_id AS companyId,
+      im.product_id AS productId,
+      im.job_site_id AS jobSiteId,
+      im.movement_type AS movementType,
+      im.quantity,
+      im.before_stock AS beforeStock,
+      im.after_stock AS afterStock,
+      im.unit_cost AS unitCost,
+      im.note,
+      im.created_at AS createdAt,
+      p.name AS productName,
+      p.sku AS productSku,
+      p.unit AS unit,
+      js.site_name AS jobSiteName
+    FROM inventory_movements im
+    LEFT JOIN products p ON p.id = im.product_id
+    LEFT JOIN job_sites js ON js.id = im.job_site_id
+    WHERE im.id = ?
+      AND im.company_id = ?
+  `).get(movementId, req.company.id);
+
+  res.json(movement);
+});
+
+
+app.get('/api/companies/:companyId/vouchers', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM vouchers
+    WHERE company_id = ?
+    ORDER BY id DESC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/vouchers', auth, company, (req, res) => {
+  const v = req.body;
+
+  const blocked = ['交際', '應酬', '娛樂', '個人', '私用', '禮品', '贈品']
+    .some((k) => (v.purpose || '').includes(k));
+
+  const amount = Number(v.amount || 0);
+  const tax = Math.round(amount / 1.05 * 0.05 * 100) / 100;
+
+  const row = db.prepare(`
+    INSERT INTO vouchers (
+      company_id,
+      vendor,
+      purpose,
+      amount,
+      tax_amount,
+      deductible,
+      status
+    )
+    VALUES (?,?,?,?,?,?,?)
+  `).run(
+    req.company.id,
+    v.vendor,
+    v.purpose || '',
+    amount,
+    tax,
+    blocked ? 0 : 1,
+    'pending'
+  );
+
+  res.json({
+    id: row.lastInsertRowid,
+    deductible: !blocked,
+    taxAmount: tax
+  });
+});
+
+app.get('/api/companies/:companyId/accounting/accounts', auth, company, requireFeature('accounting_engine'), (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM accounts
+    WHERE company_id = ?
+    ORDER BY code
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.get('/api/companies/:companyId/accounting/reports', auth, company, requireFeature('accounting_engine'), (req, res) => {
+  const revenue = db.prepare(`
+    SELECT COALESCE(SUM(gross_amount),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const cogs = db.prepare(`
+    SELECT COALESCE(SUM(cost_of_goods_sold),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const fees = db.prepare(`
+    SELECT COALESCE(SUM(platform_fee),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const grossMargin = revenue - cogs;
+  const netProfit = revenue - cogs - fees;
+
+  res.json({
+    incomeStatement: {
+      revenue,
+      cogs,
+      grossMargin,
+      fees,
+      netProfit
+    },
+    costAccounting: {
+      grossMarginRate: revenue ? grossMargin / revenue : 0,
+      platformFeeRate: revenue ? fees / revenue : 0
+    }
+  });
+});
+
+app.get('/api/companies/:companyId/tax/vat', auth, company, requireFeature('tax_center'), (req, res) => {
+  const taxableSales = db.prepare(`
+    SELECT COALESCE(SUM(gross_amount / 1.05),0) total
+    FROM transactions
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const deductiblePurchases = db.prepare(`
+    SELECT COALESCE(SUM(amount / 1.05),0) total
+    FROM vouchers
+    WHERE company_id = ?
+      AND deductible = 1
+  `).get(req.company.id).total;
+
+  const outputTax = Math.round(taxableSales * 0.05 * 100) / 100;
+  const inputTax = Math.round(deductiblePurchases * 0.05 * 100) / 100;
+
+  res.json({
+    taxableSales,
+    deductiblePurchases,
+    outputTax,
+    inputTax,
+    payableVAT: Math.max(0, outputTax - inputTax),
+    disclaimer: '本系統稅務試算僅供管理參考，正式申報仍應以會計師、記帳士或主管機關規定為準。'
+  });
+});
+
+app.get('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM accountant_clients
+    WHERE company_id = ?
+    ORDER BY id DESC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.post('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), (req, res) => {
+  const c = req.body;
+
+  const row = db.prepare(`
+    INSERT INTO accountant_clients (
+      company_id,
+      client_name,
+      client_tax_id,
+      status,
+      closing_progress,
+      missing_docs
+    )
+    VALUES (?,?,?,?,?,?)
+  `).run(
+    req.company.id,
+    c.clientName,
+    c.clientTaxId || '',
+    c.status || 'collecting',
+    c.closingProgress || 0,
+    c.missingDocs || 0
+  );
+
+  res.json({
+    id: row.lastInsertRowid,
+    ...c
+  });
+});
+
+app.get('/api/companies/:companyId/audit-logs', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM audit_logs
+    WHERE company_id = ?
+    ORDER BY id DESC
+    LIMIT 100
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
+app.listen(PORT, () => {
+  console.log(`BookAI API running on http://localhost:${PORT}`);
+});
