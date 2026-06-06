@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -9,6 +11,10 @@ import { plans, hasFeature } from './plans.js';
 import { platforms } from './platforms.js';
 
 initDb();
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -2123,6 +2129,17 @@ app.get('/api/companies/:companyId/audit-logs', auth, company, (req, res) => {
   `).all(req.company.id);
 
   res.json(rows);
+});
+
+
+// ==============================
+// Production frontend static files
+// ==============================
+const clientDistPath = path.join(__dirname, "../client/dist");
+app.use(express.static(clientDistPath));
+
+app.get(/^\/(?!api).*/, (req, res) => {
+  res.sendFile(path.join(clientDistPath, "index.html"));
 });
 
 app.listen(PORT, () => {
