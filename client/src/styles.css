@@ -473,3 +473,123 @@ th {
     line-height: 1.6;
   }
 }
+/* ============================================================
+   BookAI v3.10-4d Mobile Estimate Item Layout Fix
+   目的：修正手機版工種估價明細卡片比例過窄、項目名稱直排、小計擠壓問題
+   ============================================================ */
+
+@media (max-width: 768px) {
+  /* 估價明細檢視區與編輯區：手機改為單欄 */
+  #jobsite-estimate-items-panel,
+  #estimate-item-editor {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  #jobsite-estimate-items-panel .panel,
+  #estimate-item-editor.panel,
+  #estimate-item-editor .panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  /* 把估價明細內所有 grid 在手機改成一欄，避免桌機欄位硬塞 */
+  #jobsite-estimate-items-panel [style*="grid"],
+  #estimate-item-editor [style*="grid"] {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  /* 表單欄位統一滿版 */
+  #jobsite-estimate-items-panel label,
+  #estimate-item-editor label {
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  #jobsite-estimate-items-panel input,
+  #jobsite-estimate-items-panel select,
+  #jobsite-estimate-items-panel textarea,
+  #estimate-item-editor input,
+  #estimate-item-editor select,
+  #estimate-item-editor textarea {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+    font-size: 16px !important;
+  }
+
+  /* 防止「項目名稱」被壓成直排 */
+  #jobsite-estimate-items-panel span,
+  #estimate-item-editor span,
+  #jobsite-estimate-items-panel .muted,
+  #estimate-item-editor .muted {
+    writing-mode: horizontal-tb !important;
+    white-space: normal !important;
+    word-break: keep-all !important;
+    overflow-wrap: normal !important;
+    line-height: 1.4 !important;
+  }
+
+  /* 估價明細卡片手機版：改成正常直式卡片 */
+  #jobsite-estimate-items-panel .card,
+  #estimate-item-editor .card {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* 小計不要擠在右側，改到底部顯示 */
+  #jobsite-estimate-items-panel [class*="total"],
+  #estimate-item-editor [class*="total"],
+  #jobsite-estimate-items-panel [class*="amount"],
+  #estimate-item-editor [class*="amount"] {
+    width: 100% !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    align-items: flex-start !important;
+  }
+
+  /* 手機版按鈕排列 */
+  #jobsite-estimate-items-panel button,
+  #estimate-item-editor button {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  /* 避免卡片被瀏覽器左右裁切 */
+  body {
+    overflow-x: hidden !important;
+  }
+
+  .panel {
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 更小手機：估價區塊留白縮小 */
+  #jobsite-estimate-items-panel,
+  #estimate-item-editor {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  #jobsite-estimate-items-panel .panel,
+  #estimate-item-editor.panel,
+  #estimate-item-editor .panel {
+    padding: 14px !important;
+    border-radius: 18px !important;
+  }
+
+  #jobsite-estimate-items-panel h2,
+  #estimate-item-editor h2 {
+    font-size: 22px !important;
+    line-height: 1.25 !important;
+  }
+}
+
