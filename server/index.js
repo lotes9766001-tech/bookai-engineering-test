@@ -2142,6 +2142,85 @@ app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(clientDistPath, "index.html"));
 });
 
+
+// ==============================
+// Cloud migration: estimate_cost_total
+// ==============================
+try {
+  const jobSiteColumns = db.prepare("PRAGMA table_info(job_sites)").all().map((c) => c.name);
+
+  if (!jobSiteColumns.includes("estimate_cost_total")) {
+    db.prepare("ALTER TABLE job_sites ADD COLUMN estimate_cost_total REAL DEFAULT 0").run();
+    console.log("Added column estimate_cost_total to job_sites");
+  }
+
+  const hasEstimateItemsTable = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'job_site_estimate_items'")
+    .get();
+
+  if (hasEstimateItemsTable) {
+    db.prepare(`
+      UPDATE job_sites
+      SET estimate_cost_total = COALESCE((
+        SELECT SUM(COALESCE(cost_amount, 0))
+        FROM job_site_estimate_items
+        WHERE job_site_estimate_items.job_site_id = job_sites.id
+      ), 0)
+    `).run();
+
+    db.prepare("DROP TRIGGER IF EXISTS trg_estimate_items_insert_sync_cost").run();
+    db.prepare("DROP TRIGGER IF EXISTS trg_estimate_items_update_sync_cost").run();
+    db.prepare("DROP TRIGGER IF EXISTS trg_estimate_items_delete_sync_cost").run();
+
+    db.prepare(`
+      CREATE TRIGGER IF NOT EXISTS trg_estimate_items_insert_sync_cost
+      AFTER INSERT ON job_site_estimate_items
+      BEGIN
+        UPDATE job_sites
+        SET estimate_cost_total = COALESCE((
+          SELECT SUM(COALESCE(cost_amount, 0))
+          FROM job_site_estimate_items
+          WHERE job_site_id = NEW.job_site_id
+        ), 0)
+        WHERE id = NEW.job_site_id;
+      END;
+    `).run();
+
+    db.prepare(`
+      CREATE TRIGGER IF NOT EXISTS trg_estimate_items_update_sync_cost
+      AFTER UPDATE ON job_site_estimate_items
+      BEGIN
+        UPDATE job_sites
+        SET estimate_cost_total = COALESCE((
+          SELECT SUM(COALESCE(cost_amount, 0))
+          FROM job_site_estimate_items
+          WHERE job_site_id = NEW.job_site_id
+        ), 0)
+        WHERE id = NEW.job_site_id;
+      END;
+    `).run();
+
+    db.prepare(`
+      CREATE TRIGGER IF NOT EXISTS trg_estimate_items_delete_sync_cost
+      AFTER DELETE ON job_site_estimate_items
+      BEGIN
+        UPDATE job_sites
+        SET estimate_cost_total = COALESCE((
+          SELECT SUM(COALESCE(cost_amount, 0))
+          FROM job_site_estimate_items
+          WHERE job_site_id = OLD.job_site_id
+        ), 0)
+        WHERE id = OLD.job_site_id;
+      END;
+    `).run();
+
+    console.log("✅ estimate_cost_total cloud migration ready");
+  }
+} catch (err) {
+  console.warn("Skip estimate_cost_total cloud migration:", err.message);
+}
+
+
 app.listen(PORT, () => {
   console.log(`BookAI API running on http://localhost:${PORT}`);
 });
