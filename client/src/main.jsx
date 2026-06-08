@@ -28,6 +28,7 @@ import {
 } from 'recharts';
 import { api, setToken, clearToken, getToken } from './lib/api';
 import './styles.css';
+import LeadCenterMock from './components/LeadCenterMock.jsx';
 
 const planNames = {
   business: 'Business',
@@ -473,6 +474,7 @@ function Shell({ onLogout }) {
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
     ['dashboard', '老闆總覽', BarChart3],
+    ['leads', '接案中心', FileText],
     ['transactions', '交易中心', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
@@ -549,6 +551,7 @@ if (!me || !company) {
         />
 
         {page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
+        {page === 'leads' && <LeadCenterMock />}
         {page === 'transactions' && <Transactions companyId={companyId} />}
         {page === 'integrations' && (
           <Integrations
@@ -3067,8 +3070,8 @@ function JobSites({ companyId, company }) {
             extraMiscCost;
 
           const freshTotalAmount = numberValue(
-            copyCalcopyCalc.totalAmount ??
-            copyCalcopyCalc.quoteAmount ??
+            copyCalc.totalAmount ??
+            copyCalc.quoteAmount ??
             site.quoteAmount ??
             site.quote_amount ??
             freshSubtotalAmount
@@ -3082,8 +3085,8 @@ function JobSites({ companyId, company }) {
 
           copyCalc = {
             ...copyCalc,
-            subtotalAmount: freshSubtotalAmount || copyCalcopyCalc.subtotalAmount,
-            estimateSubtotalAmount: freshSubtotalAmount || copyCalcopyCalc.estimateSubtotalAmount,
+            subtotalAmount: freshSubtotalAmount || copyCalc.subtotalAmount,
+            estimateSubtotalAmount: freshSubtotalAmount || copyCalc.estimateSubtotalAmount,
             estimateCostTotal: freshEstimateCostTotal,
             totalCost: freshCoreCost,
             profit: freshProfit,
