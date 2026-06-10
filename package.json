@@ -11,6 +11,7 @@
     "seed": "npm --prefix server run seed",
     "backup:db": "node scripts/backup-db.js",
     "billing:activate": "node scripts/activate-company.js",
+    "demo:engineering": "node scripts/prepare-engineering-demo.js",
     "health": "node scripts/health-check.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:clean": "node scripts/smoke-clean.js",
