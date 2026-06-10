@@ -9,6 +9,7 @@ import { nanoid } from 'nanoid';
 import { db, initDb, audit } from './db.js';
 import { plans, hasFeature } from './plans.js';
 import { platforms } from './platforms.js';
+import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
 initDb();
 
@@ -54,6 +55,10 @@ function auth(req, res, next) {
 }
 
 const ADMIN_EMAILS = new Set(['lotes.9766001@gmail.com']);
+const ADMIN_EMAIL = 'lotes.9766001@gmail.com';
+const ADMIN_PASSWORD = 'demo123456';
+const ADMIN_NAME = 'BookAI Admin';
+const ADMIN_COMPANY = 'BookAI 管理控制塔';
 
 function requireAdmin(req, res, next) {
   const email = String(req.user?.email || '').toLowerCase();
@@ -165,11 +170,162 @@ function seedCompanyDefaults(companyId) {
   accounts.forEach((a) => stmt.run(companyId, ...a));
 }
 
+function ensureAdminBootstrapAccount() {
+  const hash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+  const existingUser = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE email = ?
+  `).get(ADMIN_EMAIL);
+
+  let userId;
+
+  if (existingUser) {
+    userId = existingUser.id;
+    db.prepare(`
+      UPDATE users
+      SET
+        name = ?,
+        password_hash = ?
+      WHERE id = ?
+    `).run(ADMIN_NAME, hash, userId);
+  } else {
+    const user = db.prepare(`
+      INSERT INTO users (
+        name,
+        email,
+        password_hash
+      )
+      VALUES (?,?,?)
+    `).run(ADMIN_NAME, ADMIN_EMAIL, hash);
+    userId = user.lastInsertRowid;
+  }
+
+  const existingCompany = db.prepare(`
+    SELECT id
+    FROM companies
+    WHERE name = ?
+      AND owner_id = ?
+    ORDER BY id ASC
+    LIMIT 1
+  `).get(ADMIN_COMPANY, userId);
+
+  let companyId;
+
+  if (existingCompany) {
+    companyId = existingCompany.id;
+    db.prepare(`
+      UPDATE companies
+      SET
+        name = ?,
+        industry = ?,
+        plan = ?,
+        owner_id = ?,
+        billing_status = ?,
+        subscription_plan = ?,
+        is_paid_customer = ?,
+        billing_note = ?
+      WHERE id = ?
+    `).run(
+      ADMIN_COMPANY,
+      'admin',
+      'pro',
+      userId,
+      'active',
+      'engineering_premium',
+      1,
+      'BookAI 管理者帳號',
+      companyId
+    );
+  } else {
+    const companyRow = db.prepare(`
+      INSERT INTO companies (
+        name,
+        tax_id,
+        industry,
+        companyAddress,
+        address,
+        plan,
+        owner_id,
+        billing_status,
+        subscription_plan,
+        is_paid_customer,
+        billing_note
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      ADMIN_COMPANY,
+      '',
+      'admin',
+      '',
+      '',
+      'pro',
+      userId,
+      'active',
+      'engineering_premium',
+      1,
+      'BookAI 管理者帳號'
+    );
+    companyId = companyRow.lastInsertRowid;
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO company_users (
+      company_id,
+      user_id,
+      role
+    )
+    VALUES (?,?,?)
+  `).run(companyId, userId, 'owner');
+
+  db.prepare(`
+    UPDATE company_users
+    SET role = 'owner'
+    WHERE company_id = ?
+      AND user_id = ?
+  `).run(companyId, userId);
+
+  seedCompanyDefaults(companyId);
+
+  return {
+    userId,
+    companyId
+  };
+}
+
 app.get('/api/health', (_, res) => {
   res.json({
     ok: true,
     name: 'BookAI Commerce ERP Hub'
   });
+});
+
+app.post('/api/bootstrap/admin', (req, res) => {
+  const expectedSecret = process.env.BOOKAI_BOOTSTRAP_SECRET;
+  const { secret } = req.body || {};
+
+  if (!expectedSecret) {
+    return res.status(403).json({ error: 'Bootstrap 尚未啟用' });
+  }
+
+  if (!secret || secret !== expectedSecret) {
+    return res.status(403).json({ error: 'Bootstrap secret 不正確' });
+  }
+
+  try {
+    ensureAdminBootstrapAccount();
+    res.json({
+      ok: true,
+      email: ADMIN_EMAIL,
+      password: ADMIN_PASSWORD,
+      message: 'Admin 已建立或重設'
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: 'Admin 建立或重設失敗',
+      detail: err.message
+    });
+  }
 });
 
 app.post('/api/auth/register', (req, res) => {
@@ -501,6 +657,24 @@ app.patch('/api/admin/settings', auth, requireAdmin, (req, res) => {
   `).all();
 
   res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
+});
+
+app.post('/api/admin/demo/engineering', auth, requireAdmin, (req, res) => {
+  try {
+    const demo = prepareEngineeringDemo({ closeDb: false });
+
+    audit(null, req.user.id, 'admin_engineering_demo_prepared', String(demo.companyId || ''));
+
+    res.json({
+      ok: true,
+      demo
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: '工程 Demo 建立或更新失敗',
+      detail: err.message
+    });
+  }
 });
 
 const commerceIndustries = new Set([

@@ -393,158 +393,181 @@ function upsertLead(companyId, lead) {
   return 'created';
 }
 
-initDb();
+export function prepareEngineeringDemo(options = {}) {
+  const { closeDb = false } = options;
 
-const summary = db.transaction(() => {
-  const user = getOrCreateUser();
-  const company = getOrCreateCompany(user.id);
-  ensureCompanyUser(company.id, user.id);
-  ensureAccounts(company.id);
+  initDb();
 
-  const jobSites = [
-    {
-      name: '西屯住宅油漆翻新工程',
-      clientName: '林先生',
-      address: '台中市西屯區',
-      projectType: '油漆工程',
-      areaPings: 28,
-      pricePerPing: 4200,
-      quoteAmount: 117600,
-      receivedAmount: 60000,
-      materialCost: 28000,
-      laborCost: 32000,
-      outsourcedCost: 0,
-      miscCost: 4500,
-      status: '施工中',
-      note: 'Demo：牆面翻新、局部批土與防霉漆。'
-    },
-    {
-      name: '南屯店面水電改善工程',
-      clientName: '陳小姐',
-      address: '台中市南屯區',
-      projectType: '水電工程',
-      areaPings: 18,
-      pricePerPing: 5800,
-      quoteAmount: 104400,
-      receivedAmount: 30000,
-      materialCost: 36000,
-      laborCost: 26000,
-      outsourcedCost: 8000,
-      miscCost: 3500,
-      status: '已請款',
-      note: 'Demo：插座迴路、配電箱整理與燈具線路。'
-    },
-    {
-      name: '北區辦公室冷氣汰換',
-      clientName: '王經理',
-      address: '台中市北區',
-      projectType: '冷氣工程',
-      areaPings: 12,
-      pricePerPing: 0,
-      quoteAmount: 168000,
-      receivedAmount: 168000,
-      materialCost: 98000,
-      laborCost: 18000,
-      outsourcedCost: 12000,
-      miscCost: 6000,
-      status: '已結案',
-      note: 'Demo：室內機、室外機與銅管更新。'
-    }
-  ].map((site) => ({
-    site,
-    result: upsertJobSite(company.id, site)
-  }));
+  const summary = db.transaction(() => {
+    const user = getOrCreateUser();
+    const company = getOrCreateCompany(user.id);
+    ensureCompanyUser(company.id, user.id);
+    ensureAccounts(company.id);
 
-  const paymentResults = [
-    ensurePayment(company.id, jobSites[0].result.id, {
-      amount: 60000,
-      paymentDate: todayIso(),
-      method: '匯款',
-      note: 'Demo 首期款'
-    }),
-    ensurePayment(company.id, jobSites[1].result.id, {
-      amount: 30000,
-      paymentDate: todayIso(),
-      method: '現金',
-      note: 'Demo 訂金'
-    })
-  ];
+    const jobSites = [
+      {
+        name: '西屯住宅油漆翻新工程',
+        clientName: '林先生',
+        address: '台中市西屯區',
+        projectType: '油漆工程',
+        areaPings: 28,
+        pricePerPing: 4200,
+        quoteAmount: 117600,
+        receivedAmount: 60000,
+        materialCost: 28000,
+        laborCost: 32000,
+        outsourcedCost: 0,
+        miscCost: 4500,
+        status: '施工中',
+        note: 'Demo：牆面翻新、局部批土與防霉漆。'
+      },
+      {
+        name: '南屯店面水電改善工程',
+        clientName: '陳小姐',
+        address: '台中市南屯區',
+        projectType: '水電工程',
+        areaPings: 18,
+        pricePerPing: 5800,
+        quoteAmount: 104400,
+        receivedAmount: 30000,
+        materialCost: 36000,
+        laborCost: 26000,
+        outsourcedCost: 8000,
+        miscCost: 3500,
+        status: '已請款',
+        note: 'Demo：插座迴路、配電箱整理與燈具線路。'
+      },
+      {
+        name: '北區辦公室冷氣汰換',
+        clientName: '王經理',
+        address: '台中市北區',
+        projectType: '冷氣工程',
+        areaPings: 12,
+        pricePerPing: 0,
+        quoteAmount: 168000,
+        receivedAmount: 168000,
+        materialCost: 98000,
+        laborCost: 18000,
+        outsourcedCost: 12000,
+        miscCost: 6000,
+        status: '已結案',
+        note: 'Demo：室內機、室外機與銅管更新。'
+      }
+    ].map((site) => ({
+      site,
+      result: upsertJobSite(company.id, site)
+    }));
 
-  const leadResults = [
-    upsertLead(company.id, {
-      title: 'LINE 詢價｜北屯公寓防水補漏',
-      clientName: '張小姐',
-      clientPhone: '0912-000-111',
-      source: 'LINE 詢價',
-      region: '台中市北屯區',
-      agencyType: '私人客戶',
-      projectType: '防水工程',
-      estimatedAmount: 86000,
-      estimatedCost: 56000,
-      riskLevel: 'medium',
-      fitScore: 76,
-      status: 'contacted',
-      nextAction: '安排場勘',
-      note: '頂樓局部滲水，需確認裂縫與排水狀況。',
-      tenderSource: '',
-      tenderRef: ''
-    }),
-    upsertLead(company.id, {
-      title: '舊客戶介紹｜西區套房水電修繕',
-      clientName: '黃先生',
-      clientPhone: '0933-222-555',
-      source: '舊客戶介紹',
-      region: '台中市西區',
-      agencyType: '私人客戶',
-      projectType: '水電工程',
-      estimatedAmount: 52000,
-      estimatedCost: 33000,
-      riskLevel: 'low',
-      fitScore: 84,
-      status: 'new',
-      nextAction: '補施工範圍',
-      note: '舊客戶介紹，信任度高，需確認點位與工期。',
-      tenderSource: '',
-      tenderRef: ''
-    }),
-    upsertLead(company.id, {
-      title: '地方標案｜校舍油漆整修工程',
-      clientName: '台中市某國小',
-      clientPhone: '',
-      source: '政府 / 地方標案',
-      region: '台中市',
-      agencyType: '學校機關',
-      projectType: '油漆工程',
-      estimatedAmount: 420000,
-      estimatedCost: 310000,
-      riskLevel: 'medium',
-      fitScore: 79,
-      status: 'new',
-      nextAction: '檢查投標資格與履約期限',
-      note: 'Demo 標案：教室與走廊油漆整修，需評估工期與保固。',
-      tenderSource: '政府電子採購網公開標案資料',
-      tenderRef: 'DEMO-TENDER-PAINT-001'
-    })
-  ];
+    const paymentResults = [
+      ensurePayment(company.id, jobSites[0].result.id, {
+        amount: 60000,
+        paymentDate: todayIso(),
+        method: '匯款',
+        note: 'Demo 首期款'
+      }),
+      ensurePayment(company.id, jobSites[1].result.id, {
+        amount: 30000,
+        paymentDate: todayIso(),
+        method: '現金',
+        note: 'Demo 訂金'
+      })
+    ];
 
-  return {
-    user,
-    company,
-    jobSites,
-    paymentResults,
-    leadResults
-  };
-})();
+    const leadResults = [
+      upsertLead(company.id, {
+        title: 'LINE 詢價｜北屯公寓防水補漏',
+        clientName: '張小姐',
+        clientPhone: '0912-000-111',
+        source: 'LINE 詢價',
+        region: '台中市北屯區',
+        agencyType: '私人客戶',
+        projectType: '防水工程',
+        estimatedAmount: 86000,
+        estimatedCost: 56000,
+        riskLevel: 'medium',
+        fitScore: 76,
+        status: 'contacted',
+        nextAction: '安排場勘',
+        note: '頂樓局部滲水，需確認裂縫與排水狀況。',
+        tenderSource: '',
+        tenderRef: ''
+      }),
+      upsertLead(company.id, {
+        title: '舊客戶介紹｜西區套房水電修繕',
+        clientName: '黃先生',
+        clientPhone: '0933-222-555',
+        source: '舊客戶介紹',
+        region: '台中市西區',
+        agencyType: '私人客戶',
+        projectType: '水電工程',
+        estimatedAmount: 52000,
+        estimatedCost: 33000,
+        riskLevel: 'low',
+        fitScore: 84,
+        status: 'new',
+        nextAction: '補施工範圍',
+        note: '舊客戶介紹，信任度高，需確認點位與工期。',
+        tenderSource: '',
+        tenderRef: ''
+      }),
+      upsertLead(company.id, {
+        title: '地方標案｜校舍油漆整修工程',
+        clientName: '台中市某國小',
+        clientPhone: '',
+        source: '政府 / 地方標案',
+        region: '台中市',
+        agencyType: '學校機關',
+        projectType: '油漆工程',
+        estimatedAmount: 420000,
+        estimatedCost: 310000,
+        riskLevel: 'medium',
+        fitScore: 79,
+        status: 'new',
+        nextAction: '檢查投標資格與履約期限',
+        note: 'Demo 標案：教室與走廊油漆整修，需評估工期與保固。',
+        tenderSource: '政府電子採購網公開標案資料',
+        tenderRef: 'DEMO-TENDER-PAINT-001'
+      })
+    ];
 
-console.log('BookAI 工程業 Demo 已準備完成');
-console.log(`demo email: ${DEMO_EMAIL}`);
-console.log(`demo password: ${DEMO_PASSWORD}`);
-console.log(`company id: ${summary.company.id}`);
-console.log(`company name: ${DEMO_COMPANY}`);
-console.log(`user: ${summary.user.action}`);
-console.log(`company: ${summary.company.action}`);
-console.log(`job sites: ${summary.jobSites.map((item) => `${item.site.name} ${item.result.action}`).join(' / ')}`);
-console.log(`payments: ${summary.paymentResults.join(' / ')}`);
-console.log(`leads: ${summary.leadResults.join(' / ')}`);
+    return {
+      email: DEMO_EMAIL,
+      password: DEMO_PASSWORD,
+      companyId: company.id,
+      companyName: DEMO_COMPANY,
+      userStatus: user.action,
+      companyStatus: company.action,
+      jobSites: jobSites.map((item) => ({
+        id: item.result.id,
+        name: item.site.name,
+        status: item.result.action
+      })),
+      payments: paymentResults,
+      leads: leadResults
+    };
+  })();
 
-db.close();
+  if (closeDb) {
+    db.close();
+  }
+
+  return summary;
+}
+
+function printSummary(summary) {
+  console.log('BookAI 工程業 Demo 已準備完成');
+  console.log(`demo email: ${summary.email}`);
+  console.log(`demo password: ${summary.password}`);
+  console.log(`company id: ${summary.companyId}`);
+  console.log(`company name: ${summary.companyName}`);
+  console.log(`user: ${summary.userStatus}`);
+  console.log(`company: ${summary.companyStatus}`);
+  console.log(`job sites: ${summary.jobSites.map((item) => `${item.name} ${item.status}`).join(' / ')}`);
+  console.log(`payments: ${summary.payments.join(' / ')}`);
+  console.log(`leads: ${summary.leads.join(' / ')}`);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const summary = prepareEngineeringDemo({ closeDb: true });
+  printSummary(summary);
+}
