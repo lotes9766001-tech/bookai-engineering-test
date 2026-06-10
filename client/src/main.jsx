@@ -191,6 +191,19 @@ function isEcommerceIndustry(industry) {
   return ['ecommerce'].includes(industry);
 }
 
+function isCommerceIndustry(industry) {
+  return [
+    'ecommerce',
+    'hosted_commerce',
+    'marketplace',
+    'social_commerce',
+    'food',
+    'restaurant',
+    'beverage',
+    'retail'
+  ].includes(industry);
+}
+
 function isConstructionIndustry(industry) {
   return [
     'construction',
@@ -532,9 +545,16 @@ function Shell({ onLogout }) {
   const planNav = isConstructionIndustry(company?.industry)
     ? constructionNav
     : baseNav;
-  const visibleNav = isAdminUser(me?.user)
-    ? [...planNav, ['admin', 'BookAI 後台', ShieldCheck]]
+  const commerceNav = isCommerceIndustry(company?.industry) && !isConstructionIndustry(company?.industry)
+    ? [
+        ...planNav.slice(0, 5),
+        ['commerce_site', '官網後台', Building2],
+        ...planNav.slice(5)
+      ]
     : planNav;
+  const visibleNav = isAdminUser(me?.user)
+    ? [...commerceNav, ['admin', 'BookAI 後台', ShieldCheck]]
+    : commerceNav;
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -620,6 +640,7 @@ if (!me || !company) {
         {page === 'accountant' && <Accountant companyId={companyId} />}
         {page === 'reports' && <Reports companyId={companyId} company={company} />}
         {page === 'settings' && <Settings company={company} />}
+        {page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
         {page === 'admin' && <AdminConsole />}
       </main>
     </div>
@@ -4717,6 +4738,301 @@ function Reports({ companyId, company }) {
             money(p.profit),
             rate(p.profit, p.revenue),
             platformAdvice(p)
+          ])}
+        />
+      </div>
+    </section>
+  );
+}
+
+const emptyCommerceProduct = {
+  name: '',
+  category: '',
+  price: '',
+  originalPrice: '',
+  imageUrl: '',
+  description: '',
+  isFeatured: '0',
+  isVisible: '1',
+  sortOrder: 0
+};
+
+const emptyCommercePromotion = {
+  title: '',
+  description: '',
+  promoType: 'banner',
+  startDate: '',
+  endDate: '',
+  isActive: '1',
+  sortOrder: 0
+};
+
+function CommerceSiteManager({ companyId, company }) {
+  const [settings, setSettings] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [promotions, setPromotions] = useState([]);
+  const [productForm, setProductForm] = useState(emptyCommerceProduct);
+  const [promotionForm, setPromotionForm] = useState(emptyCommercePromotion);
+  const [editingProductId, setEditingProductId] = useState(null);
+  const [editingPromotionId, setEditingPromotionId] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function loadCommerceSite() {
+    try {
+      setLoading(true);
+      setError('');
+      const [settingsRow, productRows, promotionRows] = await Promise.all([
+        api(`/companies/${companyId}/commerce-site/settings`),
+        api(`/companies/${companyId}/commerce-site/products`),
+        api(`/companies/${companyId}/commerce-site/promotions`)
+      ]);
+      setSettings(settingsRow);
+      setProducts(productRows || []);
+      setPromotions(promotionRows || []);
+    } catch (err) {
+      setError(err.message || '讀取官網後台資料失敗');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadCommerceSite();
+  }, [companyId]);
+
+  async function saveSettings(e) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      setMessage('');
+      setError('');
+      const updated = await api(`/companies/${companyId}/commerce-site/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify(settings)
+      });
+      setSettings(updated);
+      setMessage('已儲存');
+    } catch (err) {
+      setError(err.message || '儲存官網設定失敗');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveProduct(e) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      setMessage('');
+      setError('');
+      const path = editingProductId
+        ? `/companies/${companyId}/commerce-site/products/${editingProductId}`
+        : `/companies/${companyId}/commerce-site/products`;
+      const saved = await api(path, {
+        method: editingProductId ? 'PATCH' : 'POST',
+        body: JSON.stringify(productForm)
+      });
+      setProducts((old) => editingProductId ? old.map((p) => (p.id === editingProductId ? saved : p)) : [saved, ...old]);
+      setEditingProductId(null);
+      setProductForm(emptyCommerceProduct);
+      setMessage('已儲存');
+    } catch (err) {
+      setError(err.message || '儲存商品失敗');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteProduct(id) {
+    if (!window.confirm('確定要刪除此商品嗎？')) return;
+    try {
+      setError('');
+      await api(`/companies/${companyId}/commerce-site/products/${id}`, { method: 'DELETE' });
+      setProducts((old) => old.filter((p) => p.id !== id));
+      setMessage('已儲存');
+    } catch (err) {
+      setError(err.message || '刪除商品失敗');
+    }
+  }
+
+  async function savePromotion(e) {
+    e.preventDefault();
+    try {
+      setSaving(true);
+      setMessage('');
+      setError('');
+      const path = editingPromotionId
+        ? `/companies/${companyId}/commerce-site/promotions/${editingPromotionId}`
+        : `/companies/${companyId}/commerce-site/promotions`;
+      const saved = await api(path, {
+        method: editingPromotionId ? 'PATCH' : 'POST',
+        body: JSON.stringify(promotionForm)
+      });
+      setPromotions((old) => editingPromotionId ? old.map((p) => (p.id === editingPromotionId ? saved : p)) : [saved, ...old]);
+      setEditingPromotionId(null);
+      setPromotionForm(emptyCommercePromotion);
+      setMessage('已儲存');
+    } catch (err) {
+      setError(err.message || '儲存活動失敗');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deletePromotion(id) {
+    if (!window.confirm('確定要刪除此活動嗎？')) return;
+    try {
+      setError('');
+      await api(`/companies/${companyId}/commerce-site/promotions/${id}`, { method: 'DELETE' });
+      setPromotions((old) => old.filter((p) => p.id !== id));
+      setMessage('已儲存');
+    } catch (err) {
+      setError(err.message || '刪除活動失敗');
+    }
+  }
+
+  function editProduct(product) {
+    setEditingProductId(product.id);
+    setProductForm({
+      name: product.name || '',
+      category: product.category || '',
+      price: product.price || '',
+      originalPrice: product.originalPrice || '',
+      imageUrl: product.imageUrl || '',
+      description: product.description || '',
+      isFeatured: product.isFeatured ? '1' : '0',
+      isVisible: product.isVisible ? '1' : '0',
+      sortOrder: product.sortOrder || 0
+    });
+  }
+
+  function editPromotion(promotion) {
+    setEditingPromotionId(promotion.id);
+    setPromotionForm({
+      title: promotion.title || '',
+      description: promotion.description || '',
+      promoType: promotion.promoType || 'banner',
+      startDate: promotion.startDate || '',
+      endDate: promotion.endDate || '',
+      isActive: promotion.isActive ? '1' : '0',
+      sortOrder: promotion.sortOrder || 0
+    });
+  }
+
+  if (loading || !settings) {
+    return (
+      <section>
+        <Title title="Commerce 官網後台" desc="正在讀取官網後台資料..." />
+      </section>
+    );
+  }
+
+  const featuredProducts = products.filter((p) => p.isFeatured && p.isVisible).slice(0, 3);
+  const previewProducts = featuredProducts.length ? featuredProducts : products.filter((p) => p.isVisible).slice(0, 3);
+  const activePromotions = promotions.filter((p) => p.isActive).slice(0, 3);
+
+  return (
+    <section className="commerce-site-page">
+      <Title title="Commerce 官網後台" desc="管理品牌資訊、商品展示、活動跑馬燈與官方 LINE 導流內容。" />
+
+      {message && <div className="notice">{message}</div>}
+      {error && <div className="error">{error}</div>}
+
+      <div className="commerce-site-grid">
+        <form className="panel commerce-site-card" onSubmit={saveSettings}>
+          <h2>官網基本設定</h2>
+          <div className="form">
+            <label><span>品牌名稱</span><input value={settings.brandName || ''} onChange={(e) => setSettings({ ...settings, brandName: e.target.value })} /></label>
+            <label><span>首頁主標題</span><input value={settings.heroTitle || ''} onChange={(e) => setSettings({ ...settings, heroTitle: e.target.value })} /></label>
+            <label><span>首頁副標</span><input value={settings.heroSubtitle || ''} onChange={(e) => setSettings({ ...settings, heroSubtitle: e.target.value })} /></label>
+            <label><span>跑馬燈 / 公告文字</span><input value={settings.announcementText || ''} onChange={(e) => setSettings({ ...settings, announcementText: e.target.value })} /></label>
+            <label><span>官方 LINE 連結</span><input value={settings.officialLineUrl || ''} onChange={(e) => setSettings({ ...settings, officialLineUrl: e.target.value })} /></label>
+            <label><span>聯絡電話</span><input value={settings.contactPhone || ''} onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })} /></label>
+            <label><span>聯絡 Email</span><input value={settings.contactEmail || ''} onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })} /></label>
+            <label><span>網站狀態</span><select value={settings.siteStatus || 'draft'} onChange={(e) => setSettings({ ...settings, siteStatus: e.target.value })}><option value="draft">草稿</option><option value="live">已上線</option><option value="paused">暫停</option></select></label>
+            <label><span>版型名稱</span><input value={settings.themeName || 'default'} onChange={(e) => setSettings({ ...settings, themeName: e.target.value })} /></label>
+          </div>
+          <button disabled={saving}>儲存官網設定</button>
+        </form>
+
+        <div className="panel commerce-site-preview">
+          <span className="commerce-site-pill">{settings.siteStatus === 'live' ? '已上線' : settings.siteStatus === 'paused' ? '暫停' : '草稿'}</span>
+          <h2>{settings.brandName || company.name}</h2>
+          <h3>{settings.heroTitle}</h3>
+          <p>{settings.heroSubtitle}</p>
+          <div className="commerce-site-marquee">{settings.announcementText}</div>
+          <h3>主打商品</h3>
+          <div className="commerce-site-preview-products">
+            {previewProducts.map((product) => (
+              <div key={product.id}><strong>{product.name}</strong><span>{money(product.price)}</span></div>
+            ))}
+            {!products.length && <p>尚未新增商品。</p>}
+          </div>
+          <h3>目前啟用活動</h3>
+          <ul>
+            {activePromotions.map((promo) => <li key={promo.id}>{promo.title}</li>)}
+            {!activePromotions.length && <li>尚無啟用活動。</li>}
+          </ul>
+        </div>
+      </div>
+
+      <div className="panel commerce-site-card">
+        <h2>商品展示管理</h2>
+        <form className="form" onSubmit={saveProduct}>
+          <label><span>商品名稱</span><input value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} /></label>
+          <label><span>商品分類</span><input value={productForm.category} onChange={(e) => setProductForm({ ...productForm, category: e.target.value })} /></label>
+          <label><span>商品價格</span><input type="number" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} /></label>
+          <label><span>原價</span><input type="number" value={productForm.originalPrice} onChange={(e) => setProductForm({ ...productForm, originalPrice: e.target.value })} /></label>
+          <label><span>圖片網址</span><input value={productForm.imageUrl} onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })} /></label>
+          <label><span>商品描述</span><input value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} /></label>
+          <label><span>主打商品</span><select value={productForm.isFeatured} onChange={(e) => setProductForm({ ...productForm, isFeatured: e.target.value })}><option value="0">否</option><option value="1">是</option></select></label>
+          <label><span>是否顯示</span><select value={productForm.isVisible} onChange={(e) => setProductForm({ ...productForm, isVisible: e.target.value })}><option value="1">顯示</option><option value="0">隱藏</option></select></label>
+          <label><span>排序</span><input type="number" value={productForm.sortOrder} onChange={(e) => setProductForm({ ...productForm, sortOrder: e.target.value })} /></label>
+          <button disabled={saving}>{editingProductId ? '儲存商品' : '新增商品'}</button>
+          {editingProductId && <button type="button" className="link" onClick={() => { setEditingProductId(null); setProductForm(emptyCommerceProduct); }}>取消編輯</button>}
+        </form>
+
+        <Table
+          cols={['商品', '分類', '價格', '原價', '主打', '顯示', '排序', '操作']}
+          rows={products.map((product) => [
+            product.name,
+            product.category || '-',
+            money(product.price),
+            money(product.originalPrice),
+            product.isFeatured ? '是' : '否',
+            product.isVisible ? '是' : '否',
+            product.sortOrder,
+            <div className="commerce-site-actions"><button type="button" onClick={() => editProduct(product)}>編輯</button><button type="button" className="lead-danger-btn" onClick={() => deleteProduct(product.id)}>刪除</button></div>
+          ])}
+        />
+      </div>
+
+      <div className="panel commerce-site-card">
+        <h2>活動 / 跑馬燈管理</h2>
+        <form className="form" onSubmit={savePromotion}>
+          <label><span>活動標題</span><input value={promotionForm.title} onChange={(e) => setPromotionForm({ ...promotionForm, title: e.target.value })} /></label>
+          <label><span>活動描述</span><input value={promotionForm.description} onChange={(e) => setPromotionForm({ ...promotionForm, description: e.target.value })} /></label>
+          <label><span>類型</span><select value={promotionForm.promoType} onChange={(e) => setPromotionForm({ ...promotionForm, promoType: e.target.value })}><option value="banner">首頁橫幅</option><option value="marquee">跑馬燈</option><option value="campaign">活動</option></select></label>
+          <label><span>開始日期</span><input type="date" value={promotionForm.startDate} onChange={(e) => setPromotionForm({ ...promotionForm, startDate: e.target.value })} /></label>
+          <label><span>結束日期</span><input type="date" value={promotionForm.endDate} onChange={(e) => setPromotionForm({ ...promotionForm, endDate: e.target.value })} /></label>
+          <label><span>是否啟用</span><select value={promotionForm.isActive} onChange={(e) => setPromotionForm({ ...promotionForm, isActive: e.target.value })}><option value="1">啟用</option><option value="0">停用</option></select></label>
+          <label><span>排序</span><input type="number" value={promotionForm.sortOrder} onChange={(e) => setPromotionForm({ ...promotionForm, sortOrder: e.target.value })} /></label>
+          <button disabled={saving}>{editingPromotionId ? '儲存活動' : '新增活動'}</button>
+          {editingPromotionId && <button type="button" className="link" onClick={() => { setEditingPromotionId(null); setPromotionForm(emptyCommercePromotion); }}>取消編輯</button>}
+        </form>
+
+        <Table
+          cols={['活動', '類型', '期間', '啟用', '排序', '操作']}
+          rows={promotions.map((promotion) => [
+            promotion.title,
+            promotion.promoType === 'marquee' ? '跑馬燈' : promotion.promoType === 'campaign' ? '活動' : '首頁橫幅',
+            `${promotion.startDate || '-'} ~ ${promotion.endDate || '-'}`,
+            promotion.isActive ? '是' : '否',
+            promotion.sortOrder,
+            <div className="commerce-site-actions"><button type="button" onClick={() => editPromotion(promotion)}>編輯</button><button type="button" className="lead-danger-btn" onClick={() => deletePromotion(promotion.id)}>刪除</button></div>
           ])}
         />
       </div>

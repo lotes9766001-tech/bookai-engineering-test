@@ -503,6 +503,463 @@ app.patch('/api/admin/settings', auth, requireAdmin, (req, res) => {
   res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
 });
 
+const commerceIndustries = new Set([
+  'ecommerce',
+  'hosted_commerce',
+  'marketplace',
+  'social_commerce',
+  'food',
+  'restaurant',
+  'beverage',
+  'retail'
+]);
+const commerceSiteStatuses = new Set(['draft', 'live', 'paused']);
+const commercePromoTypes = new Set(['banner', 'marquee', 'campaign']);
+
+function requireCommerceCompany(req, res, next) {
+  if (commerceIndustries.has(req.company?.industry)) {
+    return next();
+  }
+
+  return res.status(403).json({ error: '官網後台僅開放 Commerce 類產業使用' });
+}
+
+function commerceBool(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (value === true || value === 1) return 1;
+  const text = String(value).trim().toLowerCase();
+  return ['1', 'true', 'yes', '是', 'on'].includes(text) ? 1 : 0;
+}
+
+function commerceNumber(value, fallback = 0) {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function ensureCommerceSiteSettings(companyRow) {
+  const existing = db.prepare(`
+    SELECT *
+    FROM commerce_site_settings
+    WHERE company_id = ?
+  `).get(companyRow.id);
+
+  if (existing) return existing;
+
+  const defaults = {
+    brandName: companyRow.name || '',
+    heroTitle: '歡迎來到我們的官方網站',
+    heroSubtitle: '商品、活動與最新資訊都可以在這裡查看。',
+    announcementText: '歡迎加入官方 LINE 了解最新活動。',
+    siteStatus: 'draft',
+    themeName: 'default'
+  };
+
+  db.prepare(`
+    INSERT INTO commerce_site_settings (
+      company_id,
+      brand_name,
+      hero_title,
+      hero_subtitle,
+      announcement_text,
+      site_status,
+      theme_name,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(
+    companyRow.id,
+    defaults.brandName,
+    defaults.heroTitle,
+    defaults.heroSubtitle,
+    defaults.announcementText,
+    defaults.siteStatus,
+    defaults.themeName
+  );
+
+  return db.prepare(`
+    SELECT *
+    FROM commerce_site_settings
+    WHERE company_id = ?
+  `).get(companyRow.id);
+}
+
+function commerceSettingsRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    brandName: row.brand_name || '',
+    heroTitle: row.hero_title || '',
+    heroSubtitle: row.hero_subtitle || '',
+    announcementText: row.announcement_text || '',
+    officialLineUrl: row.official_line_url || '',
+    contactPhone: row.contact_phone || '',
+    contactEmail: row.contact_email || '',
+    siteStatus: row.site_status || 'draft',
+    themeName: row.theme_name || 'default',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function commerceProductRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    name: row.name,
+    description: row.description || '',
+    price: row.price || 0,
+    originalPrice: row.original_price || 0,
+    imageUrl: row.image_url || '',
+    category: row.category || '',
+    isFeatured: Boolean(row.is_featured),
+    isVisible: Boolean(row.is_visible),
+    sortOrder: row.sort_order || 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function commercePromotionRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    title: row.title,
+    description: row.description || '',
+    promoType: row.promo_type || 'banner',
+    startDate: row.start_date || '',
+    endDate: row.end_date || '',
+    isActive: Boolean(row.is_active),
+    sortOrder: row.sort_order || 0,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+app.get('/api/companies/:companyId/commerce-site/settings', auth, company, requireCommerceCompany, (req, res) => {
+  res.json(commerceSettingsRow(ensureCommerceSiteSettings(req.company)));
+});
+
+app.patch('/api/companies/:companyId/commerce-site/settings', auth, company, requireCommerceCompany, requireRole('owner', 'admin'), (req, res) => {
+  ensureCommerceSiteSettings(req.company);
+
+  const b = req.body || {};
+  const siteStatus = b.siteStatus ?? b.site_status ?? 'draft';
+
+  if (!commerceSiteStatuses.has(siteStatus)) {
+    return res.status(400).json({ error: '不支援的網站狀態' });
+  }
+
+  db.prepare(`
+    UPDATE commerce_site_settings
+    SET
+      brand_name = ?,
+      hero_title = ?,
+      hero_subtitle = ?,
+      announcement_text = ?,
+      official_line_url = ?,
+      contact_phone = ?,
+      contact_email = ?,
+      site_status = ?,
+      theme_name = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE company_id = ?
+  `).run(
+    b.brandName ?? b.brand_name ?? '',
+    b.heroTitle ?? b.hero_title ?? '',
+    b.heroSubtitle ?? b.hero_subtitle ?? '',
+    b.announcementText ?? b.announcement_text ?? '',
+    b.officialLineUrl ?? b.official_line_url ?? '',
+    b.contactPhone ?? b.contact_phone ?? '',
+    b.contactEmail ?? b.contact_email ?? '',
+    siteStatus,
+    b.themeName ?? b.theme_name ?? 'default',
+    req.company.id
+  );
+
+  audit(req.company.id, req.user.id, 'commerce_site_settings_updated', siteStatus);
+
+  res.json(commerceSettingsRow(ensureCommerceSiteSettings(req.company)));
+});
+
+app.get('/api/companies/:companyId/commerce-site/products', auth, company, requireCommerceCompany, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM commerce_site_products
+    WHERE company_id = ?
+    ORDER BY sort_order ASC, id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(commerceProductRow));
+});
+
+app.post('/api/companies/:companyId/commerce-site/products', auth, company, requireCommerceCompany, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim();
+
+  if (!name) {
+    return res.status(400).json({ error: '請輸入商品名稱' });
+  }
+
+  const row = db.prepare(`
+    INSERT INTO commerce_site_products (
+      company_id,
+      name,
+      description,
+      price,
+      original_price,
+      image_url,
+      category,
+      is_featured,
+      is_visible,
+      sort_order,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(
+    req.company.id,
+    name,
+    b.description || '',
+    commerceNumber(b.price),
+    commerceNumber(b.originalPrice ?? b.original_price),
+    b.imageUrl ?? b.image_url ?? '',
+    b.category || '',
+    commerceBool(b.isFeatured ?? b.is_featured, 0),
+    commerceBool(b.isVisible ?? b.is_visible, 1),
+    commerceNumber(b.sortOrder ?? b.sort_order, 0)
+  );
+
+  audit(req.company.id, req.user.id, 'commerce_site_product_created', String(row.lastInsertRowid));
+
+  const product = db.prepare(`
+    SELECT *
+    FROM commerce_site_products
+    WHERE id = ?
+      AND company_id = ?
+  `).get(row.lastInsertRowid, req.company.id);
+
+  res.json(commerceProductRow(product));
+});
+
+app.patch('/api/companies/:companyId/commerce-site/products/:productId', auth, company, requireCommerceCompany, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const productId = Number(req.params.productId);
+  const existing = db.prepare(`
+    SELECT *
+    FROM commerce_site_products
+    WHERE id = ?
+      AND company_id = ?
+  `).get(productId, req.company.id);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此商品' });
+  }
+
+  const b = req.body || {};
+  const name = String(b.name ?? existing.name ?? '').trim();
+
+  if (!name) {
+    return res.status(400).json({ error: '請輸入商品名稱' });
+  }
+
+  db.prepare(`
+    UPDATE commerce_site_products
+    SET
+      name = ?,
+      description = ?,
+      price = ?,
+      original_price = ?,
+      image_url = ?,
+      category = ?,
+      is_featured = ?,
+      is_visible = ?,
+      sort_order = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(
+    name,
+    b.description ?? existing.description ?? '',
+    commerceNumber(b.price, existing.price || 0),
+    commerceNumber(b.originalPrice ?? b.original_price, existing.original_price || 0),
+    b.imageUrl ?? b.image_url ?? existing.image_url ?? '',
+    b.category ?? existing.category ?? '',
+    commerceBool(b.isFeatured ?? b.is_featured, existing.is_featured || 0),
+    commerceBool(b.isVisible ?? b.is_visible, existing.is_visible ?? 1),
+    commerceNumber(b.sortOrder ?? b.sort_order, existing.sort_order || 0),
+    productId,
+    req.company.id
+  );
+
+  audit(req.company.id, req.user.id, 'commerce_site_product_updated', String(productId));
+
+  const product = db.prepare(`
+    SELECT *
+    FROM commerce_site_products
+    WHERE id = ?
+      AND company_id = ?
+  `).get(productId, req.company.id);
+
+  res.json(commerceProductRow(product));
+});
+
+app.delete('/api/companies/:companyId/commerce-site/products/:productId', auth, company, requireCommerceCompany, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const productId = Number(req.params.productId);
+  const result = db.prepare(`
+    DELETE FROM commerce_site_products
+    WHERE id = ?
+      AND company_id = ?
+  `).run(productId, req.company.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: '找不到此商品' });
+  }
+
+  audit(req.company.id, req.user.id, 'commerce_site_product_deleted', String(productId));
+
+  res.json({ ok: true });
+});
+
+app.get('/api/companies/:companyId/commerce-site/promotions', auth, company, requireCommerceCompany, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM commerce_site_promotions
+    WHERE company_id = ?
+    ORDER BY sort_order ASC, id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(commercePromotionRow));
+});
+
+app.post('/api/companies/:companyId/commerce-site/promotions', auth, company, requireCommerceCompany, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const b = req.body || {};
+  const title = String(b.title || '').trim();
+  const promoType = b.promoType ?? b.promo_type ?? 'banner';
+
+  if (!title) {
+    return res.status(400).json({ error: '請輸入活動標題' });
+  }
+
+  if (!commercePromoTypes.has(promoType)) {
+    return res.status(400).json({ error: '不支援的活動類型' });
+  }
+
+  const row = db.prepare(`
+    INSERT INTO commerce_site_promotions (
+      company_id,
+      title,
+      description,
+      promo_type,
+      start_date,
+      end_date,
+      is_active,
+      sort_order,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(
+    req.company.id,
+    title,
+    b.description || '',
+    promoType,
+    b.startDate ?? b.start_date ?? '',
+    b.endDate ?? b.end_date ?? '',
+    commerceBool(b.isActive ?? b.is_active, 1),
+    commerceNumber(b.sortOrder ?? b.sort_order, 0)
+  );
+
+  audit(req.company.id, req.user.id, 'commerce_site_promotion_created', String(row.lastInsertRowid));
+
+  const promotion = db.prepare(`
+    SELECT *
+    FROM commerce_site_promotions
+    WHERE id = ?
+      AND company_id = ?
+  `).get(row.lastInsertRowid, req.company.id);
+
+  res.json(commercePromotionRow(promotion));
+});
+
+app.patch('/api/companies/:companyId/commerce-site/promotions/:promotionId', auth, company, requireCommerceCompany, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const promotionId = Number(req.params.promotionId);
+  const existing = db.prepare(`
+    SELECT *
+    FROM commerce_site_promotions
+    WHERE id = ?
+      AND company_id = ?
+  `).get(promotionId, req.company.id);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此活動' });
+  }
+
+  const b = req.body || {};
+  const title = String(b.title ?? existing.title ?? '').trim();
+  const promoType = b.promoType ?? b.promo_type ?? existing.promo_type ?? 'banner';
+
+  if (!title) {
+    return res.status(400).json({ error: '請輸入活動標題' });
+  }
+
+  if (!commercePromoTypes.has(promoType)) {
+    return res.status(400).json({ error: '不支援的活動類型' });
+  }
+
+  db.prepare(`
+    UPDATE commerce_site_promotions
+    SET
+      title = ?,
+      description = ?,
+      promo_type = ?,
+      start_date = ?,
+      end_date = ?,
+      is_active = ?,
+      sort_order = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(
+    title,
+    b.description ?? existing.description ?? '',
+    promoType,
+    b.startDate ?? b.start_date ?? existing.start_date ?? '',
+    b.endDate ?? b.end_date ?? existing.end_date ?? '',
+    commerceBool(b.isActive ?? b.is_active, existing.is_active ?? 1),
+    commerceNumber(b.sortOrder ?? b.sort_order, existing.sort_order || 0),
+    promotionId,
+    req.company.id
+  );
+
+  audit(req.company.id, req.user.id, 'commerce_site_promotion_updated', String(promotionId));
+
+  const promotion = db.prepare(`
+    SELECT *
+    FROM commerce_site_promotions
+    WHERE id = ?
+      AND company_id = ?
+  `).get(promotionId, req.company.id);
+
+  res.json(commercePromotionRow(promotion));
+});
+
+app.delete('/api/companies/:companyId/commerce-site/promotions/:promotionId', auth, company, requireCommerceCompany, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const promotionId = Number(req.params.promotionId);
+  const result = db.prepare(`
+    DELETE FROM commerce_site_promotions
+    WHERE id = ?
+      AND company_id = ?
+  `).run(promotionId, req.company.id);
+
+  if (result.changes === 0) {
+    return res.status(404).json({ error: '找不到此活動' });
+  }
+
+  audit(req.company.id, req.user.id, 'commerce_site_promotion_deleted', String(promotionId));
+
+  res.json({ ok: true });
+});
+
 app.patch('/api/companies/:companyId/plan', auth, company, (req, res) => {
   const { plan } = req.body;
 

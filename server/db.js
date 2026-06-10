@@ -289,6 +289,67 @@ export function initDb() {
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS commerce_site_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL UNIQUE,
+    brand_name TEXT,
+    hero_title TEXT,
+    hero_subtitle TEXT,
+    announcement_text TEXT,
+    official_line_url TEXT,
+    contact_phone TEXT,
+    contact_email TEXT,
+    site_status TEXT DEFAULT 'draft',
+    theme_name TEXT DEFAULT 'default',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS commerce_site_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    price REAL DEFAULT 0,
+    original_price REAL DEFAULT 0,
+    image_url TEXT,
+    category TEXT,
+    is_featured INTEGER DEFAULT 0,
+    is_visible INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS commerce_site_products_company_idx
+  ON commerce_site_products(company_id);
+
+  CREATE INDEX IF NOT EXISTS commerce_site_products_visible_idx
+  ON commerce_site_products(company_id, is_visible);
+
+  CREATE TABLE IF NOT EXISTS commerce_site_promotions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    promo_type TEXT DEFAULT 'banner',
+    start_date TEXT,
+    end_date TEXT,
+    is_active INTEGER DEFAULT 1,
+    sort_order INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS commerce_site_promotions_company_idx
+  ON commerce_site_promotions(company_id);
+
+  CREATE INDEX IF NOT EXISTS commerce_site_promotions_active_idx
+  ON commerce_site_promotions(company_id, is_active);
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER,
