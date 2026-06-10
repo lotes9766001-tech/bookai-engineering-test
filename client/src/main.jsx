@@ -7,12 +7,16 @@ import {
   FileText,
   Layers,
   LogOut,
+  Menu,
   Package,
+  PanelLeftClose,
+  PanelLeftOpen,
   PlugZap,
   ReceiptText,
   ShieldCheck,
   Users,
-  WalletCards
+  WalletCards,
+  X
 } from 'lucide-react';
 import {
   PieChart,
@@ -318,6 +322,22 @@ function isAdminUser(user) {
   return String(user?.email || '').toLowerCase() === 'lotes.9766001@gmail.com';
 }
 
+function BrandLogo({ compact = false, subtitle = 'AI 經營控制塔' }) {
+  return (
+    <div className={`brand-logo ${compact ? 'compact' : ''}`}>
+      <div className="brand-symbol" aria-hidden="true">
+        <span>B</span>
+      </div>
+      {!compact && (
+        <div className="brand-wordmark">
+          <strong>BookAI</strong>
+          <small>{subtitle}</small>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function fieldLabel(industry, type) {
   const construction = isConstructionIndustry(industry);
   const food = isFoodIndustry(industry);
@@ -389,10 +409,11 @@ function Auth({ onAuth }) {
 
   return (
     <div className="auth-page">
+      <div className="auth-ambient" aria-hidden="true" />
       <div className="auth-card">
-        <div className="logo">BookAI</div>
+        <BrandLogo subtitle="工程企業的 AI 經營控制塔" />
         <h1>{mode === 'login' ? '登入 BookAI' : '建立 BookAI 帳號'}</h1>
-        <p>台灣中小企業 Commerce ERP OS</p>
+        <p>把不值得的辛苦交給系統，把值得的辛苦留給人。</p>
 
         <form onSubmit={submit}>
           {mode === 'register' && (
@@ -477,7 +498,7 @@ function Auth({ onAuth }) {
           )}
 
           <label>
-            <span>Email</span>
+            <span>電子信箱</span>
             <input
               placeholder="例：demo@bookai.com.tw"
               value={form.email}
@@ -486,7 +507,7 @@ function Auth({ onAuth }) {
           </label>
 
           <label>
-            <span>Password</span>
+            <span>密碼</span>
             <input
               placeholder="請輸入密碼"
               type="password"
@@ -497,7 +518,7 @@ function Auth({ onAuth }) {
 
           {err && <div className="error">{err}</div>}
 
-          <button>{mode === 'login' ? '登入' : '註冊'}</button>
+          <button>{mode === 'login' ? '進入經營控制塔' : '建立帳號'}</button>
         </form>
 
         <button
@@ -507,7 +528,7 @@ function Auth({ onAuth }) {
           {mode === 'login' ? '建立新帳號' : '已有帳號，返回登入'}
         </button>
 
-        <div className="hint">Demo：demo@bookai.com.tw / demo123456</div>
+        <div className="hint">測試帳號：demo@bookai.com.tw / demo123456</div>
       </div>
     </div>
   );
@@ -518,6 +539,8 @@ function Shell({ onLogout }) {
   const [page, setPage] = useState('dashboard');
   const [companyId, setCompanyId] = useState(null);
   const [refresh, setRefresh] = useState(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('bookai_sidebar_collapsed') === '1');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     api('/me')
@@ -528,18 +551,22 @@ function Shell({ onLogout }) {
       .catch(onLogout);
   }, [onLogout]);
 
+  useEffect(() => {
+    localStorage.setItem('bookai_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
+  }, [sidebarCollapsed]);
+
   const company = me?.companies?.find((c) => c.id === companyId);
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
-    ['dashboard', '老闆總覽', BarChart3],
+    ['dashboard', '經營總覽', BarChart3],
     ['leads', '接案中心', FileText],
     ['transactions', '交易中心', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '材料 / 工具庫存 ERP', Package],
-    ['jobsites', '案場工作台', Building2],
-    ['reports', '工程月報', BarChart3],
+    ['jobsites', '案場中心', Building2],
+    ['reports', '經營報表', BarChart3],
     ['settings', '公司設定', Building2]
   ];
   const planNav = isConstructionIndustry(company?.industry)
@@ -567,48 +594,75 @@ if (!me || !company) {
   }
 
   return (
-    <div className="app">
-      <aside>
+    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
+      <div className="mobile-app-bar">
+        <BrandLogo subtitle="AI 經營控制塔" />
+        <button type="button" className="mobile-menu-btn" onClick={() => setMobileNavOpen(true)} aria-label="開啟選單">
+          <Menu size={20} />
+        </button>
+      </div>
+
+      {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="關閉選單" onClick={() => setMobileNavOpen(false)} />}
+
+      <aside className="app-sidebar">
         <div className="brand">
-          <div className="mark">B</div>
-          <div>
-            <b>BookAI</b>
-            <span>封閉測試中</span>
-          </div>
+          <BrandLogo compact={sidebarCollapsed} subtitle="AI 經營控制塔" />
+          <button
+            type="button"
+            className="sidebar-toggle"
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            aria-label={sidebarCollapsed ? '展開側邊欄' : '收合側邊欄'}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+          <button type="button" className="mobile-close-btn" onClick={() => setMobileNavOpen(false)} aria-label="關閉選單">
+            <X size={18} />
+          </button>
         </div>
 
-        <select
-          className="company-select"
-          value={companyId}
-          onChange={(e) => setCompanyId(Number(e.target.value))}
-        >
-          {me.companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
+        <div className="company-select-wrap">
+          <span>目前公司</span>
+          <select
+            className="company-select"
+            value={companyId}
+            onChange={(e) => {
+              setCompanyId(Number(e.target.value));
+              setMobileNavOpen(false);
+            }}
+          >
+            {me.companies.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <nav>
           {visibleNav.map(([id, label, Icon]) => (
             <button
               key={id}
               className={page === id ? 'active' : ''}
-              onClick={() => setPage(id)}
+              data-label={label}
+              title={sidebarCollapsed ? label : undefined}
+              onClick={() => {
+                setPage(id);
+                setMobileNavOpen(false);
+              }}
             >
               <Icon size={18} />
-              {label}
+              <span>{label}</span>
             </button>
           ))}
         </nav>
 
-        <button className="logout" onClick={onLogout}>
+        <button className="logout" data-label="登出" title={sidebarCollapsed ? '登出' : undefined} onClick={onLogout}>
           <LogOut size={18} />
-          登出
+          <span>登出</span>
         </button>
       </aside>
 
-      <main>
+      <main className="app-main">
         {page !== 'admin' && (
           <Header
             company={company}
@@ -681,6 +735,7 @@ function Card({ title, value, sub }) {
 function Dashboard({ companyId, refresh, company, onNavigate }) {
   const [s, setS] = useState(null);
   const [jobSites, setJobSites] = useState([]);
+  const [leads, setLeads] = useState([]);
   const industry = company?.industry;
   const constructionMode = isConstructionIndustry(industry);
 
@@ -691,11 +746,15 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
       api(`/companies/${companyId}/summary`).catch(() => null),
       constructionMode
         ? api(`/companies/${companyId}/jobsites`).catch(() => [])
+        : Promise.resolve([]),
+      constructionMode
+        ? api(`/companies/${companyId}/leads`).catch(() => [])
         : Promise.resolve([])
-    ]).then(([summary, sites]) => {
+    ]).then(([summary, sites, leadRows]) => {
       if (!alive) return;
       setS(summary);
       setJobSites(Array.isArray(sites) ? sites : []);
+      setLeads(Array.isArray(leadRows) ? leadRows : []);
     });
 
     return () => {
@@ -735,6 +794,7 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
 
     return {
       sites,
+      leads,
       totalQuote,
       received,
       unpaid,
@@ -747,6 +807,9 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
   })();
 
   if (constructionMode) {
+    const activeSites = constructionStats.sites.filter((site) => !['已結案', '結案'].includes(String(site.status || ''))).length;
+    const tenderLeads = leads.filter((lead) => String(lead.source || lead.tenderSource || '').includes('標案') || String(lead.agencyType || '').includes('機關')).length;
+    const priorityLeads = leads.filter((lead) => Number(lead.fitScore ?? lead.fit_score ?? 0) >= 75 && !['lost', 'converted'].includes(String(lead.status || ''))).length;
     const rows = constructionStats.sites.slice(0, 8).map((site) => {
       const quote = Number(site.quote_amount ?? site.quoteAmount ?? 0);
       const received = Number(site.received_amount ?? site.receivedAmount ?? 0);
@@ -775,61 +838,47 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
     });
 
     return (
-      <section>
-        <div className="grid">
-          <Card title="案場數量" value={constructionStats.sites.length} sub="目前建立的工程案場" />
-          <Card title="案場總報價" value={money(constructionStats.totalQuote)} sub="所有案場合計報價" />
-          <Card title="已收款" value={money(constructionStats.received)} sub={`收款率 ${constructionStats.collectionRate}%`} />
-          <Card title="未收款" value={money(constructionStats.unpaid)} sub="需持續追蹤請款" />
-        </div>
-
-        <div className="grid">
-          <Card title="核心成本" value={money(constructionStats.totalCost)} sub="材料、工資、外包與雜支" />
-          <Card title="案場毛利" value={money(constructionStats.profit)} sub={constructionStats.profit >= 0 ? '目前預估有利潤' : '目前預估虧損'} />
-          <Card title="平均毛利率" value={`${constructionStats.marginRate}%`} sub="毛利 / 報價" />
-          <Card title="風險案場" value={constructionStats.riskSites.length} sub="收款率低於 50% 且未結案" />
-        </div>
-
-        <div className="panel">
-          <h2>今天要處理什麼？</h2>
-          <div className="grid">
-            <button type="button" onClick={() => onNavigate?.('jobsites')}>
-              新增 / 管理案場
-            </button>
-            <button type="button" onClick={() => onNavigate?.('jobsites')}>
-              登記收款
-            </button>
-            <button type="button" onClick={() => onNavigate?.('reports')}>
-              查看工程月報
-            </button>
-            <button type="button" onClick={() => onNavigate?.('inventory')}>
-              檢查材料 / 工具庫存
-            </button>
+      <section className="command-center">
+        <div className="command-hero">
+          <div>
+            <p className="command-kicker">BookAI Command Center</p>
+            <h1>工程經營控制塔</h1>
+            <p>把不值得的辛苦交給系統，把值得的辛苦留給人。</p>
+          </div>
+          <div className="command-signal">
+            <span />
+            <strong>經營資料同步中</strong>
           </div>
         </div>
 
-        <div className="panel-grid">
-          <div className="panel">
-            <h2>工程營運摘要</h2>
+        <div className="command-metrics">
+          <Card title="本月營收" value={money(constructionStats.received)} sub={`收款率 ${constructionStats.collectionRate}%`} />
+          <Card title="未收款金額" value={money(constructionStats.unpaid)} sub="需持續追蹤請款" />
+          <Card title="進行中案場" value={activeSites} sub={`總案場 ${constructionStats.sites.length} 件`} />
+          <Card title="預估毛利" value={money(constructionStats.profit)} sub={`毛利率 ${constructionStats.marginRate}%`} />
+          <Card title="接案中心狀態" value={`${priorityLeads} 件`} sub={`案源總數 ${leads.length} 件`} />
+          <Card title="標案雷達機會" value={`${tenderLeads} 件`} sub="政府 / 地方案源" />
+        </div>
+
+        <div className="command-layout">
+          <div className="panel command-ai-panel">
+            <h2>AI 經營提醒</h2>
             <ul className="summary">
-              <li>案場數量：{constructionStats.sites.length}</li>
-              <li>案場總報價：{money(constructionStats.totalQuote)}</li>
-              <li>已收款：{money(constructionStats.received)}</li>
-              <li>未收款：{money(constructionStats.unpaid)}</li>
-              <li>核心成本：{money(constructionStats.totalCost)}</li>
-              <li>案場毛利：{money(constructionStats.profit)}</li>
+              {constructionStats.sites.length === 0 && <li>目前尚無案場資料，請先到案場中心新增工程案場。</li>}
+              {constructionStats.unpaid > 0 && <li>尚有未收款 {money(constructionStats.unpaid)}，建議優先追蹤請款節點。</li>}
+              {constructionStats.riskSites.length > 0 && <li>{constructionStats.riskSites.length} 個案場收款率偏低，請檢查合約、驗收與請款進度。</li>}
+              {constructionStats.marginRate < 25 && constructionStats.totalQuote > 0 && <li>整體毛利率低於 25%，建議重新檢查材料、工資與外包成本。</li>}
+              {priorityLeads > 0 && <li>接案中心有 {priorityLeads} 件案源分數較高，適合今天優先追蹤。</li>}
+              {constructionStats.sites.length > 0 && constructionStats.unpaid === 0 && <li>目前未收款風險低，請維持案場成本紀錄完整。</li>}
             </ul>
           </div>
 
-          <div className="panel">
-            <h2>請款風險提醒</h2>
-            <ul className="summary">
-              {constructionStats.sites.length === 0 && <li>目前尚無案場資料，請先到案場工作台新增工程案場。</li>}
-              {constructionStats.unpaid > 0 && <li>尚有未收款 {money(constructionStats.unpaid)}，建議持續追蹤請款進度。</li>}
-              {constructionStats.riskSites.length > 0 && <li>有 {constructionStats.riskSites.length} 個案場收款率偏低，請優先檢查。</li>}
-              {constructionStats.marginRate < 25 && constructionStats.totalQuote > 0 && <li>整體毛利率低於 25%，請檢查材料、工資與外包成本。</li>}
-              {constructionStats.sites.length > 0 && constructionStats.unpaid === 0 && <li>目前無未收款風險，收款狀況良好。</li>}
-            </ul>
+          <div className="panel command-actions">
+            <h2>今日指令</h2>
+            <button type="button" onClick={() => onNavigate?.('leads')}>檢查接案中心</button>
+            <button type="button" onClick={() => onNavigate?.('jobsites')}>管理案場中心</button>
+            <button type="button" onClick={() => onNavigate?.('jobsites')}>登記收款</button>
+            <button type="button" onClick={() => onNavigate?.('reports')}>查看經營報表</button>
           </div>
         </div>
 
@@ -5049,6 +5098,8 @@ function AdminConsole() {
   const [billingForm, setBillingForm] = useState({});
   const [websiteForm, setWebsiteForm] = useState({});
   const [settingsForm, setSettingsForm] = useState({});
+  const [demoResult, setDemoResult] = useState(null);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
@@ -5181,6 +5232,25 @@ function AdminConsole() {
     }
   }
 
+  async function prepareDemoEngineering() {
+    try {
+      setDemoLoading(true);
+      setDemoResult(null);
+      setMessage('');
+      setError('');
+      const result = await api('/admin/demo/engineering', {
+        method: 'POST'
+      });
+      setDemoResult(result.demo || null);
+      await loadAdmin();
+      setMessage('工程 Demo 已建立或更新');
+    } catch (err) {
+      setError(err.message || '建立工程 Demo 失敗');
+    } finally {
+      setDemoLoading(false);
+    }
+  }
+
   return (
     <section className="admin-console">
       <div className="admin-space-bg" />
@@ -5188,7 +5258,7 @@ function AdminConsole() {
       <div className="admin-cockpit">
         <div className="admin-hero">
           <div>
-            <div className="admin-pill">BookAI Admin Console</div>
+            <div className="admin-pill">BookAI 後台</div>
             <h1>BookAI 控制塔</h1>
             <p>管理客戶、方案、網站與平台設定的營運駕駛艙。</p>
           </div>
@@ -5200,6 +5270,27 @@ function AdminConsole() {
 
         {message && <div className="admin-message">{message}</div>}
         {error && <div className="admin-error">{error}</div>}
+
+        <div className="admin-control-panel">
+          <div className="admin-panel-head">
+            <div>
+              <h2>Demo 工具</h2>
+              <p>在線上環境建立工程業 Demo 帳號，供測試與展示使用。</p>
+            </div>
+            <button type="button" onClick={prepareDemoEngineering} disabled={demoLoading}>
+              {demoLoading ? '建立中...' : '建立 / 更新工程 Demo'}
+            </button>
+          </div>
+
+          {demoResult && (
+            <div className="admin-detail-list">
+              <p><span>Email</span><strong>{demoResult.email}</strong></p>
+              <p><span>Password</span><strong>{demoResult.password}</strong></p>
+              <p><span>Company ID</span><strong>#{demoResult.companyId}</strong></p>
+              <p><span>Company Name</span><strong>{demoResult.companyName}</strong></p>
+            </div>
+          )}
+        </div>
 
         <div className="admin-command-grid">
           <div className="admin-metric-card"><span>總客戶數</span><strong>{metrics.total}</strong></div>
