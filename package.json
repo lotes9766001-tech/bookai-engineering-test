@@ -10,6 +10,7 @@
     "build": "npm --prefix client run build",
     "seed": "npm --prefix server run seed",
     "backup:db": "node scripts/backup-db.js",
+    "billing:activate": "node scripts/activate-company.js",
     "health": "node scripts/health-check.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:clean": "node scripts/smoke-clean.js",

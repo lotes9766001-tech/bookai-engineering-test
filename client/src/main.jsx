@@ -259,6 +259,32 @@ function getIndustryInsight(industry) {
   return map[industry] || '請先設定行業別，BookAI 會逐步提供專屬分析。';
 }
 
+function getBillingStatusLabel(status) {
+  const map = {
+    trial: '試用中',
+    active: '正式使用中',
+    expired: '已到期',
+    paused: '暫停使用'
+  };
+
+  return map[status] || '未設定';
+}
+
+function getSubscriptionPlanLabel(plan) {
+  const map = {
+    engineering_trial: '工程業試用版',
+    engineering_starter: '工程業入門版',
+    engineering_pro: '工程業專業版',
+    engineering_premium: '工程業進階版'
+  };
+
+  return map[plan] || plan || '未設定';
+}
+
+function yesNoPaid(value) {
+  return value === 1 || value === true ? '是' : '否';
+}
+
 function fieldLabel(industry, type) {
   const construction = isConstructionIndustry(industry);
   const food = isFoodIndustry(industry);
@@ -4682,6 +4708,16 @@ function Settings({ company }) {
         <p>產業：{getIndustryName(company.industry)}</p>
         <p>統編：{company.tax_id || '未設定'}</p>
         <p>公司 / 營業地址：{company.address || company.company_address || '未設定'}</p>
+      </div>
+
+      <div className="panel">
+        <h2>使用狀態</h2>
+        <p>目前使用狀態：{getBillingStatusLabel(company.billing_status)}</p>
+        <p>目前方案：{getSubscriptionPlanLabel(company.subscription_plan)}</p>
+        <p>是否正式客戶：{yesNoPaid(company.is_paid_customer)}</p>
+        <p>啟用日期：{company.subscription_started_at || '未設定'}</p>
+        <p>到期日期：{company.subscription_expires_at || '未設定'}</p>
+        <p>備註：{company.billing_note || '無'}</p>
       </div>
     </section>
   );

@@ -288,6 +288,12 @@ export function initDb() {
 
   safeAddColumn('companies', 'companyAddress', 'TEXT');
   safeAddColumn('companies', 'address', 'TEXT');
+  safeAddColumn('companies', 'billing_status', "TEXT DEFAULT 'trial'");
+  safeAddColumn('companies', 'subscription_plan', "TEXT DEFAULT 'engineering_trial'");
+  safeAddColumn('companies', 'subscription_started_at', 'TEXT');
+  safeAddColumn('companies', 'subscription_expires_at', 'TEXT');
+  safeAddColumn('companies', 'is_paid_customer', 'INTEGER DEFAULT 0');
+  safeAddColumn('companies', 'billing_note', 'TEXT');
 
   safeAddColumn('products', 'category', 'TEXT');
   safeAddColumn('products', 'unit', 'TEXT');
