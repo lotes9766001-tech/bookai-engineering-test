@@ -247,6 +247,42 @@ export function initDb() {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS leads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    client_name TEXT,
+    client_phone TEXT,
+    source TEXT,
+    region TEXT,
+    agency_type TEXT,
+    project_type TEXT,
+    estimated_amount REAL DEFAULT 0,
+    estimated_cost REAL DEFAULT 0,
+    expected_margin REAL DEFAULT 0,
+    risk_level TEXT DEFAULT 'medium',
+    fit_score INTEGER DEFAULT 70,
+    status TEXT DEFAULT 'new',
+    next_action TEXT,
+    note TEXT,
+    tender_source TEXT,
+    tender_ref TEXT,
+    converted_job_site_id INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(converted_job_site_id) REFERENCES job_sites(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS leads_company_id_idx
+  ON leads(company_id);
+
+  CREATE INDEX IF NOT EXISTS leads_company_status_idx
+  ON leads(company_id, status);
+
+  CREATE INDEX IF NOT EXISTS leads_company_created_idx
+  ON leads(company_id, created_at);
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER,

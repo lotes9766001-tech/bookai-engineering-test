@@ -1,14 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
-
-const STORAGE_KEY = 'bookai_lead_center_mock_v4_1_tender_radar';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { api } from '../lib/api';
 
 const statusOptions = [
   { value: 'new', label: '新案源' },
-  { value: 'reviewing', label: '評估中' },
   { value: 'contacted', label: '已聯絡' },
+  { value: 'site_visit', label: '已場勘' },
   { value: 'quoted', label: '已報價' },
-  { value: 'waiting', label: '等待回覆' },
-  { value: 'won', label: '已成交' },
+  { value: 'won', label: '已簽約' },
   { value: 'lost', label: '未成交' },
   { value: 'converted', label: '已轉案場' }
 ];
@@ -72,47 +70,6 @@ const regions = [
   '台東縣',
   '澎湖 / 金門 / 連江',
   '全國'
-];
-
-const defaultLeads = [
-  {
-    id: 1,
-    title: '南屯舊屋油漆與壁癌處理',
-    clientName: '陳先生',
-    phone: '0912-345-678',
-    location: '台中市南屯區',
-    projectType: '油漆工程',
-    sourceType: 'LINE 詢價',
-    estimatedAmount: 120000,
-    estimatedCost: 78000,
-    rawContent: '客戶家中約 25 坪舊屋要重新油漆，牆面有壁癌，希望下週可以現場估價。',
-    aiSummary: '台中南屯舊屋油漆案，約 25 坪，包含牆面重新油漆與壁癌處理，客戶希望下週安排現場估價。',
-    aiScore: 88,
-    aiScoreReason: '地點、工程類型、需求與聯絡方式完整，預估毛利率良好，建議優先聯絡。',
-    status: 'new',
-    nextFollowUpDate: '',
-    converted: false,
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 2,
-    title: '北屯套房水電修繕',
-    clientName: '林小姐',
-    phone: '',
-    location: '台中市北屯區',
-    projectType: '水電工程',
-    sourceType: '朋友介紹',
-    estimatedAmount: 35000,
-    estimatedCost: 24000,
-    rawContent: '套房水電有幾處需要修，細節還不清楚。',
-    aiSummary: '北屯套房水電修繕案，目前需求描述較少，需補齊施工範圍與聯絡方式。',
-    aiScore: 54,
-    aiScoreReason: '工程類型與地點明確，但缺少聯絡電話與詳細施工內容，建議先補資料。',
-    status: 'reviewing',
-    nextFollowUpDate: '',
-    converted: false,
-    createdAt: new Date().toISOString()
-  }
 ];
 
 const tenderRadarItems = [
@@ -326,7 +283,7 @@ function calculateLeadScore(lead) {
     reasons.push('已有追蹤日期');
   }
 
-  if (['quoted', 'waiting', 'won'].includes(lead.status)) {
+  if (['site_visit', 'quoted', 'won'].includes(lead.status)) {
     score += 5;
     reasons.push('已進入成交追蹤階段');
   }
@@ -343,20 +300,77 @@ function calculateLeadScore(lead) {
   return { score, summary, reason };
 }
 
-function safeLoadLeads() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return defaultLeads;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : defaultLeads;
-  } catch {
-    return defaultLeads;
-  }
+function getRiskLevel(score) {
+  const value = Number(score || 0);
+  if (value >= 80) return 'low';
+  if (value < 45) return 'high';
+  return 'medium';
 }
 
-export default function LeadCenterMock() {
-  const [leads, setLeads] = useState(safeLoadLeads);
+function normalizeLead(lead) {
+  const result = calculateLeadScore({
+    ...lead,
+    aiScore: lead.aiScore ?? lead.fitScore,
+    sourceType: lead.sourceType || lead.source || '手動新增',
+    location: lead.location || lead.region || '',
+    phone: lead.phone || lead.clientPhone || '',
+    rawContent: lead.rawContent || lead.note || ''
+  });
+
+  return {
+    ...lead,
+    clientName: lead.clientName || lead.client_name || '',
+    phone: lead.phone || lead.clientPhone || lead.client_phone || '',
+    location: lead.location || lead.region || '',
+    projectType: lead.projectType || lead.project_type || '',
+    sourceType: lead.sourceType || lead.source || '手動新增',
+    estimatedAmount: Number(lead.estimatedAmount ?? lead.estimated_amount ?? 0),
+    estimatedCost: Number(lead.estimatedCost ?? lead.estimated_cost ?? 0),
+    fitScore: Number(lead.fitScore ?? lead.fit_score ?? lead.aiScore ?? result.score),
+    aiScore: Number(lead.aiScore ?? lead.fitScore ?? lead.fit_score ?? result.score),
+    aiSummary: lead.aiSummary || result.summary,
+    aiScoreReason: lead.aiScoreReason || result.reason,
+    rawContent: lead.rawContent || lead.note || '',
+    nextAction: lead.nextAction || lead.next_action || '',
+    tenderId: lead.tenderId || lead.tenderRef || lead.tender_ref || '',
+    tenderRef: lead.tenderRef || lead.tender_ref || lead.tenderId || '',
+    converted: lead.converted || lead.status === 'converted' || Boolean(lead.convertedJobSiteId)
+  };
+}
+
+function toPayload(data) {
+  const scored = calculateLeadScore(data);
+
+  return {
+    title: data.title,
+    clientName: data.clientName,
+    phone: data.phone,
+    sourceType: data.sourceType,
+    location: data.location,
+    agencyType: data.agencyType || '私人客戶',
+    projectType: data.projectType,
+    estimatedAmount: Number(data.estimatedAmount || 0),
+    estimatedCost: Number(data.estimatedCost || 0),
+    expectedMargin: Number(data.estimatedAmount || 0) - Number(data.estimatedCost || 0),
+    riskLevel: getRiskLevel(scored.score),
+    fitScore: scored.score,
+    status: data.status || 'new',
+    nextAction: data.nextAction || data.nextFollowUpDate || '',
+    rawContent: data.rawContent || '',
+    tenderSource: data.tenderSource || '',
+    tenderRef: data.tenderRef || data.tenderId || ''
+  };
+}
+
+export default function LeadCenterMock({ companyId }) {
+  const formPanelRef = useRef(null);
+  const [leads, setLeads] = useState([]);
   const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState(null);
+  const [editingLeadTitle, setEditingLeadTitle] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [scoreFilter, setScoreFilter] = useState('all');
@@ -366,14 +380,34 @@ export default function LeadCenterMock() {
   const [tenderAgencyType, setTenderAgencyType] = useState('全部機關');
   const [tenderProjectType, setTenderProjectType] = useState('全部工程');
 
+  async function loadLeads() {
+    if (!companyId) {
+      setLeads([]);
+      setLoading(false);
+      setError('找不到公司 ID，請重新登入或重新整理頁面。');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      setError('');
+      const rows = await api(`/companies/${companyId}/leads`);
+      setLeads(Array.isArray(rows) ? rows.map(normalizeLead) : []);
+    } catch (err) {
+      setError(err.message || '讀取案源失敗');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(leads));
-  }, [leads]);
+    loadLeads();
+  }, [companyId]);
 
   const stats = useMemo(() => {
     const total = leads.length;
     const highScore = leads.filter((lead) => Number(lead.aiScore || 0) >= 80).length;
-    const quoted = leads.filter((lead) => ['quoted', 'waiting'].includes(lead.status)).length;
+    const quoted = leads.filter((lead) => ['site_visit', 'quoted'].includes(lead.status)).length;
     const converted = leads.filter((lead) => lead.status === 'converted' || lead.converted).length;
     const tenderCount = leads.filter((lead) => lead.sourceType === '政府 / 地方標案').length;
     const totalAmount = leads.reduce((sum, lead) => sum + Number(lead.estimatedAmount || 0), 0);
@@ -428,152 +462,204 @@ export default function LeadCenterMock() {
     setForm((old) => ({ ...old, [key]: value }));
   }
 
-  function addLead() {
+  async function addLead() {
     if (!form.title.trim()) {
       window.alert('請先輸入案源名稱');
       return;
     }
 
-    const baseLead = {
-      id: Date.now(),
+    const payload = toPayload({
       ...form,
-      estimatedAmount: Number(form.estimatedAmount || 0),
-      estimatedCost: Number(form.estimatedCost || 0),
-      status: 'new',
-      converted: false,
-      createdAt: new Date().toISOString()
-    };
+      status: editingId ? form.status : 'new'
+    });
 
-    const result = calculateLeadScore(baseLead);
+    try {
+      setSaving(true);
+      setError('');
 
-    setLeads((old) => [
-      {
-        ...baseLead,
-        aiSummary: result.summary,
-        aiScore: result.score,
-        aiScoreReason: result.reason
-      },
-      ...old
-    ]);
+      if (editingId) {
+        const updated = await api(`/companies/${companyId}/leads/${editingId}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+        setLeads((old) => old.map((lead) => (lead.id === editingId ? normalizeLead(updated) : lead)));
+      } else {
+        const created = await api(`/companies/${companyId}/leads`, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        setLeads((old) => [normalizeLead(created), ...old]);
+      }
 
-    setForm(emptyForm);
+      setEditingId(null);
+      setEditingLeadTitle('');
+      setForm(emptyForm);
+    } catch (err) {
+      setError(err.message || '儲存案源失敗');
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function importTenderToLeads(tender) {
-    const exists = leads.some((lead) => lead.tenderId === tender.id);
+  async function importTenderToLeads(tender) {
+    const exists = leads.some((lead) => lead.tenderId === tender.id || lead.tenderRef === tender.id);
 
     if (exists) {
       window.alert('這筆標案已經匯入接案中心。');
       return;
     }
 
-    const baseLead = {
-      id: Date.now(),
+    const payload = toPayload({
       tenderId: tender.id,
+      tenderRef: tender.id,
       title: tender.title,
       clientName: tender.agency,
       phone: '',
       location: tender.region,
       projectType: tender.projectType,
       sourceType: '政府 / 地方標案',
+      agencyType: tender.agencyType,
       estimatedAmount: tender.budget,
       estimatedCost: tender.estimatedCost,
-      nextFollowUpDate: tender.deadline,
+      nextAction: `投標截止日：${tender.deadline}`,
       rawContent: `${tender.summary}\n\n機關：${tender.agency}\n機關類型：${tender.agencyType}\n地區：${tender.region}\n預算：${money(tender.budget)}\n投標截止日：${tender.deadline}\n資料來源：${tender.source}`,
+      tenderSource: tender.source,
       status: 'new',
-      converted: false,
-      createdAt: new Date().toISOString()
-    };
+      fitScore: tender.fitScore
+    });
 
-    const result = calculateLeadScore(baseLead);
+    payload.fitScore = Math.max(payload.fitScore, tender.fitScore);
+    payload.riskLevel = getRiskLevel(payload.fitScore);
 
-    setLeads((old) => [
-      {
-        ...baseLead,
-        aiSummary: `政府 / 地方標案：${tender.summary}`,
-        aiScore: Math.max(result.score, tender.fitScore),
-        aiScoreReason: `${tender.reason} 匯入後可持續追蹤資格、押標金、履約期限與現場成本。`
-      },
-      ...old
-    ]);
-
-    window.alert('已匯入接案中心，可繼續 AI 評分與轉案場。');
+    try {
+      setSaving(true);
+      setError('');
+      const created = await api(`/companies/${companyId}/leads`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      setLeads((old) => [normalizeLead(created), ...old]);
+      window.alert('已匯入接案中心，可繼續追蹤與轉案場。');
+    } catch (err) {
+      setError(err.message || '匯入標案失敗');
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function scoreLead(id) {
-    setLeads((old) =>
-      old.map((lead) => {
-        if (lead.id !== id) return lead;
-        const result = calculateLeadScore(lead);
-        return {
-          ...lead,
-          aiSummary: result.summary,
-          aiScore: result.score,
-          aiScoreReason: result.reason
-        };
-      })
-    );
+  async function scoreLead(id) {
+    const lead = leads.find((item) => item.id === id);
+    if (!lead) return;
+
+    const result = calculateLeadScore(lead);
+
+    try {
+      const updated = await api(`/companies/${companyId}/leads/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...toPayload(lead),
+          fitScore: result.score,
+          riskLevel: getRiskLevel(result.score)
+        })
+      });
+      setLeads((old) => old.map((item) => (item.id === id ? normalizeLead(updated) : item)));
+    } catch (err) {
+      setError(err.message || '重新評分失敗');
+    }
   }
 
-  function changeStatus(id, status) {
-    setLeads((old) =>
-      old.map((lead) => {
-        if (lead.id !== id) return lead;
-        const next = { ...lead, status };
-        const result = calculateLeadScore(next);
-        return {
-          ...next,
-          aiSummary: result.summary,
-          aiScore: result.score,
-          aiScoreReason: result.reason
-        };
-      })
-    );
+  async function changeStatus(id, status) {
+    const lead = leads.find((item) => item.id === id);
+    if (!lead) return;
+
+    try {
+      const updated = await api(`/companies/${companyId}/leads/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          ...toPayload({ ...lead, status }),
+          status
+        })
+      });
+      setLeads((old) => old.map((item) => (item.id === id ? normalizeLead(updated) : item)));
+    } catch (err) {
+      setError(err.message || '更新案源狀態失敗');
+    }
   }
 
-  function convertLead(id) {
-    setLeads((old) =>
-      old.map((lead) =>
-        lead.id === id
-          ? {
-              ...lead,
-              status: 'converted',
-              converted: true,
-              aiScoreReason: `${lead.aiScoreReason || ''} 此案源已模擬轉成正式案場。正式版會同步新增到案場工作台。`
-            }
-          : lead
-      )
-    );
-
-    window.alert('已模擬轉成案場。正式版會同步新增到案場工作台。');
+  async function convertLead(id) {
+    try {
+      setError('');
+      const result = await api(`/companies/${companyId}/leads/${id}/convert-to-jobsite`, {
+        method: 'POST'
+      });
+      setLeads((old) => old.map((lead) => (lead.id === id ? normalizeLead(result.lead) : lead)));
+      window.alert('已轉成案場，可到案場工作台查看。');
+    } catch (err) {
+      setError(err.message || '轉成案場失敗');
+    }
   }
 
-  function deleteLead(id) {
+  async function deleteLead(id) {
     if (!window.confirm('確定要刪除此案源嗎？')) return;
-    setLeads((old) => old.filter((lead) => lead.id !== id));
+
+    try {
+      setError('');
+      await api(`/companies/${companyId}/leads/${id}`, {
+        method: 'DELETE'
+      });
+      setLeads((old) => old.filter((lead) => lead.id !== id));
+    } catch (err) {
+      setError(err.message || '刪除案源失敗');
+    }
   }
 
-  function resetMockData() {
-    if (!window.confirm('要重置接案中心 Mock 資料嗎？')) return;
-    setLeads(defaultLeads);
-    setKeyword('');
-    setStatusFilter('all');
-    setScoreFilter('all');
+  function editLead(lead) {
+    setEditingId(lead.id);
+    setEditingLeadTitle(lead.title || '未命名案源');
+    setForm({
+      title: lead.title || '',
+      clientName: lead.clientName || '',
+      phone: lead.phone || '',
+      location: lead.location || '',
+      projectType: lead.projectType || '油漆工程',
+      sourceType: lead.sourceType || '手動新增',
+      estimatedAmount: lead.estimatedAmount || '',
+      estimatedCost: lead.estimatedCost || '',
+      nextFollowUpDate: lead.nextAction || '',
+      rawContent: lead.rawContent || '',
+      status: lead.status || 'new'
+    });
+
+    requestAnimationFrame(() => {
+      formPanelRef.current?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    });
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditingLeadTitle('');
+    setForm(emptyForm);
   }
 
   return (
     <section className="lead-page">
       <div className="lead-hero">
         <div>
-          <div className="lead-kicker">v4.1 Tender Radar Beta</div>
+          <div className="lead-kicker">正式資料庫版</div>
           <h1>BookAI 接案中心</h1>
           <p>集中管理潛在案源，新增政府 / 地方標案雷達，涵蓋中央部會、地方政府、交通局、工務局、公營事業與學校機關。</p>
         </div>
 
-        <button type="button" className="lead-soft-btn" onClick={resetMockData}>
-          重置模擬資料
+        <button type="button" className="lead-soft-btn" onClick={loadLeads}>
+          重新整理案源
         </button>
       </div>
+
+      {error && <div className="error">{error}</div>}
+      {loading && <div className="notice">正在讀取接案中心資料...</div>}
 
       <div className="lead-stats-grid">
         <div className="lead-stat-card">
@@ -589,7 +675,7 @@ export default function LeadCenterMock() {
         <div className="lead-stat-card">
           <span>高分案源</span>
           <strong>{stats.highScore}</strong>
-          <small>AI 分數 80 以上</small>
+          <small>系統評估分數 80 以上</small>
         </div>
         <div className="lead-stat-card">
           <span>已轉案場</span>
@@ -645,7 +731,7 @@ export default function LeadCenterMock() {
         <div className="tender-grid">
           {filteredTenders.map((tender) => {
             const level = getScoreLevel(tender.fitScore);
-            const imported = leads.some((lead) => lead.tenderId === tender.id);
+            const imported = leads.some((lead) => lead.tenderId === tender.id || lead.tenderRef === tender.id);
 
             return (
               <article className="tender-card" key={tender.id}>
@@ -690,7 +776,7 @@ export default function LeadCenterMock() {
                 <div className="lead-ai-box">
                   <strong>標案摘要</strong>
                   <p>{tender.summary}</p>
-                  <strong>AI 適合度理由</strong>
+                  <strong>系統適合度理由</strong>
                   <p>{tender.reason}</p>
                 </div>
 
@@ -698,7 +784,7 @@ export default function LeadCenterMock() {
                   <button
                     type="button"
                     className="lead-primary-btn"
-                    disabled={imported}
+                    disabled={imported || saving}
                     onClick={() => importTenderToLeads(tender)}
                   >
                     {imported ? '已匯入接案中心' : '匯入接案中心'}
@@ -721,11 +807,17 @@ export default function LeadCenterMock() {
       </div>
 
       <div className="lead-layout">
-        <div className="lead-panel lead-form-panel">
+        <div className="lead-panel lead-form-panel" ref={formPanelRef}>
           <div className="lead-panel-head">
-            <h2>新增案源</h2>
-            <p>可以貼上 LINE 詢價、朋友介紹、網站詢問或標案摘要。</p>
+            <h2>{editingId ? '編輯案源' : '新增案源'}</h2>
+            <p>{editingId ? `正在編輯：${editingLeadTitle || form.title || '未命名案源'}` : '可以貼上 LINE 詢價、朋友介紹、網站詢問或標案摘要。'}</p>
           </div>
+
+          {editingId && (
+            <div className="notice">
+              目前正在編輯既有案源。修改完成後請按「儲存案源」，或按「取消編輯」回到新增模式。
+            </div>
+          )}
 
           <div className="lead-form-grid">
             <label>
@@ -788,9 +880,15 @@ export default function LeadCenterMock() {
             />
           </label>
 
-          <button type="button" className="lead-primary-btn lead-sticky-cta" onClick={addLead}>
-            新增案源並 AI 評分
+          <button type="button" className="lead-primary-btn lead-sticky-cta" onClick={addLead} disabled={saving}>
+            {saving ? '儲存中...' : editingId ? '儲存案源' : '新增案源並系統評估'}
           </button>
+
+          {editingId && (
+            <button type="button" className="lead-soft-btn" onClick={cancelEdit}>
+              取消編輯
+            </button>
+          )}
         </div>
 
         <div className="lead-panel">
@@ -825,7 +923,7 @@ export default function LeadCenterMock() {
           <div className="lead-list">
             {filteredLeads.length === 0 && (
               <div className="lead-empty">
-                目前沒有符合條件的案源。可以清除搜尋或新增一筆案源。
+                目前沒有符合條件的案源。可以清除搜尋或新增一筆案源；正式資料會儲存在 SQLite。
               </div>
             )}
 
@@ -877,9 +975,9 @@ export default function LeadCenterMock() {
                   </div>
 
                   <div className="lead-ai-box">
-                    <strong>AI 摘要</strong>
-                    <p>{lead.aiSummary || '尚未產生 AI 摘要'}</p>
-                    <strong>AI 評分理由</strong>
+                    <strong>系統摘要</strong>
+                    <p>{lead.aiSummary || '尚未產生系統摘要'}</p>
+                    <strong>系統評分理由</strong>
                     <p>{lead.aiScoreReason || '尚未評分'}</p>
                   </div>
 
@@ -891,6 +989,7 @@ export default function LeadCenterMock() {
                     </select>
 
                     <button type="button" onClick={() => scoreLead(lead.id)}>重新評分</button>
+                    <button type="button" onClick={() => editLead(lead)}>編輯</button>
                     <button type="button" onClick={() => changeStatus(lead.id, 'contacted')}>已聯絡</button>
                     <button type="button" onClick={() => changeStatus(lead.id, 'quoted')}>已報價</button>
 

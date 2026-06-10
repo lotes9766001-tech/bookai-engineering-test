@@ -577,7 +577,7 @@ if (!me || !company) {
         />
 
         {page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
-        {page === 'leads' && <LeadCenterMock />}
+        {page === 'leads' && <LeadCenterMock companyId={companyId} />}
         {page === 'transactions' && <Transactions companyId={companyId} />}
         {page === 'integrations' && (
           <Integrations

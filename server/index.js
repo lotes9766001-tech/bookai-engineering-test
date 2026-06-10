@@ -389,6 +389,363 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
   });
 });
 
+const leadStatuses = new Set(['new', 'contacted', 'site_visit', 'quoted', 'won', 'lost', 'converted']);
+const leadRiskLevels = new Set(['low', 'medium', 'high']);
+
+function clampScore(value) {
+  const n = Number(value ?? 70);
+  if (!Number.isFinite(n)) return 70;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function leadValue(body, snake, camel, fallback = '') {
+  return body[snake] ?? body[camel] ?? fallback;
+}
+
+function normalizeLeadInput(body = {}, existing = {}) {
+  const title = leadValue(body, 'title', 'title', existing.title || '');
+  const riskLevel = leadValue(body, 'risk_level', 'riskLevel', existing.risk_level || 'medium');
+  const status = leadValue(body, 'status', 'status', existing.status || 'new');
+
+  return {
+    title: String(title || '').trim(),
+    clientName: leadValue(body, 'client_name', 'clientName', existing.client_name || ''),
+    clientPhone: leadValue(body, 'client_phone', 'phone', existing.client_phone || ''),
+    source: leadValue(body, 'source', 'sourceType', existing.source || '手動新增'),
+    region: leadValue(body, 'region', 'location', existing.region || ''),
+    agencyType: leadValue(body, 'agency_type', 'agencyType', existing.agency_type || '私人客戶'),
+    projectType: leadValue(body, 'project_type', 'projectType', existing.project_type || ''),
+    estimatedAmount: Number(leadValue(body, 'estimated_amount', 'estimatedAmount', existing.estimated_amount || 0) || 0),
+    estimatedCost: Number(leadValue(body, 'estimated_cost', 'estimatedCost', existing.estimated_cost || 0) || 0),
+    expectedMargin: Number(leadValue(body, 'expected_margin', 'expectedMargin', existing.expected_margin || 0) || 0),
+    riskLevel: leadRiskLevels.has(riskLevel) ? riskLevel : 'medium',
+    fitScore: clampScore(leadValue(body, 'fit_score', 'fitScore', existing.fit_score ?? 70)),
+    status: leadStatuses.has(status) ? status : 'new',
+    nextAction: leadValue(body, 'next_action', 'nextAction', existing.next_action || ''),
+    note: leadValue(body, 'note', 'rawContent', existing.note || ''),
+    tenderSource: leadValue(body, 'tender_source', 'tenderSource', existing.tender_source || ''),
+    tenderRef: leadValue(body, 'tender_ref', 'tenderRef', existing.tender_ref || '')
+  };
+}
+
+function leadRow(row) {
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    title: row.title,
+    clientName: row.client_name || '',
+    phone: row.client_phone || '',
+    sourceType: row.source || '',
+    location: row.region || '',
+    agencyType: row.agency_type || '',
+    projectType: row.project_type || '',
+    estimatedAmount: row.estimated_amount || 0,
+    estimatedCost: row.estimated_cost || 0,
+    expectedMargin: row.expected_margin || 0,
+    riskLevel: row.risk_level || 'medium',
+    fitScore: row.fit_score || 70,
+    aiScore: row.fit_score || 70,
+    status: row.status || 'new',
+    nextAction: row.next_action || '',
+    rawContent: row.note || '',
+    note: row.note || '',
+    tenderSource: row.tender_source || '',
+    tenderRef: row.tender_ref || '',
+    tenderId: row.tender_ref || '',
+    convertedJobSiteId: row.converted_job_site_id || null,
+    converted: row.status === 'converted' || Boolean(row.converted_job_site_id),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function getLead(companyId, leadId) {
+  return db.prepare(`
+    SELECT *
+    FROM leads
+    WHERE id = ?
+      AND company_id = ?
+  `).get(leadId, companyId);
+}
+
+app.get('/api/companies/:companyId/leads', auth, company, (req, res) => {
+  const where = ['company_id = ?'];
+  const params = [req.company.id];
+
+  if (req.query.status) {
+    where.push('status = ?');
+    params.push(req.query.status);
+  }
+
+  if (req.query.source) {
+    where.push('source = ?');
+    params.push(req.query.source);
+  }
+
+  if (req.query.project_type) {
+    where.push('project_type = ?');
+    params.push(req.query.project_type);
+  }
+
+  if (req.query.risk_level) {
+    where.push('risk_level = ?');
+    params.push(req.query.risk_level);
+  }
+
+  if (req.query.search) {
+    where.push(`(
+      title LIKE ?
+      OR client_name LIKE ?
+      OR client_phone LIKE ?
+      OR source LIKE ?
+      OR region LIKE ?
+      OR project_type LIKE ?
+      OR note LIKE ?
+    )`);
+    const q = `%${req.query.search}%`;
+    params.push(q, q, q, q, q, q, q);
+  }
+
+  const rows = db.prepare(`
+    SELECT *
+    FROM leads
+    WHERE ${where.join(' AND ')}
+    ORDER BY created_at DESC, id DESC
+  `).all(...params);
+
+  res.json(rows.map(leadRow));
+});
+
+app.post('/api/companies/:companyId/leads', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const input = normalizeLeadInput(req.body);
+
+  if (!input.title) {
+    return res.status(400).json({ error: '請輸入案源名稱' });
+  }
+
+  const row = db.prepare(`
+    INSERT INTO leads (
+      company_id,
+      title,
+      client_name,
+      client_phone,
+      source,
+      region,
+      agency_type,
+      project_type,
+      estimated_amount,
+      estimated_cost,
+      expected_margin,
+      risk_level,
+      fit_score,
+      status,
+      next_action,
+      note,
+      tender_source,
+      tender_ref,
+      created_at,
+      updated_at
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(
+    req.company.id,
+    input.title,
+    input.clientName,
+    input.clientPhone,
+    input.source,
+    input.region,
+    input.agencyType,
+    input.projectType,
+    input.estimatedAmount,
+    input.estimatedCost,
+    input.expectedMargin,
+    input.riskLevel,
+    input.fitScore,
+    input.status,
+    input.nextAction,
+    input.note,
+    input.tenderSource,
+    input.tenderRef
+  );
+
+  audit(req.company.id, req.user.id, 'lead_created', String(row.lastInsertRowid));
+
+  res.json(leadRow(getLead(req.company.id, row.lastInsertRowid)));
+});
+
+app.patch('/api/companies/:companyId/leads/:leadId', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const leadId = Number(req.params.leadId);
+  const existing = getLead(req.company.id, leadId);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此案源，或你沒有權限修改' });
+  }
+
+  const input = normalizeLeadInput(req.body, existing);
+
+  if (!input.title) {
+    return res.status(400).json({ error: '請輸入案源名稱' });
+  }
+
+  db.prepare(`
+    UPDATE leads
+    SET
+      title = ?,
+      client_name = ?,
+      client_phone = ?,
+      source = ?,
+      region = ?,
+      agency_type = ?,
+      project_type = ?,
+      estimated_amount = ?,
+      estimated_cost = ?,
+      expected_margin = ?,
+      risk_level = ?,
+      fit_score = ?,
+      status = ?,
+      next_action = ?,
+      note = ?,
+      tender_source = ?,
+      tender_ref = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(
+    input.title,
+    input.clientName,
+    input.clientPhone,
+    input.source,
+    input.region,
+    input.agencyType,
+    input.projectType,
+    input.estimatedAmount,
+    input.estimatedCost,
+    input.expectedMargin,
+    input.riskLevel,
+    input.fitScore,
+    input.status,
+    input.nextAction,
+    input.note,
+    input.tenderSource,
+    input.tenderRef,
+    leadId,
+    req.company.id
+  );
+
+  audit(req.company.id, req.user.id, 'lead_updated', String(leadId));
+
+  res.json(leadRow(getLead(req.company.id, leadId)));
+});
+
+app.delete('/api/companies/:companyId/leads/:leadId', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const leadId = Number(req.params.leadId);
+  const existing = getLead(req.company.id, leadId);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此案源，或你沒有權限刪除' });
+  }
+
+  db.prepare(`
+    DELETE FROM leads
+    WHERE id = ?
+      AND company_id = ?
+  `).run(leadId, req.company.id);
+
+  audit(req.company.id, req.user.id, 'lead_deleted', String(leadId));
+
+  res.json({ ok: true });
+});
+
+app.post('/api/companies/:companyId/leads/:leadId/convert-to-jobsite', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const leadId = Number(req.params.leadId);
+  const lead = getLead(req.company.id, leadId);
+
+  if (!lead) {
+    return res.status(404).json({ error: '找不到此案源，或你沒有權限轉成案場' });
+  }
+
+  if (lead.converted_job_site_id) {
+    return res.status(400).json({ error: '此案源已轉成案場' });
+  }
+
+  const tx = db.transaction(() => {
+    const row = db.prepare(`
+      INSERT INTO job_sites (
+        company_id,
+        name,
+        site_name,
+        client_name,
+        client_phone,
+        address,
+        project_type,
+        quote_amount,
+        subtotal_amount,
+        total_amount,
+        status,
+        note,
+        created_at,
+        updated_at
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?, ?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    `).run(
+      req.company.id,
+      lead.title,
+      lead.title,
+      lead.client_name || '',
+      lead.client_phone || '',
+      lead.region || '',
+      lead.project_type || '',
+      Number(lead.estimated_amount || 0),
+      Number(lead.estimated_amount || 0),
+      Number(lead.estimated_amount || 0),
+      '已簽約',
+      lead.note || '由接案中心轉成案場'
+    );
+
+    db.prepare(`
+      UPDATE leads
+      SET
+        status = 'converted',
+        converted_job_site_id = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+        AND company_id = ?
+    `).run(row.lastInsertRowid, leadId, req.company.id);
+
+    return row.lastInsertRowid;
+  });
+
+  const jobSiteId = tx();
+
+  audit(req.company.id, req.user.id, 'lead_converted_to_jobsite', `${leadId} -> ${jobSiteId}`);
+
+  const jobSite = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      COALESCE(site_name, name) AS siteName,
+      COALESCE(client_name, '') AS clientName,
+      COALESCE(client_phone, '') AS clientPhone,
+      COALESCE(address, '') AS address,
+      COALESCE(project_type, '') AS projectType,
+      COALESCE(quote_amount, 0) AS quoteAmount,
+      COALESCE(status, '已簽約') AS status,
+      COALESCE(note, '') AS note,
+      created_at AS createdAt,
+      updated_at AS updatedAt
+    FROM job_sites
+    WHERE id = ?
+      AND company_id = ?
+  `).get(jobSiteId, req.company.id);
+
+  res.json({
+    lead: leadRow(getLead(req.company.id, leadId)),
+    jobSite
+  });
+});
+
 // ===============================
 // 工程業案場中心 API
 // ===============================
