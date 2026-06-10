@@ -53,6 +53,18 @@ function auth(req, res, next) {
   }
 }
 
+const ADMIN_EMAILS = new Set(['lotes.9766001@gmail.com']);
+
+function requireAdmin(req, res, next) {
+  const email = String(req.user?.email || '').toLowerCase();
+
+  if (ADMIN_EMAILS.has(email)) {
+    return next();
+  }
+
+  return res.status(403).json({ error: '沒有 BookAI 後台權限' });
+}
+
 function company(req, res, next) {
   const companyId = Number(req.params.companyId || req.query.companyId || req.body.companyId);
 
@@ -299,6 +311,196 @@ app.get('/api/me', auth, (req, res) => {
 
 app.get('/api/plans', (_, res) => {
   res.json(plans);
+});
+
+const adminBillingStatuses = new Set(['trial', 'active', 'expired', 'paused']);
+const adminWebsiteStatuses = new Set(['none', 'planning', 'building', 'live', 'paused']);
+const adminSettingKeys = new Set([
+  'official_site_url',
+  'official_line_url',
+  'default_trial_days',
+  'renewal_reminder_days',
+  'enable_website_backend',
+  'system_announcement'
+]);
+
+function toAdminBoolean(value) {
+  if (value === true || value === 1) return 1;
+  const text = String(value ?? '').trim().toLowerCase();
+  return ['1', 'true', 'yes', '是', 'on'].includes(text) ? 1 : 0;
+}
+
+app.get('/api/admin/companies', auth, requireAdmin, (req, res) => {
+  const companies = db.prepare(`
+    SELECT
+      c.id,
+      c.name,
+      c.tax_id,
+      c.industry,
+      c.plan,
+      c.billing_status,
+      c.subscription_plan,
+      c.subscription_started_at,
+      c.subscription_expires_at,
+      c.is_paid_customer,
+      c.billing_note,
+      c.has_official_site,
+      c.official_site_url,
+      c.official_site_status,
+      c.official_site_note,
+      c.created_at,
+      u.name AS owner_name,
+      u.email AS owner_email
+    FROM companies c
+    LEFT JOIN users u ON u.id = c.owner_id
+    ORDER BY c.created_at DESC, c.id DESC
+  `).all();
+
+  res.json(companies);
+});
+
+app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, res) => {
+  const companyId = Number(req.params.companyId);
+  const {
+    billing_status,
+    subscription_plan,
+    subscription_expires_at,
+    is_paid_customer,
+    billing_note
+  } = req.body || {};
+
+  if (!companyId) {
+    return res.status(400).json({ error: '缺少 companyId' });
+  }
+
+  if (billing_status && !adminBillingStatuses.has(billing_status)) {
+    return res.status(400).json({ error: '不支援的使用狀態' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id
+    FROM companies
+    WHERE id = ?
+  `).get(companyId);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到公司' });
+  }
+
+  db.prepare(`
+    UPDATE companies
+    SET
+      billing_status = ?,
+      subscription_plan = ?,
+      subscription_expires_at = ?,
+      is_paid_customer = ?,
+      billing_note = ?
+    WHERE id = ?
+  `).run(
+    billing_status || 'trial',
+    subscription_plan || 'engineering_trial',
+    subscription_expires_at || '',
+    toAdminBoolean(is_paid_customer),
+    billing_note || '',
+    companyId
+  );
+
+  audit(companyId, req.user.id, 'admin_billing_updated', JSON.stringify({
+    billing_status,
+    subscription_plan,
+    subscription_expires_at
+  }));
+
+  res.json({ ok: true });
+});
+
+app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, (req, res) => {
+  const companyId = Number(req.params.companyId);
+  const {
+    has_official_site,
+    official_site_url,
+    official_site_status,
+    official_site_note
+  } = req.body || {};
+
+  if (!companyId) {
+    return res.status(400).json({ error: '缺少 companyId' });
+  }
+
+  if (official_site_status && !adminWebsiteStatuses.has(official_site_status)) {
+    return res.status(400).json({ error: '不支援的網站狀態' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id
+    FROM companies
+    WHERE id = ?
+  `).get(companyId);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到公司' });
+  }
+
+  db.prepare(`
+    UPDATE companies
+    SET
+      has_official_site = ?,
+      official_site_url = ?,
+      official_site_status = ?,
+      official_site_note = ?
+    WHERE id = ?
+  `).run(
+    toAdminBoolean(has_official_site),
+    official_site_url || '',
+    official_site_status || 'none',
+    official_site_note || '',
+    companyId
+  );
+
+  audit(companyId, req.user.id, 'admin_website_updated', official_site_status || 'none');
+
+  res.json({ ok: true });
+});
+
+app.get('/api/admin/settings', auth, requireAdmin, (req, res) => {
+  const rows = db.prepare(`
+    SELECT key, value
+    FROM platform_settings
+    ORDER BY key
+  `).all();
+
+  res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
+});
+
+app.patch('/api/admin/settings', auth, requireAdmin, (req, res) => {
+  const body = req.body || {};
+  const stmt = db.prepare(`
+    INSERT INTO platform_settings (
+      key,
+      value,
+      updated_at
+    )
+    VALUES (?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET
+      value = excluded.value,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+
+  Object.entries(body).forEach(([key, value]) => {
+    if (adminSettingKeys.has(key)) {
+      stmt.run(key, String(value ?? ''));
+    }
+  });
+
+  audit(null, req.user.id, 'admin_settings_updated', Object.keys(body).join(','));
+
+  const rows = db.prepare(`
+    SELECT key, value
+    FROM platform_settings
+    ORDER BY key
+  `).all();
+
+  res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
 });
 
 app.patch('/api/companies/:companyId/plan', auth, company, (req, res) => {

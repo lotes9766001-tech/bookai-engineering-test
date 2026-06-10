@@ -275,7 +275,11 @@ function getSubscriptionPlanLabel(plan) {
     engineering_trial: '工程業試用版',
     engineering_starter: '工程業入門版',
     engineering_pro: '工程業專業版',
-    engineering_premium: '工程業進階版'
+    engineering_premium: '工程業進階版',
+    commerce_starter: '電商入門版',
+    commerce_pro: '電商專業版',
+    accountant_starter: '事務所入門版',
+    accountant_pro: '事務所專業版'
   };
 
   return map[plan] || plan || '未設定';
@@ -283,6 +287,22 @@ function getSubscriptionPlanLabel(plan) {
 
 function yesNoPaid(value) {
   return value === 1 || value === true ? '是' : '否';
+}
+
+function getOfficialSiteStatusLabel(status) {
+  const map = {
+    none: '未建立',
+    planning: '規劃中',
+    building: '製作中',
+    live: '已上線',
+    paused: '暫停'
+  };
+
+  return map[status] || '未設定';
+}
+
+function isAdminUser(user) {
+  return String(user?.email || '').toLowerCase() === 'lotes.9766001@gmail.com';
 }
 
 function fieldLabel(industry, type) {
@@ -512,6 +532,9 @@ function Shell({ onLogout }) {
   const planNav = isConstructionIndustry(company?.industry)
     ? constructionNav
     : baseNav;
+  const visibleNav = isAdminUser(me?.user)
+    ? [...planNav, ['admin', 'BookAI 後台', ShieldCheck]]
+    : planNav;
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -547,7 +570,7 @@ if (!me || !company) {
         </select>
 
         <nav>
-          {planNav.map(([id, label, Icon]) => (
+          {visibleNav.map(([id, label, Icon]) => (
             <button
               key={id}
               className={page === id ? 'active' : ''}
@@ -566,15 +589,17 @@ if (!me || !company) {
       </aside>
 
       <main>
-        <Header
-          company={company}
-          onPlanChange={(p) => {
-            api(`/companies/${companyId}/plan`, {
-              method: 'PATCH',
-              body: JSON.stringify({ plan: p })
-            }).then(() => location.reload());
-          }}
-        />
+        {page !== 'admin' && (
+          <Header
+            company={company}
+            onPlanChange={(p) => {
+              api(`/companies/${companyId}/plan`, {
+                method: 'PATCH',
+                body: JSON.stringify({ plan: p })
+              }).then(() => location.reload());
+            }}
+          />
+        )}
 
         {page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
         {page === 'leads' && <LeadCenterMock companyId={companyId} />}
@@ -595,6 +620,7 @@ if (!me || !company) {
         {page === 'accountant' && <Accountant companyId={companyId} />}
         {page === 'reports' && <Reports companyId={companyId} company={company} />}
         {page === 'settings' && <Settings company={company} />}
+        {page === 'admin' && <AdminConsole />}
       </main>
     </div>
   );
@@ -4693,6 +4719,375 @@ function Reports({ companyId, company }) {
             platformAdvice(p)
           ])}
         />
+      </div>
+    </section>
+  );
+}
+
+function AdminConsole() {
+  const [companies, setCompanies] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [settings, setSettings] = useState({});
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [keyword, setKeyword] = useState('');
+  const [billingForm, setBillingForm] = useState({});
+  const [websiteForm, setWebsiteForm] = useState({});
+  const [settingsForm, setSettingsForm] = useState({});
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function loadAdmin() {
+    try {
+      setError('');
+      const [companyRows, settingRows] = await Promise.all([
+        api('/admin/companies'),
+        api('/admin/settings')
+      ]);
+      setCompanies(companyRows || []);
+      setSettings(settingRows || {});
+      setSettingsForm(settingRows || {});
+      setSelectedId((old) => old || companyRows?.[0]?.id || null);
+    } catch (err) {
+      setError(err.message || '讀取 BookAI 後台失敗');
+    }
+  }
+
+  useEffect(() => {
+    loadAdmin();
+  }, []);
+
+  const selected = companies.find((c) => c.id === selectedId) || null;
+
+  useEffect(() => {
+    if (!selected) return;
+
+    setBillingForm({
+      billing_status: selected.billing_status || 'trial',
+      subscription_plan: selected.subscription_plan || 'engineering_trial',
+      subscription_expires_at: selected.subscription_expires_at || '',
+      is_paid_customer: selected.is_paid_customer ? '1' : '0',
+      billing_note: selected.billing_note || ''
+    });
+
+    setWebsiteForm({
+      has_official_site: selected.has_official_site ? '1' : '0',
+      official_site_url: selected.official_site_url || '',
+      official_site_status: selected.official_site_status || 'none',
+      official_site_note: selected.official_site_note || ''
+    });
+  }, [selectedId, companies]);
+
+  const filteredCompanies = companies.filter((company) => {
+    const statusMatched = statusFilter === 'all' || company.billing_status === statusFilter;
+    const keywordMatched = !keyword.trim() || String(company.name || '').includes(keyword.trim());
+    return statusMatched && keywordMatched;
+  });
+
+  const renewalDays = Number(settings.renewal_reminder_days || 7);
+  const now = new Date();
+  const soonLimit = new Date();
+  soonLimit.setDate(soonLimit.getDate() + renewalDays);
+
+  const metrics = {
+    total: companies.length,
+    trial: companies.filter((c) => c.billing_status === 'trial').length,
+    active: companies.filter((c) => c.billing_status === 'active').length,
+    expired: companies.filter((c) => c.billing_status === 'expired').length,
+    paused: companies.filter((c) => c.billing_status === 'paused').length,
+    website: companies.filter((c) => Number(c.has_official_site || 0) === 1).length,
+    expiring: companies.filter((c) => {
+      if (!c.subscription_expires_at) return false;
+      const expires = new Date(c.subscription_expires_at);
+      return expires >= now && expires <= soonLimit;
+    }).length,
+    mrr: companies.reduce((sum, c) => {
+      if (!c.is_paid_customer || c.billing_status !== 'active') return sum;
+      const map = {
+        engineering_starter: 799,
+        engineering_pro: 1999,
+        engineering_premium: 3999
+      };
+      return sum + Number(map[c.subscription_plan] || 0);
+    }, 0)
+  };
+
+  async function saveBilling(e) {
+    e.preventDefault();
+    if (!selected) return;
+
+    try {
+      setMessage('');
+      setError('');
+      await api(`/admin/companies/${selected.id}/billing`, {
+        method: 'PATCH',
+        body: JSON.stringify(billingForm)
+      });
+      await loadAdmin();
+      setMessage('收費狀態已更新');
+    } catch (err) {
+      setError(err.message || '更新收費狀態失敗');
+    }
+  }
+
+  async function saveWebsite(e) {
+    e.preventDefault();
+    if (!selected) return;
+
+    try {
+      setMessage('');
+      setError('');
+      await api(`/admin/companies/${selected.id}/website`, {
+        method: 'PATCH',
+        body: JSON.stringify(websiteForm)
+      });
+      await loadAdmin();
+      setMessage('網站狀態已更新');
+    } catch (err) {
+      setError(err.message || '更新網站狀態失敗');
+    }
+  }
+
+  async function saveSettings(e) {
+    e.preventDefault();
+
+    try {
+      setMessage('');
+      setError('');
+      const updated = await api('/admin/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(settingsForm)
+      });
+      setSettings(updated || {});
+      setSettingsForm(updated || {});
+      setMessage('平台設定已更新');
+    } catch (err) {
+      setError(err.message || '更新平台設定失敗');
+    }
+  }
+
+  return (
+    <section className="admin-console">
+      <div className="admin-space-bg" />
+
+      <div className="admin-cockpit">
+        <div className="admin-hero">
+          <div>
+            <div className="admin-pill">BookAI Admin Console</div>
+            <h1>BookAI 控制塔</h1>
+            <p>管理客戶、方案、網站與平台設定的營運駕駛艙。</p>
+          </div>
+          <div className="admin-orbit">
+            <span className="admin-status-light active" />
+            <strong>CONTROL TOWER ONLINE</strong>
+          </div>
+        </div>
+
+        {message && <div className="admin-message">{message}</div>}
+        {error && <div className="admin-error">{error}</div>}
+
+        <div className="admin-command-grid">
+          <div className="admin-metric-card"><span>總客戶數</span><strong>{metrics.total}</strong></div>
+          <div className="admin-metric-card"><span>試用中</span><strong>{metrics.trial}</strong></div>
+          <div className="admin-metric-card"><span>正式使用中</span><strong>{metrics.active}</strong></div>
+          <div className="admin-metric-card"><span>已到期</span><strong>{metrics.expired}</strong></div>
+          <div className="admin-metric-card"><span>暫停使用</span><strong>{metrics.paused}</strong></div>
+          <div className="admin-metric-card"><span>有官方網站客戶</span><strong>{metrics.website}</strong></div>
+          <div className="admin-metric-card"><span>即將到期客戶</span><strong>{metrics.expiring}</strong></div>
+          <div className="admin-metric-card gold"><span>本月預估月收</span><strong>{money(metrics.mrr)}</strong></div>
+        </div>
+
+        <div className="admin-grid">
+          <div className="admin-control-panel">
+            <div className="admin-panel-head">
+              <div>
+                <h2>客戶管理</h2>
+                <p>依公司、收費狀態與網站狀態追蹤客戶。</p>
+              </div>
+              <button type="button" onClick={loadAdmin}>重新同步</button>
+            </div>
+
+            <div className="admin-toolbar">
+              <input
+                value={keyword}
+                onChange={(e) => setKeyword(e.target.value)}
+                placeholder="搜尋公司名稱"
+              />
+              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option value="all">全部狀態</option>
+                <option value="trial">試用中</option>
+                <option value="active">正式使用中</option>
+                <option value="expired">已到期</option>
+                <option value="paused">暫停使用</option>
+              </select>
+            </div>
+
+            <div className="admin-customer-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>公司</th>
+                    <th>方案</th>
+                    <th>狀態</th>
+                    <th>到期日</th>
+                    <th>網站</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredCompanies.map((company) => (
+                    <tr
+                      key={company.id}
+                      className={selectedId === company.id ? 'selected' : ''}
+                      onClick={() => setSelectedId(company.id)}
+                    >
+                      <td>#{company.id}</td>
+                      <td>
+                        <strong>{company.name}</strong>
+                        <small>{company.owner_email || '未設定 owner email'}</small>
+                      </td>
+                      <td>{getSubscriptionPlanLabel(company.subscription_plan)}</td>
+                      <td>
+                        <span className={`admin-status-dot ${company.billing_status || 'trial'}`} />
+                        {getBillingStatusLabel(company.billing_status)}
+                      </td>
+                      <td>{company.subscription_expires_at || '未設定'}</td>
+                      <td>{getOfficialSiteStatusLabel(company.official_site_status)}</td>
+                    </tr>
+                  ))}
+                  {!filteredCompanies.length && (
+                    <tr>
+                      <td colSpan="6">目前沒有符合條件的公司。</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="admin-drawer">
+            <div className="admin-glow-card">
+              <h2>客戶詳細資料</h2>
+              {selected ? (
+                <>
+                  <div className="admin-detail-list">
+                    <p><span>公司 ID</span><strong>#{selected.id}</strong></p>
+                    <p><span>公司名稱</span><strong>{selected.name}</strong></p>
+                    <p><span>行業別</span><strong>{getIndustryName(selected.industry)}</strong></p>
+                    <p><span>是否正式客戶</span><strong>{yesNoPaid(selected.is_paid_customer)}</strong></p>
+                    <p><span>官方網站網址</span><strong>{selected.official_site_url || '未設定'}</strong></p>
+                    <p><span>管理備註</span><strong>{selected.billing_note || '無'}</strong></p>
+                  </div>
+
+                  <form className="admin-settings-panel" onSubmit={saveBilling}>
+                    <h3>方案 / 收費管理</h3>
+                    <label>
+                      <span>使用狀態</span>
+                      <select value={billingForm.billing_status || 'trial'} onChange={(e) => setBillingForm({ ...billingForm, billing_status: e.target.value })}>
+                        <option value="trial">試用中</option>
+                        <option value="active">正式使用中</option>
+                        <option value="expired">已到期</option>
+                        <option value="paused">暫停使用</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>方案</span>
+                      <input value={billingForm.subscription_plan || ''} onChange={(e) => setBillingForm({ ...billingForm, subscription_plan: e.target.value })} />
+                    </label>
+                    <label>
+                      <span>到期日</span>
+                      <input value={billingForm.subscription_expires_at || ''} onChange={(e) => setBillingForm({ ...billingForm, subscription_expires_at: e.target.value })} placeholder="YYYY-MM-DD" />
+                    </label>
+                    <label>
+                      <span>正式客戶</span>
+                      <select value={billingForm.is_paid_customer || '0'} onChange={(e) => setBillingForm({ ...billingForm, is_paid_customer: e.target.value })}>
+                        <option value="0">否</option>
+                        <option value="1">是</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>管理備註</span>
+                      <input value={billingForm.billing_note || ''} onChange={(e) => setBillingForm({ ...billingForm, billing_note: e.target.value })} />
+                    </label>
+                    <button>儲存收費狀態</button>
+                  </form>
+
+                  <form className="admin-settings-panel" onSubmit={saveWebsite}>
+                    <h3>客戶網站狀態</h3>
+                    <label>
+                      <span>是否有官方網站</span>
+                      <select value={websiteForm.has_official_site || '0'} onChange={(e) => setWebsiteForm({ ...websiteForm, has_official_site: e.target.value })}>
+                        <option value="0">否</option>
+                        <option value="1">是</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>網站網址</span>
+                      <input value={websiteForm.official_site_url || ''} onChange={(e) => setWebsiteForm({ ...websiteForm, official_site_url: e.target.value })} />
+                    </label>
+                    <label>
+                      <span>網站狀態</span>
+                      <select value={websiteForm.official_site_status || 'none'} onChange={(e) => setWebsiteForm({ ...websiteForm, official_site_status: e.target.value })}>
+                        <option value="none">未建立</option>
+                        <option value="planning">規劃中</option>
+                        <option value="building">製作中</option>
+                        <option value="live">已上線</option>
+                        <option value="paused">暫停</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>網站備註</span>
+                      <input value={websiteForm.official_site_note || ''} onChange={(e) => setWebsiteForm({ ...websiteForm, official_site_note: e.target.value })} />
+                    </label>
+                    <button>儲存網站狀態</button>
+                  </form>
+                </>
+              ) : (
+                <p>請先選擇一家公司。</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <form className="admin-control-panel admin-platform-settings" onSubmit={saveSettings}>
+          <div className="admin-panel-head">
+            <div>
+              <h2>平台設定</h2>
+              <p>這裡先保存控制塔設定，後續可串到官網與營運流程。</p>
+            </div>
+          </div>
+
+          <div className="admin-settings-grid">
+            <label>
+              <span>官方網站網址</span>
+              <input value={settingsForm.official_site_url || ''} onChange={(e) => setSettingsForm({ ...settingsForm, official_site_url: e.target.value })} />
+            </label>
+            <label>
+              <span>官方 LINE 連結</span>
+              <input value={settingsForm.official_line_url || ''} onChange={(e) => setSettingsForm({ ...settingsForm, official_line_url: e.target.value })} />
+            </label>
+            <label>
+              <span>預設試用天數</span>
+              <input value={settingsForm.default_trial_days || ''} onChange={(e) => setSettingsForm({ ...settingsForm, default_trial_days: e.target.value })} />
+            </label>
+            <label>
+              <span>到期提醒天數</span>
+              <input value={settingsForm.renewal_reminder_days || ''} onChange={(e) => setSettingsForm({ ...settingsForm, renewal_reminder_days: e.target.value })} />
+            </label>
+            <label>
+              <span>啟用官網後台功能</span>
+              <select value={settingsForm.enable_website_backend || 'true'} onChange={(e) => setSettingsForm({ ...settingsForm, enable_website_backend: e.target.value })}>
+                <option value="true">啟用</option>
+                <option value="false">停用</option>
+              </select>
+            </label>
+            <label>
+              <span>系統公告</span>
+              <input value={settingsForm.system_announcement || ''} onChange={(e) => setSettingsForm({ ...settingsForm, system_announcement: e.target.value })} />
+            </label>
+          </div>
+
+          <button>儲存平台設定</button>
+        </form>
       </div>
     </section>
   );

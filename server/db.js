@@ -283,6 +283,12 @@ export function initDb() {
   CREATE INDEX IF NOT EXISTS leads_company_created_idx
   ON leads(company_id, created_at);
 
+  CREATE TABLE IF NOT EXISTS platform_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER,
@@ -330,6 +336,31 @@ export function initDb() {
   safeAddColumn('companies', 'subscription_expires_at', 'TEXT');
   safeAddColumn('companies', 'is_paid_customer', 'INTEGER DEFAULT 0');
   safeAddColumn('companies', 'billing_note', 'TEXT');
+  safeAddColumn('companies', 'has_official_site', 'INTEGER DEFAULT 0');
+  safeAddColumn('companies', 'official_site_url', 'TEXT');
+  safeAddColumn('companies', 'official_site_status', "TEXT DEFAULT 'none'");
+  safeAddColumn('companies', 'official_site_note', 'TEXT');
+
+  const defaultSettings = {
+    official_site_url: 'https://bookai-engineering-official.onrender.com',
+    official_line_url: 'https://lin.ee/pU6X4oP',
+    default_trial_days: '30',
+    renewal_reminder_days: '7',
+    enable_website_backend: 'true',
+    system_announcement: 'BookAI 控制塔已啟用。'
+  };
+
+  const settingStmt = db.prepare(`
+    INSERT OR IGNORE INTO platform_settings (
+      key,
+      value
+    )
+    VALUES (?,?)
+  `);
+
+  Object.entries(defaultSettings).forEach(([key, value]) => {
+    settingStmt.run(key, value);
+  });
 
   safeAddColumn('products', 'category', 'TEXT');
   safeAddColumn('products', 'unit', 'TEXT');
