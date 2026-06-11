@@ -30,7 +30,7 @@ function section(title) {
 
 let hasError = false;
 
-section('BookAI v5.4 Production Deployment 健康檢查');
+section('BookAI v5.5 External Tester 健康檢查');
 
 if (!fs.existsSync(dbPath)) {
   fail(`找不到 SQLite 資料庫：${dbPath}`);
@@ -79,6 +79,7 @@ const requiredTables = [
   'job_sites',
   'job_site_payments',
   'inventory_movements',
+  'feedbacks',
   'audit_logs'
 ];
 
@@ -108,6 +109,10 @@ const requiredColumns = {
     'industry',
     'plan',
     'owner_id',
+    'is_tester',
+    'tester_started_at',
+    'tester_note',
+    'tester_feedback_status',
     'created_at'
   ],
   company_users: [
@@ -216,6 +221,19 @@ const requiredColumns = {
     'note',
     'created_at'
   ],
+  feedbacks: [
+    'id',
+    'company_id',
+    'user_id',
+    'category',
+    'rating',
+    'message',
+    'page',
+    'status',
+    'admin_note',
+    'created_at',
+    'updated_at'
+  ],
   job_sites: [
     'id',
     'company_id',
@@ -299,6 +317,7 @@ const counts = {
   job_sites: countRows('job_sites'),
   job_site_payments: countRows('job_site_payments'),
   inventory_movements: countRows('inventory_movements'),
+  feedbacks: countRows('feedbacks'),
   audit_logs: countRows('audit_logs')
 };
 

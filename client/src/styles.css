@@ -2689,6 +2689,76 @@ button.lead-danger-btn {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.tester-guide-card {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr auto;
+  gap: 18px;
+  align-items: center;
+  margin: 18px 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
+  box-shadow: 0 18px 45px rgba(15, 23, 42, 0.06);
+}
+
+.tester-guide-card.tester {
+  border-color: rgba(37, 99, 235, 0.22);
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+}
+
+.tester-guide-kicker {
+  margin: 0 0 6px;
+  color: var(--brand-blue);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.tester-guide-card h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+}
+
+.tester-guide-card p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.tester-guide-card ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text);
+}
+
+.tester-guide-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.tester-guide-actions button {
+  white-space: nowrap;
+}
+
+.feedback-form {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.feedback-message-field {
+  grid-column: 1 / -1;
+}
+
+.feedback-message-field textarea {
+  min-height: 130px;
+  resize: vertical;
+}
+
+.admin-feedback-message {
+  min-width: 260px;
+  max-width: 460px;
+  white-space: normal;
+}
+
 .erp-contact-form {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -2735,8 +2805,14 @@ button.lead-danger-btn {
   .command-quick-actions,
   .commerce-cms-status,
   .commerce-cms-form,
+  .tester-guide-card,
+  .feedback-form,
   .erp-form {
     grid-template-columns: 1fr;
+  }
+
+  .tester-guide-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .command-hero {

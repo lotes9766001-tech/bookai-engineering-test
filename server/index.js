@@ -562,6 +562,9 @@ app.get('/api/plans', (_, res) => {
 
 const adminBillingStatuses = new Set(['trial', 'active', 'expired', 'paused']);
 const adminWebsiteStatuses = new Set(['none', 'planning', 'building', 'live', 'paused']);
+const testerFeedbackStatuses = new Set(['尚未回饋', '已回饋', '需追蹤', '已完成測試']);
+const feedbackCategories = new Set(['操作問題', '介面建議', '功能需求', '錯誤回報', '其他']);
+const feedbackStatuses = new Set(['new', 'reviewing', 'resolved', 'ignored']);
 const adminSettingKeys = new Set([
   'official_site_url',
   'official_line_url',
@@ -575,6 +578,31 @@ function toAdminBoolean(value) {
   if (value === true || value === 1) return 1;
   const text = String(value ?? '').trim().toLowerCase();
   return ['1', 'true', 'yes', '是', 'on'].includes(text) ? 1 : 0;
+}
+
+function normalizeRating(value) {
+  const rating = Number(value);
+  if (!Number.isFinite(rating)) return 3;
+  return Math.max(1, Math.min(5, Math.round(rating)));
+}
+
+function feedbackRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    companyName: row.company_name || '',
+    userId: row.user_id,
+    userName: row.user_name || '',
+    userEmail: row.user_email || '',
+    category: row.category || '其他',
+    rating: row.rating || 3,
+    message: row.message || '',
+    page: row.page || '',
+    status: row.status || 'new',
+    adminNote: row.admin_note || '',
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || ''
+  };
 }
 
 app.get('/api/admin/companies', auth, requireAdmin, (req, res) => {
@@ -595,6 +623,10 @@ app.get('/api/admin/companies', auth, requireAdmin, (req, res) => {
       c.official_site_url,
       c.official_site_status,
       c.official_site_note,
+      c.is_tester,
+      c.tester_started_at,
+      c.tester_note,
+      c.tester_feedback_status,
       c.created_at,
       u.name AS owner_name,
       u.email AS owner_email
@@ -709,6 +741,58 @@ app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, (req, r
   res.json({ ok: true });
 });
 
+app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res) => {
+  const companyId = Number(req.params.companyId);
+  const {
+    is_tester,
+    tester_started_at,
+    tester_note,
+    tester_feedback_status
+  } = req.body || {};
+
+  if (!companyId) {
+    return res.status(400).json({ error: '缺少 companyId' });
+  }
+
+  if (tester_feedback_status && !testerFeedbackStatuses.has(tester_feedback_status)) {
+    return res.status(400).json({ error: '不支援的測試回饋狀態' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id
+    FROM companies
+    WHERE id = ?
+  `).get(companyId);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到公司' });
+  }
+
+  const isTester = toAdminBoolean(is_tester);
+  db.prepare(`
+    UPDATE companies
+    SET
+      is_tester = ?,
+      tester_started_at = ?,
+      tester_note = ?,
+      tester_feedback_status = ?
+    WHERE id = ?
+  `).run(
+    isTester,
+    tester_started_at || (isTester ? new Date().toISOString().slice(0, 10) : ''),
+    tester_note || '',
+    tester_feedback_status || '尚未回饋',
+    companyId
+  );
+
+  audit(companyId, req.user.id, 'admin_tester_status_updated', JSON.stringify({
+    is_tester: isTester,
+    tester_feedback_status: tester_feedback_status || '尚未回饋'
+  }));
+
+  res.json({ ok: true });
+});
+
 app.get('/api/admin/settings', auth, requireAdmin, (req, res) => {
   const rows = db.prepare(`
     SELECT key, value
@@ -766,6 +850,135 @@ app.post('/api/admin/demo/engineering', auth, requireAdmin, (req, res) => {
       detail: err.message
     });
   }
+});
+
+app.get('/api/feedbacks/my', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      f.*,
+      c.name AS company_name,
+      u.name AS user_name,
+      u.email AS user_email
+    FROM feedbacks f
+    LEFT JOIN companies c ON c.id = f.company_id
+    LEFT JOIN users u ON u.id = f.user_id
+    WHERE f.company_id = ?
+    ORDER BY f.created_at DESC, f.id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(feedbackRow));
+});
+
+app.post('/api/feedbacks/create', auth, company, (req, res) => {
+  const body = req.body || {};
+  const message = String(body.message || '').trim();
+  if (!message) return res.status(400).json({ error: '請填寫回饋內容' });
+
+  const category = feedbackCategories.has(body.category) ? body.category : '其他';
+  const rating = normalizeRating(body.rating);
+  const page = String(body.page || '').trim();
+
+  const row = db.prepare(`
+    INSERT INTO feedbacks (
+      company_id,
+      user_id,
+      category,
+      rating,
+      message,
+      page,
+      status
+    )
+    VALUES (?,?,?,?,?,?,?)
+  `).run(req.company.id, req.user.id, category, rating, message, page, 'new');
+
+  audit(req.company.id, req.user.id, 'feedback_created', String(row.lastInsertRowid));
+
+  const created = db.prepare(`
+    SELECT
+      f.*,
+      c.name AS company_name,
+      u.name AS user_name,
+      u.email AS user_email
+    FROM feedbacks f
+    LEFT JOIN companies c ON c.id = f.company_id
+    LEFT JOIN users u ON u.id = f.user_id
+    WHERE f.id = ?
+      AND f.company_id = ?
+  `).get(row.lastInsertRowid, req.company.id);
+
+  res.json(feedbackRow(created));
+});
+
+app.get('/api/admin/feedbacks', auth, requireAdmin, (req, res) => {
+  const status = String(req.query.status || '').trim();
+  const category = String(req.query.category || '').trim();
+  const where = [];
+  const params = [];
+
+  if (status && feedbackStatuses.has(status)) {
+    where.push('f.status = ?');
+    params.push(status);
+  }
+
+  if (category && feedbackCategories.has(category)) {
+    where.push('f.category = ?');
+    params.push(category);
+  }
+
+  const rows = db.prepare(`
+    SELECT
+      f.*,
+      c.name AS company_name,
+      u.name AS user_name,
+      u.email AS user_email
+    FROM feedbacks f
+    LEFT JOIN companies c ON c.id = f.company_id
+    LEFT JOIN users u ON u.id = f.user_id
+    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+    ORDER BY f.created_at DESC, f.id DESC
+  `).all(...params);
+
+  res.json(rows.map(feedbackRow));
+});
+
+app.put('/api/admin/feedbacks/:id', auth, requireAdmin, (req, res) => {
+  const feedbackId = Number(req.params.id);
+  const body = req.body || {};
+  const status = feedbackStatuses.has(body.status) ? body.status : null;
+
+  if (!feedbackId) return res.status(400).json({ error: '缺少 feedback id' });
+  if (!status) return res.status(400).json({ error: '不支援的回饋狀態' });
+
+  const existing = db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(feedbackId);
+  if (!existing) return res.status(404).json({ error: '找不到回饋' });
+
+  db.prepare(`
+    UPDATE feedbacks
+    SET
+      status = ?,
+      admin_note = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(status, body.admin_note || body.adminNote || '', feedbackId);
+
+  audit(existing.company_id, req.user.id, 'admin_feedback_updated', JSON.stringify({
+    feedbackId,
+    status
+  }));
+
+  const updated = db.prepare(`
+    SELECT
+      f.*,
+      c.name AS company_name,
+      u.name AS user_name,
+      u.email AS user_email
+    FROM feedbacks f
+    LEFT JOIN companies c ON c.id = f.company_id
+    LEFT JOIN users u ON u.id = f.user_id
+    WHERE f.id = ?
+  `).get(feedbackId);
+
+  res.json(feedbackRow(updated));
 });
 
 const commerceIndustries = new Set([

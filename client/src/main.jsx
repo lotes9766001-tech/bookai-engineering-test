@@ -136,6 +136,7 @@ const navs = {
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
     ['reports', '經營報表', BarChart3],
+    ['feedbacks', '回饋中心', FileText],
     ['settings', '公司設定', Building2]
   ],
   pro: [
@@ -152,6 +153,7 @@ const navs = {
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
     ['reports', '經營報表', BarChart3],
+    ['feedbacks', '回饋中心', FileText],
     ['settings', '公司設定', Building2]
   ],
   accountant: [
@@ -161,6 +163,7 @@ const navs = {
     ['invoices', '發票整理', FileText],
     ['reports', '批次報表', BarChart3],
     ['tax', '稅務準備', ShieldCheck],
+    ['feedbacks', '回饋中心', FileText],
     ['settings', '事務所設定', Building2]
   ]
 };
@@ -321,6 +324,17 @@ function getOfficialSiteStatusLabel(status) {
     building: '製作中',
     live: '已上線',
     paused: '暫停'
+  };
+
+  return map[status] || '未設定';
+}
+
+function getFeedbackStatusLabel(status) {
+  const map = {
+    new: '新回饋',
+    reviewing: '處理中',
+    resolved: '已處理',
+    ignored: '暫不處理'
   };
 
   return map[status] || '未設定';
@@ -580,6 +594,7 @@ function Shell({ onLogout }) {
     ['inventory', '材料 / 工具庫存 ERP', Package],
     ['jobsites', '案場中心', Building2],
     ['reports', '經營報表', BarChart3],
+    ['feedbacks', '回饋中心', FileText],
     ['settings', '公司設定', Building2]
   ];
   const planNav = isConstructionIndustry(company?.industry)
@@ -701,6 +716,7 @@ if (!me || !company) {
         {page === 'sales' && <SalesManager companyId={companyId} />}
         {page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
         {page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
+        {page === 'feedbacks' && <FeedbackCenter companyId={companyId} />}
         {page === 'integrations' && (
           <Integrations
             companyId={companyId}
@@ -757,6 +773,32 @@ function Card({ title, value, sub }) {
       <span>{title}</span>
       <strong>{value}</strong>
       {sub && <small>{sub}</small>}
+    </div>
+  );
+}
+
+function TesterGuideCard({ company, constructionMode, onNavigate }) {
+  const isTester = Number(company?.is_tester || 0) === 1;
+  const steps = constructionMode
+    ? ['查看經營總覽', '新增一筆進貨', '新增一筆銷貨', '查看商品 / 材料庫存是否變動', '測試接案中心與案場中心', '到回饋中心留下使用感受']
+    : ['查看經營總覽', '新增一筆進貨', '新增一筆銷貨', '查看商品 / 材料庫存是否變動', '檢查收款與報表資訊', '到回饋中心留下使用感受'];
+
+  return (
+    <div className={`tester-guide-card ${isTester ? 'tester' : ''}`}>
+      <div>
+        <p className="tester-guide-kicker">{isTester ? '測試者引導' : '開始使用 BookAI'}</p>
+        <h2>{isTester ? '歡迎使用 BookAI 測試版' : '建議先完成核心資料流程'}</h2>
+        <p>{isTester ? '請依序測試主要流程，協助我們確認外部測試環境的穩定度與操作感受。' : '先建立進貨、銷貨與庫存資料，經營總覽會更接近實際營運狀態。'}</p>
+      </div>
+      <ol>
+        {steps.map((step) => <li key={step}>{step}</li>)}
+      </ol>
+      <div className="tester-guide-actions">
+        <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
+        <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
+        <button type="button" onClick={() => onNavigate?.('inventory')}>查看庫存</button>
+        <button type="button" onClick={() => onNavigate?.('feedbacks')}>回饋中心</button>
+      </div>
     </div>
   );
 }
@@ -895,6 +937,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
           </div>
         </div>
 
+        <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
+
         <div className="command-metrics">
           <Card title="本月銷貨總額" value={money(s.monthlySales || constructionStats.received)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
           <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} sub={`未付款 ${money(s.unpaidPurchases || 0)}`} />
@@ -966,6 +1010,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
         </div>
       </div>
 
+      <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
+
       <div className="command-metrics">
         <Card title="本月銷貨總額" value={money(s.monthlySales || 0)} />
         <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} />
@@ -1004,6 +1050,108 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
             <li>待處理發票：{s.invoicesPending}</li>
           </ul>
         </div>
+      </div>
+    </section>
+  );
+}
+
+function FeedbackCenter({ companyId }) {
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState({
+    category: '操作問題',
+    rating: '5',
+    page: '',
+    message: ''
+  });
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function load() {
+    const data = await api(`/feedbacks/my?companyId=${companyId}`);
+    setRows(data || []);
+  }
+
+  useEffect(() => {
+    setMessage('');
+    setError('');
+    load().catch((err) => setError(err.message || '讀取回饋資料失敗'));
+  }, [companyId]);
+
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      setMessage('');
+      setError('');
+      await api('/feedbacks/create', {
+        method: 'POST',
+        body: JSON.stringify({
+          companyId,
+          category: form.category,
+          rating: Number(form.rating),
+          page: form.page,
+          message: form.message
+        })
+      });
+      setForm({ category: '操作問題', rating: '5', page: '', message: '' });
+      setMessage('回饋已送出，BookAI 團隊會依狀態追蹤處理。');
+      await load();
+    } catch (err) {
+      setError(err.message || '送出回饋失敗');
+    }
+  }
+
+  return (
+    <section>
+      <Title title="回饋中心" desc="提交使用問題、功能建議與測試回饋。你只能看到自己公司的回饋紀錄。" />
+      {message && <div className="notice">{message}</div>}
+      {error && <div className="error">{error}</div>}
+
+      <form className="form feedback-form" onSubmit={submit}>
+        <label>
+          <span>類別</span>
+          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+            <option>操作問題</option>
+            <option>介面建議</option>
+            <option>功能需求</option>
+            <option>錯誤回報</option>
+            <option>其他</option>
+          </select>
+        </label>
+        <label>
+          <span>評分</span>
+          <select value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })}>
+            <option value="5">5 分，非常順手</option>
+            <option value="4">4 分，大致順手</option>
+            <option value="3">3 分，普通</option>
+            <option value="2">2 分，需要改善</option>
+            <option value="1">1 分，明顯卡住</option>
+          </select>
+        </label>
+        <label>
+          <span>目前頁面 / 模組</span>
+          <input value={form.page} onChange={(e) => setForm({ ...form, page: e.target.value })} placeholder="例如：進貨管理、接案中心" />
+        </label>
+        <label className="feedback-message-field">
+          <span>回饋內容</span>
+          <textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required placeholder="請描述你遇到的問題、建議或測試感受。" />
+        </label>
+        <button>送出回饋</button>
+      </form>
+
+      <div className="panel">
+        <h2>我的回饋紀錄</h2>
+        <Table
+          cols={['時間', '類別', '評分', '頁面', '內容', '狀態', '回覆備註']}
+          rows={rows.map((row) => [
+            row.createdAt || '-',
+            row.category || '-',
+            `${row.rating || 3} / 5`,
+            row.page || '-',
+            row.message,
+            getFeedbackStatusLabel(row.status),
+            row.adminNote || '-'
+          ])}
+        />
       </div>
     </section>
   );
@@ -5647,7 +5795,11 @@ function AdminConsole() {
   const [keyword, setKeyword] = useState('');
   const [billingForm, setBillingForm] = useState({});
   const [websiteForm, setWebsiteForm] = useState({});
+  const [testerForm, setTesterForm] = useState({});
   const [settingsForm, setSettingsForm] = useState({});
+  const [feedbacks, setFeedbacks] = useState([]);
+  const [feedbackStatusFilter, setFeedbackStatusFilter] = useState('all');
+  const [feedbackCategoryFilter, setFeedbackCategoryFilter] = useState('all');
   const [demoResult, setDemoResult] = useState(null);
   const [demoLoading, setDemoLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -5656,13 +5808,15 @@ function AdminConsole() {
   async function loadAdmin() {
     try {
       setError('');
-      const [companyRows, settingRows] = await Promise.all([
+      const [companyRows, settingRows, feedbackRows] = await Promise.all([
         api('/admin/companies'),
-        api('/admin/settings')
+        api('/admin/settings'),
+        api('/admin/feedbacks')
       ]);
       setCompanies(companyRows || []);
       setSettings(settingRows || {});
       setSettingsForm(settingRows || {});
+      setFeedbacks(feedbackRows || []);
       setSelectedId((old) => old || companyRows?.[0]?.id || null);
     } catch (err) {
       setError(err.message || '讀取 BookAI 後台失敗');
@@ -5692,6 +5846,13 @@ function AdminConsole() {
       official_site_status: selected.official_site_status || 'none',
       official_site_note: selected.official_site_note || ''
     });
+
+    setTesterForm({
+      is_tester: selected.is_tester ? '1' : '0',
+      tester_started_at: selected.tester_started_at || '',
+      tester_feedback_status: selected.tester_feedback_status || '尚未回饋',
+      tester_note: selected.tester_note || ''
+    });
   }, [selectedId, companies]);
 
   const filteredCompanies = companies.filter((company) => {
@@ -5717,6 +5878,8 @@ function AdminConsole() {
       const expires = new Date(c.subscription_expires_at);
       return expires >= now && expires <= soonLimit;
     }).length,
+    testers: companies.filter((c) => Number(c.is_tester || 0) === 1).length,
+    newFeedbacks: feedbacks.filter((f) => f.status === 'new').length,
     mrr: companies.reduce((sum, c) => {
       if (!c.is_paid_customer || c.billing_status !== 'active') return sum;
       const map = {
@@ -5764,6 +5927,24 @@ function AdminConsole() {
     }
   }
 
+  async function saveTester(e) {
+    e.preventDefault();
+    if (!selected) return;
+
+    try {
+      setMessage('');
+      setError('');
+      await api(`/admin/companies/${selected.id}/tester`, {
+        method: 'PUT',
+        body: JSON.stringify(testerForm)
+      });
+      await loadAdmin();
+      setMessage('測試者狀態已更新');
+    } catch (err) {
+      setError(err.message || '更新測試者狀態失敗');
+    }
+  }
+
   async function saveSettings(e) {
     e.preventDefault();
 
@@ -5800,6 +5981,30 @@ function AdminConsole() {
       setDemoLoading(false);
     }
   }
+
+  async function updateFeedback(row, patch) {
+    try {
+      setMessage('');
+      setError('');
+      const updated = await api(`/admin/feedbacks/${row.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: patch.status ?? row.status,
+          admin_note: patch.adminNote ?? row.adminNote ?? ''
+        })
+      });
+      setFeedbacks((items) => items.map((item) => item.id === updated.id ? updated : item));
+      setMessage('回饋狀態已更新');
+    } catch (err) {
+      setError(err.message || '更新回饋失敗');
+    }
+  }
+
+  const filteredFeedbacks = feedbacks.filter((row) => {
+    const statusMatched = feedbackStatusFilter === 'all' || row.status === feedbackStatusFilter;
+    const categoryMatched = feedbackCategoryFilter === 'all' || row.category === feedbackCategoryFilter;
+    return statusMatched && categoryMatched;
+  });
 
   return (
     <section className="admin-console">
@@ -5850,6 +6055,8 @@ function AdminConsole() {
           <div className="admin-metric-card"><span>暫停使用</span><strong>{metrics.paused}</strong></div>
           <div className="admin-metric-card"><span>有官方網站客戶</span><strong>{metrics.website}</strong></div>
           <div className="admin-metric-card"><span>即將到期客戶</span><strong>{metrics.expiring}</strong></div>
+          <div className="admin-metric-card"><span>外部測試者</span><strong>{metrics.testers}</strong></div>
+          <div className="admin-metric-card"><span>新回饋</span><strong>{metrics.newFeedbacks}</strong></div>
           <div className="admin-metric-card gold"><span>本月預估月收</span><strong>{money(metrics.mrr)}</strong></div>
         </div>
 
@@ -5887,6 +6094,7 @@ function AdminConsole() {
                     <th>方案</th>
                     <th>狀態</th>
                     <th>到期日</th>
+                    <th>測試者</th>
                     <th>網站</th>
                   </tr>
                 </thead>
@@ -5908,12 +6116,13 @@ function AdminConsole() {
                         {getBillingStatusLabel(company.billing_status)}
                       </td>
                       <td>{company.subscription_expires_at || '未設定'}</td>
+                      <td>{Number(company.is_tester || 0) === 1 ? '是' : '否'}</td>
                       <td>{getOfficialSiteStatusLabel(company.official_site_status)}</td>
                     </tr>
                   ))}
                   {!filteredCompanies.length && (
                     <tr>
-                      <td colSpan="6">目前沒有符合條件的公司。</td>
+                      <td colSpan="7">目前沒有符合條件的公司。</td>
                     </tr>
                   )}
                 </tbody>
@@ -5931,6 +6140,8 @@ function AdminConsole() {
                     <p><span>公司名稱</span><strong>{selected.name}</strong></p>
                     <p><span>行業別</span><strong>{getIndustryName(selected.industry)}</strong></p>
                     <p><span>是否正式客戶</span><strong>{yesNoPaid(selected.is_paid_customer)}</strong></p>
+                    <p><span>外部測試者</span><strong>{Number(selected.is_tester || 0) === 1 ? '是' : '否'}</strong></p>
+                    <p><span>測試回饋狀態</span><strong>{selected.tester_feedback_status || '尚未回饋'}</strong></p>
                     <p><span>官方網站網址</span><strong>{selected.official_site_url || '未設定'}</strong></p>
                     <p><span>管理備註</span><strong>{selected.billing_note || '無'}</strong></p>
                   </div>
@@ -5968,6 +6179,35 @@ function AdminConsole() {
                     <button>儲存收費狀態</button>
                   </form>
 
+                  <form className="admin-settings-panel" onSubmit={saveTester}>
+                    <h3>測試者狀態管理</h3>
+                    <label>
+                      <span>外部測試者</span>
+                      <select value={testerForm.is_tester || '0'} onChange={(e) => setTesterForm({ ...testerForm, is_tester: e.target.value })}>
+                        <option value="0">否</option>
+                        <option value="1">是</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>測試開始日</span>
+                      <input value={testerForm.tester_started_at || ''} onChange={(e) => setTesterForm({ ...testerForm, tester_started_at: e.target.value })} placeholder="YYYY-MM-DD" />
+                    </label>
+                    <label>
+                      <span>回饋狀態</span>
+                      <select value={testerForm.tester_feedback_status || '尚未回饋'} onChange={(e) => setTesterForm({ ...testerForm, tester_feedback_status: e.target.value })}>
+                        <option>尚未回饋</option>
+                        <option>已回饋</option>
+                        <option>需追蹤</option>
+                        <option>已完成測試</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>測試備註</span>
+                      <input value={testerForm.tester_note || ''} onChange={(e) => setTesterForm({ ...testerForm, tester_note: e.target.value })} />
+                    </label>
+                    <button>儲存測試者狀態</button>
+                  </form>
+
                   <form className="admin-settings-panel" onSubmit={saveWebsite}>
                     <h3>客戶網站狀態</h3>
                     <label>
@@ -6002,6 +6242,86 @@ function AdminConsole() {
                 <p>請先選擇一家公司。</p>
               )}
             </div>
+          </div>
+        </div>
+
+        <div className="admin-control-panel">
+          <div className="admin-panel-head">
+            <div>
+              <h2>測試回饋</h2>
+              <p>查看所有公司送出的測試回饋，並標記處理狀態與內部備註。</p>
+            </div>
+          </div>
+
+          <div className="admin-toolbar">
+            <select value={feedbackStatusFilter} onChange={(e) => setFeedbackStatusFilter(e.target.value)}>
+              <option value="all">全部狀態</option>
+              <option value="new">新回饋</option>
+              <option value="reviewing">處理中</option>
+              <option value="resolved">已處理</option>
+              <option value="ignored">暫不處理</option>
+            </select>
+            <select value={feedbackCategoryFilter} onChange={(e) => setFeedbackCategoryFilter(e.target.value)}>
+              <option value="all">全部類別</option>
+              <option value="操作問題">操作問題</option>
+              <option value="介面建議">介面建議</option>
+              <option value="功能需求">功能需求</option>
+              <option value="錯誤回報">錯誤回報</option>
+              <option value="其他">其他</option>
+            </select>
+          </div>
+
+          <div className="admin-customer-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>公司</th>
+                  <th>使用者</th>
+                  <th>類別</th>
+                  <th>評分</th>
+                  <th>內容</th>
+                  <th>狀態</th>
+                  <th>管理備註</th>
+                  <th>建立時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredFeedbacks.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.companyName || '-'}</td>
+                    <td>
+                      <strong>{row.userName || '-'}</strong>
+                      <small>{row.userEmail || ''}</small>
+                    </td>
+                    <td>{row.category}</td>
+                    <td>{row.rating} / 5</td>
+                    <td className="admin-feedback-message">{row.message}</td>
+                    <td>
+                      <select value={row.status || 'new'} onChange={(e) => updateFeedback(row, { status: e.target.value })}>
+                        <option value="new">新回饋</option>
+                        <option value="reviewing">處理中</option>
+                        <option value="resolved">已處理</option>
+                        <option value="ignored">暫不處理</option>
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        value={row.adminNote || ''}
+                        onChange={(e) => setFeedbacks((items) => items.map((item) => item.id === row.id ? { ...item, adminNote: e.target.value } : item))}
+                        onBlur={(e) => updateFeedback(row, { adminNote: e.target.value })}
+                        placeholder="內部備註"
+                      />
+                    </td>
+                    <td>{row.createdAt || '-'}</td>
+                  </tr>
+                ))}
+                {!filteredFeedbacks.length && (
+                  <tr>
+                    <td colSpan="8">目前沒有符合條件的回饋。</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 

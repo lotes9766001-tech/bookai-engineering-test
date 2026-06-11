@@ -470,6 +470,28 @@ export function initDb() {
   CREATE INDEX IF NOT EXISTS sale_items_sale_idx
   ON sale_items(company_id, sale_id);
 
+  CREATE TABLE IF NOT EXISTS feedbacks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    user_id INTEGER,
+    category TEXT,
+    rating INTEGER,
+    message TEXT NOT NULL,
+    page TEXT,
+    status TEXT DEFAULT 'new',
+    admin_note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(user_id) REFERENCES users(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS feedbacks_company_idx
+  ON feedbacks(company_id);
+
+  CREATE INDEX IF NOT EXISTS feedbacks_status_idx
+  ON feedbacks(status);
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER,
@@ -521,6 +543,10 @@ export function initDb() {
   safeAddColumn('companies', 'official_site_url', 'TEXT');
   safeAddColumn('companies', 'official_site_status', "TEXT DEFAULT 'none'");
   safeAddColumn('companies', 'official_site_note', 'TEXT');
+  safeAddColumn('companies', 'is_tester', 'INTEGER DEFAULT 0');
+  safeAddColumn('companies', 'tester_started_at', 'TEXT');
+  safeAddColumn('companies', 'tester_note', 'TEXT');
+  safeAddColumn('companies', 'tester_feedback_status', "TEXT DEFAULT '尚未回饋'");
 
   const defaultSettings = {
     official_site_url: 'https://bookai-engineering-official.onrender.com',
