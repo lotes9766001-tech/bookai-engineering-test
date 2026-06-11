@@ -79,9 +79,13 @@ function normalizeEmail(email) {
 }
 
 function requireAdmin(req, res, next) {
-  const email = String(req.user?.email || '').toLowerCase();
+  const user = db.prepare(`
+    SELECT email
+    FROM users
+    WHERE id = ?
+  `).get(req.user?.id);
 
-  if (isAdminEmail(email)) {
+  if (user && isAdminEmail(user.email)) {
     return next();
   }
 
@@ -446,8 +450,7 @@ app.post('/api/auth/register', (req, res) => {
     });
   } catch (e) {
     res.status(400).json({
-      error: '帳號可能已存在',
-      detail: e.message
+      error: '帳號可能已存在'
     });
   }
 });
@@ -3325,7 +3328,7 @@ app.get('/api/companies/:companyId/accountant/clients', auth, company, requireFe
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), (req, res) => {
+app.post('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), requireRole('owner', 'admin'), (req, res) => {
   const c = req.body;
 
   const row = db.prepare(`

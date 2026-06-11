@@ -777,6 +777,12 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
 
   if (!s) return null;
 
+  const todayText = new Date().toLocaleDateString('zh-TW', {
+    month: 'long',
+    day: 'numeric',
+    weekday: 'short'
+  });
+
   const constructionStats = (() => {
     const sites = jobSites || [];
 
@@ -854,13 +860,21 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
       <section className="command-center">
         <div className="command-hero">
           <div>
-            <p className="command-kicker">BookAI Command Center</p>
-            <h1>工程經營控制塔</h1>
-            <p>把不值得的辛苦交給系統，把值得的辛苦留給人。</p>
+            <p className="command-kicker">{todayText}｜經營總覽</p>
+            <h1>{company.name}</h1>
+            <p>今日經營狀態：{constructionStats.unpaid > 0 ? `尚有 ${money(constructionStats.unpaid)} 未收款需要追蹤` : '收款狀況穩定'}。把不值得的辛苦交給系統，把值得的辛苦留給人。</p>
           </div>
-          <div className="command-signal">
-            <span />
-            <strong>經營資料同步中</strong>
+          <div className="command-hero-side">
+            <div className="command-signal">
+              <span />
+              <strong>資料已同步</strong>
+            </div>
+            <div className="command-quick-actions">
+              <button type="button" onClick={() => onNavigate?.('transactions')}>新增進貨 / 銷貨</button>
+              <button type="button" onClick={() => onNavigate?.('leads')}>新增案源</button>
+              <button type="button" onClick={() => onNavigate?.('jobsites')}>新增案場</button>
+              <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
+            </div>
           </div>
         </div>
 
@@ -887,7 +901,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
           </div>
 
           <div className="panel command-actions">
-            <h2>今日指令</h2>
+            <h2>快速操作</h2>
+            <button type="button" onClick={() => onNavigate?.('transactions')}>新增進貨 / 銷貨</button>
             <button type="button" onClick={() => onNavigate?.('leads')}>檢查接案中心</button>
             <button type="button" onClick={() => onNavigate?.('jobsites')}>管理案場中心</button>
             <button type="button" onClick={() => onNavigate?.('jobsites')}>登記收款</button>
@@ -911,8 +926,28 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
     : [{ name: '尚無資料', value: 1 }];
 
   return (
-    <section>
-      <div className="grid">
+    <section className="command-center">
+      <div className="command-hero">
+        <div>
+          <p className="command-kicker">{todayText}｜經營總覽</p>
+          <h1>{company.name}</h1>
+          <p>今日經營狀態：目前累計營收 {money(s.revenue)}，淨利 {money(s.netProfit)}。進貨、銷貨、庫存與報表集中管理。</p>
+        </div>
+        <div className="command-hero-side">
+          <div className="command-signal">
+            <span />
+            <strong>資料已同步</strong>
+          </div>
+          <div className="command-quick-actions">
+            <button type="button" onClick={() => onNavigate?.('transactions')}>新增進貨 / 銷貨</button>
+            <button type="button" onClick={() => onNavigate?.('inventory')}>檢查庫存</button>
+            <button type="button" onClick={() => onNavigate?.('invoices')}>處理發票</button>
+            <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="command-metrics">
         <Card title="總營收" value={money(s.revenue)} />
         <Card title="總支出" value={money(s.expenses)} />
         <Card title="淨利" value={money(s.netProfit)} />
@@ -4884,6 +4919,24 @@ function CommerceSiteManager({ companyId, company }) {
     }
   }
 
+  async function publishSettings() {
+    try {
+      setSaving(true);
+      setMessage('');
+      setError('');
+      const updated = await api(`/companies/${companyId}/commerce-site/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ ...settings, siteStatus: 'live' })
+      });
+      setSettings(updated);
+      setMessage('網站狀態已更新為已上線');
+    } catch (err) {
+      setError(err.message || '發布更新失敗');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function saveProduct(e) {
     e.preventDefault();
     try {
@@ -4995,6 +5048,7 @@ function CommerceSiteManager({ companyId, company }) {
   const featuredProducts = products.filter((p) => p.isFeatured && p.isVisible).slice(0, 3);
   const previewProducts = featuredProducts.length ? featuredProducts : products.filter((p) => p.isVisible).slice(0, 3);
   const activePromotions = promotions.filter((p) => p.isActive).slice(0, 3);
+  const visibleProductCount = products.filter((p) => p.isVisible).length;
 
   return (
     <section className="commerce-site-page">
@@ -5003,21 +5057,58 @@ function CommerceSiteManager({ companyId, company }) {
       {message && <div className="notice">{message}</div>}
       {error && <div className="error">{error}</div>}
 
+      <div className="commerce-cms-status">
+        <div className="commerce-cms-status-card">
+          <span>官網狀態</span>
+          <strong>{settings.siteStatus === 'live' ? '已上線' : settings.siteStatus === 'paused' ? '暫停' : '草稿'}</strong>
+          <small>最後更新：{settings.updatedAt || '尚未更新'}</small>
+        </div>
+        <div className="commerce-cms-status-card">
+          <span>商品展示</span>
+          <strong>{visibleProductCount} 件</strong>
+          <small>主打商品：{featuredProducts.length} 件</small>
+        </div>
+        <div className="commerce-cms-status-card">
+          <span>活動內容</span>
+          <strong>{activePromotions.length} 則</strong>
+          <small>首頁橫幅 / 跑馬燈 / 活動</small>
+        </div>
+      </div>
+
       <div className="commerce-site-grid">
-        <form className="panel commerce-site-card" onSubmit={saveSettings}>
-          <h2>官網基本設定</h2>
-          <div className="form">
+        <form className="panel commerce-site-card commerce-cms-editor" onSubmit={saveSettings}>
+          <div className="commerce-cms-head">
+            <div>
+              <h2>首頁內容設定</h2>
+              <p>管理訪客第一眼看到的品牌名稱、主標、副標與公告文字。</p>
+            </div>
+            <div className="commerce-site-actions">
+              <button disabled={saving}>儲存設定</button>
+              <button type="button" className="link" onClick={() => setMessage('預覽會顯示在右側官網預覽卡。')}>預覽官方網站</button>
+              <button type="button" onClick={publishSettings} disabled={saving}>發布更新</button>
+            </div>
+          </div>
+
+          <div className="form commerce-cms-form">
             <label><span>品牌名稱</span><input value={settings.brandName || ''} onChange={(e) => setSettings({ ...settings, brandName: e.target.value })} /></label>
             <label><span>首頁主標題</span><input value={settings.heroTitle || ''} onChange={(e) => setSettings({ ...settings, heroTitle: e.target.value })} /></label>
             <label><span>首頁副標</span><input value={settings.heroSubtitle || ''} onChange={(e) => setSettings({ ...settings, heroSubtitle: e.target.value })} /></label>
             <label><span>跑馬燈 / 公告文字</span><input value={settings.announcementText || ''} onChange={(e) => setSettings({ ...settings, announcementText: e.target.value })} /></label>
+          </div>
+
+          <div className="commerce-cms-head compact">
+            <div>
+              <h2>品牌資訊</h2>
+              <p>官方 LINE、聯絡方式與網站狀態。</p>
+            </div>
+          </div>
+          <div className="form commerce-cms-form">
             <label><span>官方 LINE 連結</span><input value={settings.officialLineUrl || ''} onChange={(e) => setSettings({ ...settings, officialLineUrl: e.target.value })} /></label>
             <label><span>聯絡電話</span><input value={settings.contactPhone || ''} onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })} /></label>
             <label><span>聯絡 Email</span><input value={settings.contactEmail || ''} onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })} /></label>
             <label><span>網站狀態</span><select value={settings.siteStatus || 'draft'} onChange={(e) => setSettings({ ...settings, siteStatus: e.target.value })}><option value="draft">草稿</option><option value="live">已上線</option><option value="paused">暫停</option></select></label>
             <label><span>版型名稱</span><input value={settings.themeName || 'default'} onChange={(e) => setSettings({ ...settings, themeName: e.target.value })} /></label>
           </div>
-          <button disabled={saving}>儲存官網設定</button>
         </form>
 
         <div className="panel commerce-site-preview">
@@ -5042,7 +5133,12 @@ function CommerceSiteManager({ companyId, company }) {
       </div>
 
       <div className="panel commerce-site-card">
-        <h2>商品展示管理</h2>
+        <div className="commerce-cms-head">
+          <div>
+            <h2>商品展示管理</h2>
+            <p>設定商品名稱、分類、售價、主打商品、上架狀態與排序。</p>
+          </div>
+        </div>
         <form className="form" onSubmit={saveProduct}>
           <label><span>商品名稱</span><input value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} /></label>
           <label><span>商品分類</span><input value={productForm.category} onChange={(e) => setProductForm({ ...productForm, category: e.target.value })} /></label>
@@ -5073,7 +5169,12 @@ function CommerceSiteManager({ companyId, company }) {
       </div>
 
       <div className="panel commerce-site-card">
-        <h2>活動 / 跑馬燈管理</h2>
+        <div className="commerce-cms-head">
+          <div>
+            <h2>活動 / 跑馬燈管理</h2>
+            <p>管理首頁橫幅、跑馬燈與活動訊息。</p>
+          </div>
+        </div>
         <form className="form" onSubmit={savePromotion}>
           <label><span>活動標題</span><input value={promotionForm.title} onChange={(e) => setPromotionForm({ ...promotionForm, title: e.target.value })} /></label>
           <label><span>活動描述</span><input value={promotionForm.description} onChange={(e) => setPromotionForm({ ...promotionForm, description: e.target.value })} /></label>
