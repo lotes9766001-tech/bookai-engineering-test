@@ -1251,6 +1251,7 @@ function purchaseRow(row) {
     total: row.total || 0,
     paymentStatus: row.payment_status || '未付款',
     paidAmount: row.paid_amount || 0,
+    status: row.status || 'confirmed',
     note: row.note || '',
     createdAt: row.created_at
   };
@@ -1270,6 +1271,7 @@ function saleRow(row) {
     total: row.total || 0,
     collectionStatus: row.collection_status || '未收款',
     receivedAmount: row.received_amount || 0,
+    status: row.status || 'confirmed',
     note: row.note || '',
     createdAt: row.created_at
   };
@@ -1461,9 +1463,9 @@ app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', '
       const purchase = db.prepare(`
         INSERT INTO purchases (
           company_id, supplier_id, supplier_name, purchase_no, purchase_date, category,
-          subtotal, tax, total, payment_status, paid_amount, note
+          subtotal, tax, total, payment_status, paid_amount, status, note
         )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         req.company.id,
         supplierId,
@@ -1476,6 +1478,7 @@ app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', '
         total,
         status,
         erpNumber(body.paidAmount, 0),
+        'confirmed',
         body.note || ''
       );
 
@@ -1518,6 +1521,44 @@ app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', '
 
 app.delete('/api/purchases/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
   res.status(400).json({ error: '此版本尚未開放刪除已入庫單據' });
+});
+
+app.post('/api/purchases/:id/void', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
+  if ((purchase.status || 'confirmed') === 'void') return res.status(400).json({ error: '此進貨單已作廢' });
+
+  const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? AND company_id = ?').all(req.params.id, req.company.id);
+
+  try {
+    db.transaction(() => {
+      const movementStmt = db.prepare(`
+        INSERT INTO inventory_movements (
+          company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+        )
+        VALUES (?,?,?,?,?,?,?,?)
+      `);
+
+      items.forEach((item) => {
+        if (!item.product_id) return;
+        const product = getProductForUpdate(req.company.id, item.product_id);
+        if (!product) throw new Error(`找不到商品 / 材料：${item.item_name}`);
+        const quantity = Math.max(0, erpNumber(item.quantity, 0));
+        const beforeStock = erpNumber(product.stock, 0);
+        const afterStock = Math.round((beforeStock - quantity) * 100) / 100;
+        if (afterStock < 0) throw new Error(`作廢後庫存不可小於 0：${product.name}`);
+        db.prepare('UPDATE products SET stock = ? WHERE id = ? AND company_id = ?').run(afterStock, item.product_id, req.company.id);
+        movementStmt.run(req.company.id, item.product_id, 'purchase_void', quantity, beforeStock, afterStock, erpNumber(item.unit_cost, 0), `作廢進貨單 ${purchase.purchase_no || purchase.id}`);
+      });
+
+      db.prepare('UPDATE purchases SET status = ? WHERE id = ? AND company_id = ?').run('void', req.params.id, req.company.id);
+      audit(req.company.id, req.user.id, 'purchase_voided', String(req.params.id));
+    })();
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message || '作廢進貨單失敗' });
+  }
 });
 
 app.get('/api/sales/list', auth, company, (req, res) => {
@@ -1571,9 +1612,9 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
       const sale = db.prepare(`
         INSERT INTO sales (
           company_id, customer_id, customer_name, sale_no, sale_date, category,
-          subtotal, tax, total, collection_status, received_amount, note
+          subtotal, tax, total, collection_status, received_amount, status, note
         )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
       `).run(
         req.company.id,
         customerId,
@@ -1586,6 +1627,7 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
         total,
         status,
         erpNumber(body.receivedAmount, 0),
+        'confirmed',
         body.note || ''
       );
 
@@ -1627,6 +1669,43 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
 
 app.delete('/api/sales/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
   res.status(400).json({ error: '此版本尚未開放刪除已出庫單據' });
+});
+
+app.post('/api/sales/:id/void', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
+  if ((sale.status || 'confirmed') === 'void') return res.status(400).json({ error: '此銷貨單已作廢' });
+
+  const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ? AND company_id = ?').all(req.params.id, req.company.id);
+
+  try {
+    db.transaction(() => {
+      const movementStmt = db.prepare(`
+        INSERT INTO inventory_movements (
+          company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+        )
+        VALUES (?,?,?,?,?,?,?,?)
+      `);
+
+      items.forEach((item) => {
+        if (!item.product_id) return;
+        const product = getProductForUpdate(req.company.id, item.product_id);
+        if (!product) throw new Error(`找不到商品 / 材料：${item.item_name}`);
+        const quantity = Math.max(0, erpNumber(item.quantity, 0));
+        const beforeStock = erpNumber(product.stock, 0);
+        const afterStock = Math.round((beforeStock + quantity) * 100) / 100;
+        db.prepare('UPDATE products SET stock = ? WHERE id = ? AND company_id = ?').run(afterStock, item.product_id, req.company.id);
+        movementStmt.run(req.company.id, item.product_id, 'sale_void', quantity, beforeStock, afterStock, erpNumber(product.cost, 0), `作廢銷貨單 ${sale.sale_no || sale.id}`);
+      });
+
+      db.prepare('UPDATE sales SET status = ? WHERE id = ? AND company_id = ?').run('void', req.params.id, req.company.id);
+      audit(req.company.id, req.user.id, 'sale_voided', String(req.params.id));
+    })();
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(400).json({ error: err.message || '作廢銷貨單失敗' });
+  }
 });
 
 app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
@@ -1692,6 +1771,7 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
     FROM sales
     WHERE company_id = ?
       AND date(sale_date) >= date(?)
+      AND COALESCE(status, 'confirmed') != 'void'
   `).get(req.company.id, monthStartText).total;
 
   const monthlyPurchases = db.prepare(`
@@ -1699,6 +1779,7 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
     FROM purchases
     WHERE company_id = ?
       AND date(purchase_date) >= date(?)
+      AND COALESCE(status, 'confirmed') != 'void'
   `).get(req.company.id, monthStartText).total;
 
   const unpaidSales = db.prepare(`
@@ -1706,6 +1787,7 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
     FROM sales
     WHERE company_id = ?
       AND collection_status != '已收款'
+      AND COALESCE(status, 'confirmed') != 'void'
   `).get(req.company.id).total;
 
   const unpaidPurchases = db.prepare(`
@@ -1713,6 +1795,7 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
     FROM purchases
     WHERE company_id = ?
       AND payment_status != '已付款'
+      AND COALESCE(status, 'confirmed') != 'void'
   `).get(req.company.id).total;
 
   res.json({

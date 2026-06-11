@@ -30,7 +30,7 @@ function section(title) {
 
 let hasError = false;
 
-section('BookAI v3.5b 健康檢查');
+section('BookAI v5.3 Launch Readiness 健康檢查');
 
 if (!fs.existsSync(dbPath)) {
   fail(`找不到 SQLite 資料庫：${dbPath}`);
@@ -169,6 +169,7 @@ const requiredColumns = {
     'total',
     'payment_status',
     'paid_amount',
+    'status',
     'note',
     'created_at'
   ],
@@ -198,6 +199,7 @@ const requiredColumns = {
     'total',
     'collection_status',
     'received_amount',
+    'status',
     'note',
     'created_at'
   ],
@@ -426,6 +428,80 @@ if (negativeStock.length) {
   });
 } else {
   ok('沒有負庫存。');
+}
+
+const negativePurchaseItems = tableExists('purchase_items')
+  ? db.prepare(`
+      SELECT id, item_name, quantity
+      FROM purchase_items
+      WHERE quantity < 0
+    `).all()
+  : [];
+
+if (negativePurchaseItems.length) {
+  hasError = true;
+  fail(`發現 ${negativePurchaseItems.length} 筆進貨明細數量為負數。`);
+  negativePurchaseItems.forEach((item) => {
+    console.log(`  - #${item.id} ${item.item_name}: ${item.quantity}`);
+  });
+} else {
+  ok('進貨明細數量沒有負數。');
+}
+
+const negativeSaleItems = tableExists('sale_items')
+  ? db.prepare(`
+      SELECT id, item_name, quantity
+      FROM sale_items
+      WHERE quantity < 0
+    `).all()
+  : [];
+
+if (negativeSaleItems.length) {
+  hasError = true;
+  fail(`發現 ${negativeSaleItems.length} 筆銷貨明細數量為負數。`);
+  negativeSaleItems.forEach((item) => {
+    console.log(`  - #${item.id} ${item.item_name}: ${item.quantity}`);
+  });
+} else {
+  ok('銷貨明細數量沒有負數。');
+}
+
+const badPurchaseTotals = tableExists('purchases')
+  ? db.prepare(`
+      SELECT id, purchase_no, total
+      FROM purchases
+      WHERE total IS NULL
+        OR typeof(total) NOT IN ('integer', 'real')
+    `).all()
+  : [];
+
+if (badPurchaseTotals.length) {
+  hasError = true;
+  fail(`發現 ${badPurchaseTotals.length} 筆進貨單總額異常。`);
+  badPurchaseTotals.forEach((row) => {
+    console.log(`  - #${row.id} ${row.purchase_no || ''}: ${row.total}`);
+  });
+} else {
+  ok('進貨單總額沒有空值或非數字。');
+}
+
+const badSaleTotals = tableExists('sales')
+  ? db.prepare(`
+      SELECT id, sale_no, total
+      FROM sales
+      WHERE total IS NULL
+        OR typeof(total) NOT IN ('integer', 'real')
+    `).all()
+  : [];
+
+if (badSaleTotals.length) {
+  hasError = true;
+  fail(`發現 ${badSaleTotals.length} 筆銷貨單總額異常。`);
+  badSaleTotals.forEach((row) => {
+    console.log(`  - #${row.id} ${row.sale_no || ''}: ${row.total}`);
+  });
+} else {
+  ok('銷貨單總額沒有空值或非數字。');
 }
 
 const negativeMaterialCost = tableExists('job_sites')

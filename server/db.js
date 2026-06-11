@@ -397,6 +397,7 @@ export function initDb() {
     total REAL DEFAULT 0,
     payment_status TEXT DEFAULT '未付款',
     paid_amount REAL DEFAULT 0,
+    status TEXT DEFAULT 'confirmed',
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id),
@@ -439,6 +440,7 @@ export function initDb() {
     total REAL DEFAULT 0,
     collection_status TEXT DEFAULT '未收款',
     received_amount REAL DEFAULT 0,
+    status TEXT DEFAULT 'confirmed',
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id),
@@ -546,6 +548,8 @@ export function initDb() {
   safeAddColumn('products', 'supplier', 'TEXT');
   safeAddColumn('products', 'storage_location', 'TEXT');
   safeAddColumn('products', 'note', 'TEXT');
+  safeAddColumn('purchases', 'status', "TEXT DEFAULT 'confirmed'");
+  safeAddColumn('sales', 'status', "TEXT DEFAULT 'confirmed'");
 
   safeAddColumn('job_sites', 'site_name', 'TEXT');
   safeAddColumn('job_sites', 'project_type', 'TEXT');

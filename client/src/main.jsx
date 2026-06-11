@@ -128,6 +128,8 @@ const navs = {
     ['dashboard', '經營總覽', BarChart3],
     ['purchases', '進貨管理', WalletCards],
     ['sales', '銷貨管理', WalletCards],
+    ['suppliers', '供應商管理', Users],
+    ['customers', '客戶管理', Users],
     ['transactions', '收支管理', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
@@ -140,6 +142,8 @@ const navs = {
     ['dashboard', '經營總覽', BarChart3],
     ['purchases', '進貨管理', WalletCards],
     ['sales', '銷貨管理', WalletCards],
+    ['suppliers', '供應商管理', Users],
+    ['customers', '客戶管理', Users],
     ['transactions', '收支管理', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
@@ -568,6 +572,8 @@ function Shell({ onLogout }) {
     ['leads', '接案中心', FileText],
     ['purchases', '進貨管理', WalletCards],
     ['sales', '銷貨管理', WalletCards],
+    ['suppliers', '供應商管理', Users],
+    ['customers', '客戶管理', Users],
     ['transactions', '收支管理', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
@@ -693,6 +699,8 @@ if (!me || !company) {
         {page === 'transactions' && <Transactions companyId={companyId} />}
         {page === 'purchases' && <PurchasesManager companyId={companyId} />}
         {page === 'sales' && <SalesManager companyId={companyId} />}
+        {page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
+        {page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
         {page === 'integrations' && (
           <Integrations
             companyId={companyId}
@@ -1001,6 +1009,132 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
   );
 }
 
+function ContactsManager({ companyId, type }) {
+  const isSupplier = type === 'suppliers';
+  const title = isSupplier ? '供應商管理' : '客戶管理';
+  const desc = isSupplier
+    ? '管理供應商資料，建立進貨單時可直接選用。'
+    : '管理客戶資料，建立銷貨單時可直接選用。';
+  const createEmptyForm = () => ({
+    name: '',
+    contactPerson: '',
+    phone: '',
+    email: '',
+    taxId: '',
+    address: '',
+    note: ''
+  });
+  const [rows, setRows] = useState([]);
+  const [form, setForm] = useState(createEmptyForm);
+  const [editingId, setEditingId] = useState(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function load() {
+    const data = await api(`/${type}/list?companyId=${companyId}`);
+    setRows(data || []);
+  }
+
+  useEffect(() => {
+    setForm(createEmptyForm());
+    setEditingId(null);
+    setMessage('');
+    setError('');
+    load().catch((err) => setError(err.message || `讀取${title}失敗`));
+  }, [companyId, type]);
+
+  function edit(row) {
+    setEditingId(row.id);
+    setForm({
+      name: row.name || '',
+      contactPerson: row.contactPerson || '',
+      phone: row.phone || '',
+      email: row.email || '',
+      taxId: row.taxId || '',
+      address: row.address || '',
+      note: row.note || ''
+    });
+    setMessage(`正在編輯：${row.name}`);
+    setError('');
+  }
+
+  function reset() {
+    setEditingId(null);
+    setForm(createEmptyForm());
+    setMessage('');
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      setError('');
+      setMessage('');
+      const path = editingId
+        ? `/${type}/${editingId}?companyId=${companyId}`
+        : `/${type}/create?companyId=${companyId}`;
+      await api(path, {
+        method: editingId ? 'PUT' : 'POST',
+        body: JSON.stringify(form)
+      });
+      setMessage(editingId ? `${title}已更新` : `${title}已新增`);
+      reset();
+      await load();
+    } catch (err) {
+      setError(err.message || `${title}儲存失敗`);
+    }
+  }
+
+  async function remove(row) {
+    if (!confirm(`確定刪除「${row.name}」？`)) return;
+    try {
+      setError('');
+      setMessage('');
+      await api(`/${type}/${row.id}?companyId=${companyId}`, { method: 'DELETE' });
+      setMessage(`${title}已刪除`);
+      await load();
+    } catch (err) {
+      setError(err.message || `${title}刪除失敗`);
+    }
+  }
+
+  return (
+    <section>
+      <Title title={title} desc={desc} />
+      {message && <div className="notice">{message}</div>}
+      {error && <div className="error">{error}</div>}
+
+      <form className="form erp-form erp-contact-form" onSubmit={submit}>
+        <label><span>名稱</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
+        <label><span>聯絡人</span><input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} /></label>
+        <label><span>電話</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
+        <label><span>Email</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+        <label><span>統編</span><input value={form.taxId} onChange={(e) => setForm({ ...form, taxId: e.target.value })} /></label>
+        <label><span>地址</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
+        <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+        <button>{editingId ? '儲存修改' : '新增資料'}</button>
+        {editingId && <button type="button" className="lead-soft-btn" onClick={reset}>取消編輯</button>}
+      </form>
+
+      <Table
+        cols={['名稱', '聯絡人', '電話', 'Email', '統編', '地址', '備註', '操作']}
+        rows={rows.map((row) => [
+          row.name,
+          row.contactPerson || '-',
+          row.phone || '-',
+          row.email || '-',
+          row.taxId || '-',
+          row.address || '-',
+          row.note || '-',
+          <div className="lead-actions">
+            <button type="button" className="lead-soft-btn" onClick={() => edit(row)}>編輯</button>
+            <button type="button" className="lead-danger-btn" onClick={() => remove(row)}>刪除</button>
+          </div>
+        ])}
+      />
+    </section>
+  );
+}
+
 function PurchasesManager({ companyId }) {
   const [rows, setRows] = useState([]);
   const [products, setProducts] = useState([]);
@@ -1083,6 +1217,19 @@ function PurchasesManager({ companyId }) {
     }
   }
 
+  async function voidPurchase(row) {
+    if (!confirm(`確定作廢進貨單「${row.purchaseNo || row.id}」？作廢後會回滾庫存。`)) return;
+    try {
+      setMessage('');
+      setError('');
+      await api(`/purchases/${row.id}/void?companyId=${companyId}`, { method: 'POST' });
+      setMessage('進貨單已作廢，庫存已回滾');
+      await load();
+    } catch (err) {
+      setError(err.message || '作廢進貨單失敗');
+    }
+  }
+
   const subtotal = Number(form.quantity || 0) * Number(form.unitCost || 0);
 
   return (
@@ -1110,7 +1257,7 @@ function PurchasesManager({ companyId }) {
       </form>
 
       <Table
-        cols={['日期', '單號', '供應商', '類別', '總額', '付款狀態', '已付款', '備註']}
+        cols={['日期', '單號', '供應商', '類別', '總額', '付款狀態', '狀態', '已付款', '備註', '操作']}
         rows={rows.map((row) => [
           row.purchaseDate,
           row.purchaseNo,
@@ -1118,8 +1265,12 @@ function PurchasesManager({ companyId }) {
           row.category || '-',
           money(row.total),
           row.paymentStatus,
+          row.status === 'void' ? '作廢' : '已確認',
           money(row.paidAmount),
-          row.note || '-'
+          row.note || '-',
+          row.status === 'void'
+            ? '-'
+            : <button type="button" className="lead-danger-btn" onClick={() => voidPurchase(row)}>作廢</button>
         ])}
       />
     </section>
@@ -1208,6 +1359,19 @@ function SalesManager({ companyId }) {
     }
   }
 
+  async function voidSale(row) {
+    if (!confirm(`確定作廢銷貨單「${row.saleNo || row.id}」？作廢後會回滾庫存。`)) return;
+    try {
+      setMessage('');
+      setError('');
+      await api(`/sales/${row.id}/void?companyId=${companyId}`, { method: 'POST' });
+      setMessage('銷貨單已作廢，庫存已回滾');
+      await load();
+    } catch (err) {
+      setError(err.message || '作廢銷貨單失敗');
+    }
+  }
+
   const subtotal = Number(form.quantity || 0) * Number(form.unitPrice || 0);
 
   return (
@@ -1235,7 +1399,7 @@ function SalesManager({ companyId }) {
       </form>
 
       <Table
-        cols={['日期', '單號', '客戶', '類別', '總額', '收款狀態', '已收款', '備註']}
+        cols={['日期', '單號', '客戶', '類別', '總額', '收款狀態', '狀態', '已收款', '備註', '操作']}
         rows={rows.map((row) => [
           row.saleDate,
           row.saleNo,
@@ -1243,8 +1407,12 @@ function SalesManager({ companyId }) {
           row.category || '-',
           money(row.total),
           row.collectionStatus,
+          row.status === 'void' ? '作廢' : '已確認',
           money(row.receivedAmount),
-          row.note || '-'
+          row.note || '-',
+          row.status === 'void'
+            ? '-'
+            : <button type="button" className="lead-danger-btn" onClick={() => voidSale(row)}>作廢</button>
         ])}
       />
     </section>

@@ -2689,6 +2689,10 @@ button.lead-danger-btn {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.erp-contact-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .erp-form-total {
   display: grid;
   align-content: center;
