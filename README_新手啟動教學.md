@@ -38,13 +38,13 @@ npm -v
 npm run install:all
 ```
 
-## 第 3 步：建立 Demo 帳號
+## 第 3 步：建立本機測試帳號
 
 ```bash
 npm run seed
 ```
 
-Demo 帳號：
+本機測試帳號：
 
 ```text
 Email: demo@bookai.com.tw

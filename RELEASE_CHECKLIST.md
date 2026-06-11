@@ -20,8 +20,8 @@
 
 ## 權限實測
 
-- Admin / GM 帳號可看到 BookAI 後台。
-- 一般帳號看不到 BookAI 後台。
+- 系統管理員帳號可看到 BookAI 營運後台。
+- 一般帳號看不到 BookAI 營運後台。
 - 一般帳號直接呼叫 `/api/admin/*` 會回 403。
 - 一般帳號只能操作自己的公司資料。
 
@@ -34,7 +34,7 @@
 - 銷貨庫存不足會被阻擋。
 - 進貨作廢會扣回庫存。
 - 銷貨作廢會加回庫存。
-- Dashboard 本月進貨 / 銷貨 / 未收款 / 未付款數字合理。
+- Dashboard 本月進貨 / 銷貨 / 應收 / 應付數字合理。
 
 ## 產品頁面實測
 
@@ -47,11 +47,11 @@
 - 案場中心。
 - 標案雷達。
 - Commerce 官網後台。
-- BookAI 後台。
+- BookAI 營運後台。
 - 手機版 RWD。
 
 ## 官方網站
 
 - 官方網站「登入 BookAI」CTA 導向 production app。
-- 不導向 Demo、測試入口或 localhost。
+- 不導向測試資料工具、未登入系統頁面或 localhost。
 - 手機版 header / menu / cards 不破版。

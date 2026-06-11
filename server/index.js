@@ -31,7 +31,7 @@ const ADMIN_EMAIL = [...ADMIN_EMAILS][0] || DEFAULT_ADMIN_EMAIL;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' ? '' : 'demo123456');
 const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || process.env.BOOKAI_BOOTSTRAP_SECRET || '';
 const ADMIN_NAME = 'BookAI Admin';
-const ADMIN_COMPANY = 'BookAI 管理控制塔';
+const ADMIN_COMPANY = 'BookAI 系統管理中心';
 
 function assertProductionSecrets() {
   if (NODE_ENV !== 'production') return;
@@ -113,7 +113,7 @@ function requireAdmin(req, res, next) {
     return next();
   }
 
-  return res.status(403).json({ error: '沒有 BookAI 後台權限' });
+  return res.status(403).json({ error: '沒有 BookAI 營運後台權限' });
 }
 
 function company(req, res, next) {
@@ -280,7 +280,7 @@ function ensureAdminBootstrapAccount() {
       'active',
       'engineering_premium',
       1,
-      'BookAI 管理者帳號',
+      'BookAI 系統管理員帳號',
       companyId
     );
   } else {
@@ -310,7 +310,7 @@ function ensureAdminBootstrapAccount() {
       'active',
       'engineering_premium',
       1,
-      'BookAI 管理者帳號'
+      'BookAI 系統管理員帳號'
     );
     companyId = companyRow.lastInsertRowid;
   }
@@ -755,7 +755,7 @@ app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res)
   }
 
   if (tester_feedback_status && !testerFeedbackStatuses.has(tester_feedback_status)) {
-    return res.status(400).json({ error: '不支援的測試回饋狀態' });
+    return res.status(400).json({ error: '不支援的使用回饋狀態' });
   }
 
   const existing = db.prepare(`
@@ -846,7 +846,7 @@ app.post('/api/admin/demo/engineering', auth, requireAdmin, (req, res) => {
     });
   } catch (err) {
     res.status(500).json({
-      error: '工程 Demo 建立或更新失敗',
+      error: '工程測試資料建立或更新失敗',
       detail: err.message
     });
   }
@@ -1495,6 +1495,8 @@ function contactRow(row) {
 }
 
 function purchaseRow(row) {
+  const total = erpNumber(row.total, 0);
+  const paidAmount = erpNumber(row.paid_amount, 0);
   return {
     id: row.id,
     companyId: row.company_id,
@@ -1505,9 +1507,10 @@ function purchaseRow(row) {
     category: row.category || '',
     subtotal: row.subtotal || 0,
     tax: row.tax || 0,
-    total: row.total || 0,
+    total,
     paymentStatus: row.payment_status || '未付款',
-    paidAmount: row.paid_amount || 0,
+    paidAmount,
+    remainingAmount: Math.max(Math.round((total - paidAmount) * 100) / 100, 0),
     status: row.status || 'confirmed',
     note: row.note || '',
     createdAt: row.created_at
@@ -1515,6 +1518,8 @@ function purchaseRow(row) {
 }
 
 function saleRow(row) {
+  const total = erpNumber(row.total, 0);
+  const receivedAmount = erpNumber(row.received_amount, 0);
   return {
     id: row.id,
     companyId: row.company_id,
@@ -1525,9 +1530,10 @@ function saleRow(row) {
     category: row.category || '',
     subtotal: row.subtotal || 0,
     tax: row.tax || 0,
-    total: row.total || 0,
+    total,
     collectionStatus: row.collection_status || '未收款',
-    receivedAmount: row.received_amount || 0,
+    receivedAmount,
+    remainingAmount: Math.max(Math.round((total - receivedAmount) * 100) / 100, 0),
     status: row.status || 'confirmed',
     note: row.note || '',
     createdAt: row.created_at
@@ -1580,6 +1586,44 @@ function getProductForUpdate(companyId, productId) {
     WHERE id = ?
       AND company_id = ?
   `).get(productId, companyId);
+}
+
+function salesCollectionStatus(total, receivedAmount) {
+  if (receivedAmount <= 0) return '未收款';
+  if (receivedAmount >= total) return '已收款';
+  return '部分收款';
+}
+
+function purchasePaymentStatus(total, paidAmount) {
+  if (paidAmount <= 0) return '未付款';
+  if (paidAmount >= total) return '已付款';
+  return '部分付款';
+}
+
+function saleReceiptRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    saleId: row.sale_id,
+    amount: row.amount || 0,
+    receiptDate: row.receipt_date || '',
+    method: row.method || '',
+    note: row.note || '',
+    createdAt: row.created_at || ''
+  };
+}
+
+function purchasePaymentRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    purchaseId: row.purchase_id,
+    amount: row.amount || 0,
+    paymentDate: row.payment_date || '',
+    method: row.method || '',
+    note: row.note || '',
+    createdAt: row.created_at || ''
+  };
 }
 
 app.get('/api/suppliers/list', auth, company, (req, res) => {
@@ -1780,10 +1824,77 @@ app.delete('/api/purchases/:id', auth, company, requireRole('owner', 'admin'), (
   res.status(400).json({ error: '此版本尚未開放刪除已入庫單據' });
 });
 
+app.get('/api/purchases/:id/payments', auth, company, (req, res) => {
+  const purchase = db.prepare('SELECT id FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
+
+  const rows = db.prepare(`
+    SELECT *
+    FROM purchase_payments
+    WHERE purchase_id = ?
+      AND company_id = ?
+    ORDER BY payment_date DESC, id DESC
+  `).all(req.params.id, req.company.id);
+
+  res.json(rows.map(purchasePaymentRow));
+});
+
+app.post('/api/purchases/:id/payments', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+  const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
+  if ((purchase.status || 'confirmed') === 'void') return res.status(400).json({ error: '作廢進貨單不可新增付款' });
+
+  const amount = Math.round(erpNumber(req.body?.amount, 0) * 100) / 100;
+  if (amount <= 0) return res.status(400).json({ error: '付款金額必須大於 0' });
+
+  const total = erpNumber(purchase.total, 0);
+  const paidAmount = erpNumber(purchase.paid_amount, 0);
+  const nextPaid = Math.round((paidAmount + amount) * 100) / 100;
+  if (nextPaid > total) return res.status(400).json({ error: '付款金額不可超過進貨單總額' });
+
+  const result = db.transaction(() => {
+    const row = db.prepare(`
+      INSERT INTO purchase_payments (
+        company_id,
+        purchase_id,
+        amount,
+        payment_date,
+        method,
+        note
+      )
+      VALUES (?,?,?,?,?,?)
+    `).run(
+      req.company.id,
+      purchase.id,
+      amount,
+      req.body?.paymentDate || req.body?.payment_date || new Date().toISOString().slice(0, 10),
+      req.body?.method || '',
+      req.body?.note || ''
+    );
+
+    db.prepare(`
+      UPDATE purchases
+      SET
+        paid_amount = ?,
+        payment_status = ?
+      WHERE id = ?
+        AND company_id = ?
+    `).run(nextPaid, purchasePaymentStatus(total, nextPaid), purchase.id, req.company.id);
+
+    return row.lastInsertRowid;
+  })();
+
+  audit(req.company.id, req.user.id, 'purchase_payment_created', String(result));
+  const updated = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(purchase.id, req.company.id);
+  res.json({ ok: true, paymentId: result, purchase: purchaseRow(updated) });
+});
+
 app.post('/api/purchases/:id/void', auth, company, requireRole('owner', 'admin'), (req, res) => {
   const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
   if ((purchase.status || 'confirmed') === 'void') return res.status(400).json({ error: '此進貨單已作廢' });
+  const paymentCount = db.prepare('SELECT COUNT(*) count FROM purchase_payments WHERE purchase_id = ? AND company_id = ?').get(req.params.id, req.company.id).count;
+  if (paymentCount > 0) return res.status(400).json({ error: '已有付款紀錄，請先確認帳務處理' });
 
   const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? AND company_id = ?').all(req.params.id, req.company.id);
 
@@ -1928,10 +2039,77 @@ app.delete('/api/sales/:id', auth, company, requireRole('owner', 'admin'), (req,
   res.status(400).json({ error: '此版本尚未開放刪除已出庫單據' });
 });
 
+app.get('/api/sales/:id/receipts', auth, company, (req, res) => {
+  const sale = db.prepare('SELECT id FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
+
+  const rows = db.prepare(`
+    SELECT *
+    FROM sale_receipts
+    WHERE sale_id = ?
+      AND company_id = ?
+    ORDER BY receipt_date DESC, id DESC
+  `).all(req.params.id, req.company.id);
+
+  res.json(rows.map(saleReceiptRow));
+});
+
+app.post('/api/sales/:id/receipts', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+  const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
+  if ((sale.status || 'confirmed') === 'void') return res.status(400).json({ error: '作廢銷貨單不可新增收款' });
+
+  const amount = Math.round(erpNumber(req.body?.amount, 0) * 100) / 100;
+  if (amount <= 0) return res.status(400).json({ error: '收款金額必須大於 0' });
+
+  const total = erpNumber(sale.total, 0);
+  const receivedAmount = erpNumber(sale.received_amount, 0);
+  const nextReceived = Math.round((receivedAmount + amount) * 100) / 100;
+  if (nextReceived > total) return res.status(400).json({ error: '收款金額不可超過銷貨單總額' });
+
+  const result = db.transaction(() => {
+    const row = db.prepare(`
+      INSERT INTO sale_receipts (
+        company_id,
+        sale_id,
+        amount,
+        receipt_date,
+        method,
+        note
+      )
+      VALUES (?,?,?,?,?,?)
+    `).run(
+      req.company.id,
+      sale.id,
+      amount,
+      req.body?.receiptDate || req.body?.receipt_date || new Date().toISOString().slice(0, 10),
+      req.body?.method || '',
+      req.body?.note || ''
+    );
+
+    db.prepare(`
+      UPDATE sales
+      SET
+        received_amount = ?,
+        collection_status = ?
+      WHERE id = ?
+        AND company_id = ?
+    `).run(nextReceived, salesCollectionStatus(total, nextReceived), sale.id, req.company.id);
+
+    return row.lastInsertRowid;
+  })();
+
+  audit(req.company.id, req.user.id, 'sale_receipt_created', String(result));
+  const updated = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(sale.id, req.company.id);
+  res.json({ ok: true, receiptId: result, sale: saleRow(updated) });
+});
+
 app.post('/api/sales/:id/void', auth, company, requireRole('owner', 'admin'), (req, res) => {
   const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
   if ((sale.status || 'confirmed') === 'void') return res.status(400).json({ error: '此銷貨單已作廢' });
+  const receiptCount = db.prepare('SELECT COUNT(*) count FROM sale_receipts WHERE sale_id = ? AND company_id = ?').get(req.params.id, req.company.id).count;
+  if (receiptCount > 0) return res.status(400).json({ error: '已有收款紀錄，請先確認帳務處理' });
 
   const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ? AND company_id = ?').all(req.params.id, req.company.id);
 
@@ -1963,6 +2141,68 @@ app.post('/api/sales/:id/void', auth, company, requireRole('owner', 'admin'), (r
   } catch (err) {
     res.status(400).json({ error: err.message || '作廢銷貨單失敗' });
   }
+});
+
+app.get('/api/receivables/list', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      id,
+      sale_no,
+      customer_name,
+      sale_date,
+      total,
+      received_amount,
+      collection_status,
+      note
+    FROM sales
+    WHERE company_id = ?
+      AND COALESCE(status, 'confirmed') != 'void'
+      AND COALESCE(total, 0) > COALESCE(received_amount, 0)
+    ORDER BY sale_date DESC, id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map((row) => ({
+    id: row.id,
+    documentNo: row.sale_no || '',
+    customerName: row.customer_name || '',
+    date: row.sale_date || '',
+    total: row.total || 0,
+    receivedAmount: row.received_amount || 0,
+    remainingAmount: Math.max(Math.round((erpNumber(row.total, 0) - erpNumber(row.received_amount, 0)) * 100) / 100, 0),
+    collectionStatus: row.collection_status || '未收款',
+    note: row.note || ''
+  })));
+});
+
+app.get('/api/payables/list', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT
+      id,
+      purchase_no,
+      supplier_name,
+      purchase_date,
+      total,
+      paid_amount,
+      payment_status,
+      note
+    FROM purchases
+    WHERE company_id = ?
+      AND COALESCE(status, 'confirmed') != 'void'
+      AND COALESCE(total, 0) > COALESCE(paid_amount, 0)
+    ORDER BY purchase_date DESC, id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map((row) => ({
+    id: row.id,
+    documentNo: row.purchase_no || '',
+    supplierName: row.supplier_name || '',
+    date: row.purchase_date || '',
+    total: row.total || 0,
+    paidAmount: row.paid_amount || 0,
+    remainingAmount: Math.max(Math.round((erpNumber(row.total, 0) - erpNumber(row.paid_amount, 0)) * 100) / 100, 0),
+    paymentStatus: row.payment_status || '未付款',
+    note: row.note || ''
+  })));
 });
 
 app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
@@ -2055,6 +2295,20 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
       AND COALESCE(status, 'confirmed') != 'void'
   `).get(req.company.id).total;
 
+  const collectedSales = db.prepare(`
+    SELECT COALESCE(SUM(received_amount),0) total
+    FROM sales
+    WHERE company_id = ?
+      AND COALESCE(status, 'confirmed') != 'void'
+  `).get(req.company.id).total;
+
+  const paidPurchases = db.prepare(`
+    SELECT COALESCE(SUM(paid_amount),0) total
+    FROM purchases
+    WHERE company_id = ?
+      AND COALESCE(status, 'confirmed') != 'void'
+  `).get(req.company.id).total;
+
   res.json({
     revenue: income + monthlySales,
     expenses: fees + cogs + vouchers,
@@ -2068,7 +2322,9 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
     monthlySales,
     monthlyPurchases,
     unpaidSales,
-    unpaidPurchases
+    unpaidPurchases,
+    collectedSales,
+    paidPurchases
   });
 });
 

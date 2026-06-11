@@ -470,6 +470,38 @@ export function initDb() {
   CREATE INDEX IF NOT EXISTS sale_items_sale_idx
   ON sale_items(company_id, sale_id);
 
+  CREATE TABLE IF NOT EXISTS sale_receipts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    sale_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    receipt_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    method TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(sale_id) REFERENCES sales(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS sale_receipts_sale_idx
+  ON sale_receipts(company_id, sale_id);
+
+  CREATE TABLE IF NOT EXISTS purchase_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    purchase_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    method TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(purchase_id) REFERENCES purchases(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS purchase_payments_purchase_idx
+  ON purchase_payments(company_id, purchase_id);
+
   CREATE TABLE IF NOT EXISTS feedbacks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER NOT NULL,

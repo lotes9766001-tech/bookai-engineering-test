@@ -30,7 +30,7 @@ function section(title) {
 
 let hasError = false;
 
-section('BookAI v5.5 External Tester 健康檢查');
+section('BookAI v5.6 Commercial Readiness 健康檢查');
 
 if (!fs.existsSync(dbPath)) {
   fail(`找不到 SQLite 資料庫：${dbPath}`);
@@ -76,6 +76,8 @@ const requiredTables = [
   'purchase_items',
   'sales',
   'sale_items',
+  'sale_receipts',
+  'purchase_payments',
   'job_sites',
   'job_site_payments',
   'inventory_movements',
@@ -221,6 +223,26 @@ const requiredColumns = {
     'note',
     'created_at'
   ],
+  sale_receipts: [
+    'id',
+    'company_id',
+    'sale_id',
+    'amount',
+    'receipt_date',
+    'method',
+    'note',
+    'created_at'
+  ],
+  purchase_payments: [
+    'id',
+    'company_id',
+    'purchase_id',
+    'amount',
+    'payment_date',
+    'method',
+    'note',
+    'created_at'
+  ],
   feedbacks: [
     'id',
     'company_id',
@@ -314,6 +336,8 @@ const counts = {
   purchase_items: countRows('purchase_items'),
   sales: countRows('sales'),
   sale_items: countRows('sale_items'),
+  sale_receipts: countRows('sale_receipts'),
+  purchase_payments: countRows('purchase_payments'),
   job_sites: countRows('job_sites'),
   job_site_payments: countRows('job_site_payments'),
   inventory_movements: countRows('inventory_movements'),
@@ -521,6 +545,66 @@ if (badSaleTotals.length) {
   });
 } else {
   ok('銷貨單總額沒有空值或非數字。');
+}
+
+const badReceipts = tableExists('sale_receipts')
+  ? db.prepare(`
+      SELECT id, sale_id, amount
+      FROM sale_receipts
+      WHERE amount <= 0
+    `).all()
+  : [];
+
+if (badReceipts.length) {
+  hasError = true;
+  fail(`發現 ${badReceipts.length} 筆收款金額小於或等於 0。`);
+} else {
+  ok('收款金額皆大於 0。');
+}
+
+const badPayments = tableExists('purchase_payments')
+  ? db.prepare(`
+      SELECT id, purchase_id, amount
+      FROM purchase_payments
+      WHERE amount <= 0
+    `).all()
+  : [];
+
+if (badPayments.length) {
+  hasError = true;
+  fail(`發現 ${badPayments.length} 筆付款金額小於或等於 0。`);
+} else {
+  ok('付款金額皆大於 0。');
+}
+
+const overReceivedSales = tableExists('sales')
+  ? db.prepare(`
+      SELECT id, sale_no, total, received_amount
+      FROM sales
+      WHERE COALESCE(received_amount, 0) > COALESCE(total, 0)
+    `).all()
+  : [];
+
+if (overReceivedSales.length) {
+  hasError = true;
+  fail(`發現 ${overReceivedSales.length} 筆銷貨單已收款大於總額。`);
+} else {
+  ok('銷貨單沒有超收。');
+}
+
+const overPaidPurchases = tableExists('purchases')
+  ? db.prepare(`
+      SELECT id, purchase_no, total, paid_amount
+      FROM purchases
+      WHERE COALESCE(paid_amount, 0) > COALESCE(total, 0)
+    `).all()
+  : [];
+
+if (overPaidPurchases.length) {
+  hasError = true;
+  fail(`發現 ${overPaidPurchases.length} 筆進貨單已付款大於總額。`);
+} else {
+  ok('進貨單沒有超付。');
 }
 
 const negativeMaterialCost = tableExists('job_sites')

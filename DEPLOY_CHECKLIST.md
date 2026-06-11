@@ -13,9 +13,9 @@
 - `NODE_ENV=production`
 - `PORT`：Render 通常自動提供。
 - `JWT_SECRET`：正式環境必須使用高強度隨機字串。
-- `BOOTSTRAP_SECRET`：只用於 `/api/bootstrap/admin` 初始化或重設 GM / Admin。
-- `ADMIN_EMAIL`：BookAI GM / Admin Email，例如 `lotes.9766001@gmail.com`。
-- `ADMIN_PASSWORD`：正式 GM / Admin 密碼，必須由 Render env 設定。
+- `BOOTSTRAP_SECRET`：只用於 `/api/bootstrap/admin` 初始化或重設系統管理員。
+- `ADMIN_EMAIL`：BookAI 系統管理員 Email，例如 `lotes.9766001@gmail.com`。
+- `ADMIN_PASSWORD`：正式系統管理員密碼，必須由 Render env 設定。
 
 相容說明：舊環境若已設定 `BOOKAI_BOOTSTRAP_SECRET` 仍可運作，但正式部署建議改用 `BOOTSTRAP_SECRET`。
 
@@ -29,15 +29,15 @@
      -d '{"secret":"你的 BOOTSTRAP_SECRET"}'
    ```
 3. 使用 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 登入 BookAI。
-4. 進入 BookAI 後台，建立或檢查公司資料。
-5. 使用一般公司帳號登入，確認看不到 BookAI 後台。
+4. 進入 BookAI 營運後台，建立或檢查公司資料。
+5. 使用一般公司帳號登入，確認看不到 BookAI 營運後台。
 
 正式環境 bootstrap 回傳不會包含明文密碼；請以 Render env 中的 `ADMIN_PASSWORD` 登入。
 
 ## 4. 官方網站登入連結
 
 - 官方網站的「登入 BookAI」應導向已部署的 BookAI app URL。
-- 不要導向 Demo、測試入口、localhost 或未登入可見的 Command Center。
+- 不要導向測試資料工具、未登入系統頁面、localhost 或非正式網址。
 - 靜態官方網站若需要手動調整，請確認所有登入按鈕的 LOGIN_URL 都指向 production app。
 - 目前官方網站登入連結不得使用 `localhost:5173`。
 
@@ -55,7 +55,7 @@
 - 商品 / 材料庫存可正常顯示。
 - 接案中心、案場中心、標案雷達可正常開啟。
 - Commerce 官網後台不影響工程業公司。
-- BookAI 後台只給 GM / Admin 看到。
+- BookAI 營運後台只給系統管理員看到。
 - 一般帳號直接呼叫 `/api/admin/*` 應回 403。
 - 官方網站「登入 BookAI」按鈕導向 production app。
 - 手機版登入、Sidebar、表格與表單不橫向破版。
