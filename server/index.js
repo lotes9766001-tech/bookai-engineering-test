@@ -1202,7 +1202,438 @@ app.patch('/api/companies/:companyId/plan', auth, company, requireRole('owner', 
   });
 });
 
+const purchasePaymentStatuses = new Set(['未付款', '部分付款', '已付款']);
+const saleCollectionStatuses = new Set(['未收款', '部分收款', '已收款']);
+
+function erpNumber(value, fallback = 0) {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function contactBody(body = {}) {
+  return {
+    name: String(body.name || '').trim(),
+    phone: body.phone || '',
+    email: body.email || '',
+    taxId: body.taxId ?? body.tax_id ?? '',
+    address: body.address || '',
+    contactPerson: body.contactPerson ?? body.contact_person ?? '',
+    note: body.note || ''
+  };
+}
+
+function contactRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    name: row.name,
+    phone: row.phone || '',
+    email: row.email || '',
+    taxId: row.tax_id || '',
+    address: row.address || '',
+    contactPerson: row.contact_person || '',
+    note: row.note || '',
+    createdAt: row.created_at
+  };
+}
+
+function purchaseRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    supplierId: row.supplier_id,
+    supplierName: row.supplier_name || '',
+    purchaseNo: row.purchase_no || '',
+    purchaseDate: row.purchase_date || '',
+    category: row.category || '',
+    subtotal: row.subtotal || 0,
+    tax: row.tax || 0,
+    total: row.total || 0,
+    paymentStatus: row.payment_status || '未付款',
+    paidAmount: row.paid_amount || 0,
+    note: row.note || '',
+    createdAt: row.created_at
+  };
+}
+
+function saleRow(row) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    customerId: row.customer_id,
+    customerName: row.customer_name || '',
+    saleNo: row.sale_no || '',
+    saleDate: row.sale_date || '',
+    category: row.category || '',
+    subtotal: row.subtotal || 0,
+    tax: row.tax || 0,
+    total: row.total || 0,
+    collectionStatus: row.collection_status || '未收款',
+    receivedAmount: row.received_amount || 0,
+    note: row.note || '',
+    createdAt: row.created_at
+  };
+}
+
+function erpItemRow(row, type) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    productId: row.product_id,
+    itemName: row.item_name,
+    quantity: row.quantity || 0,
+    unit: row.unit || '',
+    unitCost: type === 'purchase' ? row.unit_cost || 0 : undefined,
+    unitPrice: type === 'sale' ? row.unit_price || 0 : undefined,
+    subtotal: row.subtotal || 0,
+    note: row.note || '',
+    createdAt: row.created_at
+  };
+}
+
+function normalizeErpItems(items = [], type = 'purchase') {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => {
+      const quantity = Math.max(0, erpNumber(item.quantity, 0));
+      const price = Math.max(0, erpNumber(type === 'purchase' ? item.unitCost ?? item.unit_cost : item.unitPrice ?? item.unit_price, 0));
+      return {
+        productId: Number(item.productId ?? item.product_id ?? 0) || null,
+        itemName: String(item.itemName ?? item.item_name ?? '').trim(),
+        quantity,
+        unit: item.unit || '',
+        price,
+        subtotal: Math.round(quantity * price * 100) / 100,
+        note: item.note || ''
+      };
+    })
+    .filter((item) => item.itemName && item.quantity > 0);
+}
+
+function erpTax(subtotal, bodyTax) {
+  const tax = erpNumber(bodyTax, Math.round(subtotal * 0.05 * 100) / 100);
+  return Math.max(0, Math.round(tax * 100) / 100);
+}
+
+function getProductForUpdate(companyId, productId) {
+  return db.prepare(`
+    SELECT *
+    FROM products
+    WHERE id = ?
+      AND company_id = ?
+  `).get(productId, companyId);
+}
+
+app.get('/api/suppliers/list', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM suppliers
+    WHERE company_id = ?
+    ORDER BY id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(contactRow));
+});
+
+app.post('/api/suppliers/create', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const b = contactBody(req.body);
+  if (!b.name) return res.status(400).json({ error: '請填寫供應商名稱' });
+
+  const row = db.prepare(`
+    INSERT INTO suppliers (
+      company_id, name, phone, email, tax_id, address, contact_person, note
+    )
+    VALUES (?,?,?,?,?,?,?,?)
+  `).run(req.company.id, b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note);
+
+  audit(req.company.id, req.user.id, 'supplier_created', String(row.lastInsertRowid));
+  res.json(contactRow(db.prepare('SELECT * FROM suppliers WHERE id = ? AND company_id = ?').get(row.lastInsertRowid, req.company.id)));
+});
+
+app.put('/api/suppliers/:id', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const b = contactBody(req.body);
+  if (!b.name) return res.status(400).json({ error: '請填寫供應商名稱' });
+
+  const result = db.prepare(`
+    UPDATE suppliers
+    SET name = ?, phone = ?, email = ?, tax_id = ?, address = ?, contact_person = ?, note = ?
+    WHERE id = ?
+      AND company_id = ?
+  `).run(b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note, req.params.id, req.company.id);
+
+  if (!result.changes) return res.status(404).json({ error: '找不到供應商' });
+  audit(req.company.id, req.user.id, 'supplier_updated', String(req.params.id));
+  res.json(contactRow(db.prepare('SELECT * FROM suppliers WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id)));
+});
+
+app.delete('/api/suppliers/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const result = db.prepare('DELETE FROM suppliers WHERE id = ? AND company_id = ?').run(req.params.id, req.company.id);
+  if (!result.changes) return res.status(404).json({ error: '找不到供應商' });
+  audit(req.company.id, req.user.id, 'supplier_deleted', String(req.params.id));
+  res.json({ ok: true });
+});
+
+app.get('/api/customers/list', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM customers
+    WHERE company_id = ?
+    ORDER BY id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(contactRow));
+});
+
+app.post('/api/customers/create', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const b = contactBody(req.body);
+  if (!b.name) return res.status(400).json({ error: '請填寫客戶名稱' });
+
+  const row = db.prepare(`
+    INSERT INTO customers (
+      company_id, name, phone, email, tax_id, address, contact_person, note
+    )
+    VALUES (?,?,?,?,?,?,?,?)
+  `).run(req.company.id, b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note);
+
+  audit(req.company.id, req.user.id, 'customer_created', String(row.lastInsertRowid));
+  res.json(contactRow(db.prepare('SELECT * FROM customers WHERE id = ? AND company_id = ?').get(row.lastInsertRowid, req.company.id)));
+});
+
+app.put('/api/customers/:id', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+  const b = contactBody(req.body);
+  if (!b.name) return res.status(400).json({ error: '請填寫客戶名稱' });
+
+  const result = db.prepare(`
+    UPDATE customers
+    SET name = ?, phone = ?, email = ?, tax_id = ?, address = ?, contact_person = ?, note = ?
+    WHERE id = ?
+      AND company_id = ?
+  `).run(b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note, req.params.id, req.company.id);
+
+  if (!result.changes) return res.status(404).json({ error: '找不到客戶' });
+  audit(req.company.id, req.user.id, 'customer_updated', String(req.params.id));
+  res.json(contactRow(db.prepare('SELECT * FROM customers WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id)));
+});
+
+app.delete('/api/customers/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  const result = db.prepare('DELETE FROM customers WHERE id = ? AND company_id = ?').run(req.params.id, req.company.id);
+  if (!result.changes) return res.status(404).json({ error: '找不到客戶' });
+  audit(req.company.id, req.user.id, 'customer_deleted', String(req.params.id));
+  res.json({ ok: true });
+});
+
+app.get('/api/purchases/list', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM purchases
+    WHERE company_id = ?
+    ORDER BY purchase_date DESC, id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(purchaseRow));
+});
+
+app.get('/api/purchases/:id', auth, company, (req, res) => {
+  const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
+  const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? AND company_id = ? ORDER BY id').all(req.params.id, req.company.id);
+  res.json({ ...purchaseRow(purchase), items: items.map((row) => erpItemRow(row, 'purchase')) });
+});
+
+app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+  const body = req.body || {};
+  const items = normalizeErpItems(body.items, 'purchase');
+  if (!items.length) return res.status(400).json({ error: '請至少新增一筆進貨明細' });
+
+  try {
+    const result = db.transaction(() => {
+      const subtotal = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const tax = erpTax(subtotal, body.tax);
+      const total = Math.round((subtotal + tax) * 100) / 100;
+      const status = purchasePaymentStatuses.has(body.paymentStatus) ? body.paymentStatus : '未付款';
+      const supplierId = Number(body.supplierId || 0) || null;
+      let supplierName = body.supplierName || '';
+      if (supplierId) {
+        const supplier = db.prepare('SELECT name FROM suppliers WHERE id = ? AND company_id = ?').get(supplierId, req.company.id);
+        if (!supplier) throw new Error('找不到供應商');
+        supplierName = supplier.name;
+      }
+
+      const purchase = db.prepare(`
+        INSERT INTO purchases (
+          company_id, supplier_id, supplier_name, purchase_no, purchase_date, category,
+          subtotal, tax, total, payment_status, paid_amount, note
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        req.company.id,
+        supplierId,
+        supplierName,
+        body.purchaseNo || `PO-${Date.now()}`,
+        body.purchaseDate || new Date().toISOString().slice(0, 10),
+        body.category || '',
+        subtotal,
+        tax,
+        total,
+        status,
+        erpNumber(body.paidAmount, 0),
+        body.note || ''
+      );
+
+      const itemStmt = db.prepare(`
+        INSERT INTO purchase_items (
+          company_id, purchase_id, product_id, item_name, quantity, unit, unit_cost, subtotal, note
+        )
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `);
+
+      const movementStmt = db.prepare(`
+        INSERT INTO inventory_movements (
+          company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+        )
+        VALUES (?,?,?,?,?,?,?,?)
+      `);
+
+      items.forEach((item) => {
+        itemStmt.run(req.company.id, purchase.lastInsertRowid, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note);
+        if (item.productId) {
+          const product = getProductForUpdate(req.company.id, item.productId);
+          if (!product) throw new Error(`找不到商品 / 材料：${item.itemName}`);
+          const beforeStock = erpNumber(product.stock, 0);
+          const afterStock = Math.round((beforeStock + item.quantity) * 100) / 100;
+          db.prepare('UPDATE products SET stock = ?, cost = ? WHERE id = ? AND company_id = ?').run(afterStock, item.price, item.productId, req.company.id);
+          movementStmt.run(req.company.id, item.productId, 'purchase', item.quantity, beforeStock, afterStock, item.price, `進貨單 ${body.purchaseNo || purchase.lastInsertRowid}`);
+        }
+      });
+
+      return purchase.lastInsertRowid;
+    })();
+
+    audit(req.company.id, req.user.id, 'purchase_created', String(result));
+    const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(result, req.company.id);
+    res.json(purchaseRow(purchase));
+  } catch (err) {
+    res.status(400).json({ error: err.message || '建立進貨單失敗' });
+  }
+});
+
+app.delete('/api/purchases/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  res.status(400).json({ error: '此版本尚未開放刪除已入庫單據' });
+});
+
+app.get('/api/sales/list', auth, company, (req, res) => {
+  const rows = db.prepare(`
+    SELECT *
+    FROM sales
+    WHERE company_id = ?
+    ORDER BY sale_date DESC, id DESC
+  `).all(req.company.id);
+
+  res.json(rows.map(saleRow));
+});
+
+app.get('/api/sales/:id', auth, company, (req, res) => {
+  const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+  if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
+  const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ? AND company_id = ? ORDER BY id').all(req.params.id, req.company.id);
+  res.json({ ...saleRow(sale), items: items.map((row) => erpItemRow(row, 'sale')) });
+});
+
+app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+  const body = req.body || {};
+  const items = normalizeErpItems(body.items, 'sale');
+  if (!items.length) return res.status(400).json({ error: '請至少新增一筆銷貨明細' });
+
+  try {
+    const result = db.transaction(() => {
+      for (const item of items) {
+        if (item.productId) {
+          const product = getProductForUpdate(req.company.id, item.productId);
+          if (!product) throw new Error(`找不到商品 / 材料：${item.itemName}`);
+          const beforeStock = erpNumber(product.stock, 0);
+          if (beforeStock < item.quantity) {
+            throw new Error(`${product.name} 庫存不足，目前 ${beforeStock}，需要 ${item.quantity}`);
+          }
+        }
+      }
+
+      const subtotal = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const tax = erpTax(subtotal, body.tax);
+      const total = Math.round((subtotal + tax) * 100) / 100;
+      const status = saleCollectionStatuses.has(body.collectionStatus) ? body.collectionStatus : '未收款';
+      const customerId = Number(body.customerId || 0) || null;
+      let customerName = body.customerName || '';
+      if (customerId) {
+        const customer = db.prepare('SELECT name FROM customers WHERE id = ? AND company_id = ?').get(customerId, req.company.id);
+        if (!customer) throw new Error('找不到客戶');
+        customerName = customer.name;
+      }
+
+      const sale = db.prepare(`
+        INSERT INTO sales (
+          company_id, customer_id, customer_name, sale_no, sale_date, category,
+          subtotal, tax, total, collection_status, received_amount, note
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      `).run(
+        req.company.id,
+        customerId,
+        customerName,
+        body.saleNo || `SO-${Date.now()}`,
+        body.saleDate || new Date().toISOString().slice(0, 10),
+        body.category || '',
+        subtotal,
+        tax,
+        total,
+        status,
+        erpNumber(body.receivedAmount, 0),
+        body.note || ''
+      );
+
+      const itemStmt = db.prepare(`
+        INSERT INTO sale_items (
+          company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, note
+        )
+        VALUES (?,?,?,?,?,?,?,?,?)
+      `);
+
+      const movementStmt = db.prepare(`
+        INSERT INTO inventory_movements (
+          company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+        )
+        VALUES (?,?,?,?,?,?,?,?)
+      `);
+
+      items.forEach((item) => {
+        itemStmt.run(req.company.id, sale.lastInsertRowid, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note);
+        if (item.productId) {
+          const product = getProductForUpdate(req.company.id, item.productId);
+          const beforeStock = erpNumber(product.stock, 0);
+          const afterStock = Math.round((beforeStock - item.quantity) * 100) / 100;
+          db.prepare('UPDATE products SET stock = ? WHERE id = ? AND company_id = ?').run(afterStock, item.productId, req.company.id);
+          movementStmt.run(req.company.id, item.productId, 'sale', item.quantity, beforeStock, afterStock, erpNumber(product.cost, 0), `銷貨單 ${body.saleNo || sale.lastInsertRowid}`);
+        }
+      });
+
+      return sale.lastInsertRowid;
+    })();
+
+    audit(req.company.id, req.user.id, 'sale_created', String(result));
+    const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(result, req.company.id);
+    res.json(saleRow(sale));
+  } catch (err) {
+    res.status(400).json({ error: err.message || '建立銷貨單失敗' });
+  }
+});
+
+app.delete('/api/sales/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
+  res.status(400).json({ error: '此版本尚未開放刪除已出庫單據' });
+});
+
 app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  const monthStartText = monthStart.toISOString().slice(0, 10);
+
   const income = db.prepare(`
     SELECT COALESCE(SUM(gross_amount),0) total
     FROM transactions
@@ -1256,16 +1687,48 @@ app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
       AND stock <= safety_stock
   `).get(req.company.id).count;
 
+  const monthlySales = db.prepare(`
+    SELECT COALESCE(SUM(total),0) total
+    FROM sales
+    WHERE company_id = ?
+      AND date(sale_date) >= date(?)
+  `).get(req.company.id, monthStartText).total;
+
+  const monthlyPurchases = db.prepare(`
+    SELECT COALESCE(SUM(total),0) total
+    FROM purchases
+    WHERE company_id = ?
+      AND date(purchase_date) >= date(?)
+  `).get(req.company.id, monthStartText).total;
+
+  const unpaidSales = db.prepare(`
+    SELECT COALESCE(SUM(MAX(total - received_amount, 0)),0) total
+    FROM sales
+    WHERE company_id = ?
+      AND collection_status != '已收款'
+  `).get(req.company.id).total;
+
+  const unpaidPurchases = db.prepare(`
+    SELECT COALESCE(SUM(MAX(total - paid_amount, 0)),0) total
+    FROM purchases
+    WHERE company_id = ?
+      AND payment_status != '已付款'
+  `).get(req.company.id).total;
+
   res.json({
-    revenue: income,
+    revenue: income + monthlySales,
     expenses: fees + cogs + vouchers,
-    netProfit: income - fees - cogs - vouchers,
+    netProfit: income + monthlySales - fees - cogs - vouchers - monthlyPurchases,
     cogs,
     fees,
     txCount,
     invoicesPending,
     revenueByPlatform,
-    lowStock
+    lowStock,
+    monthlySales,
+    monthlyPurchases,
+    unpaidSales,
+    unpaidPurchases
   });
 });
 

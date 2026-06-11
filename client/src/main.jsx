@@ -126,7 +126,9 @@ const industryLabel = {
 const navs = {
   business: [
     ['dashboard', '經營總覽', BarChart3],
-    ['transactions', '進貨 / 銷貨', WalletCards],
+    ['purchases', '進貨管理', WalletCards],
+    ['sales', '銷貨管理', WalletCards],
+    ['transactions', '收支管理', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '商品 / 材料庫存', Package],
@@ -136,7 +138,9 @@ const navs = {
   ],
   pro: [
     ['dashboard', '經營總覽', BarChart3],
-    ['transactions', '進貨 / 銷貨', WalletCards],
+    ['purchases', '進貨管理', WalletCards],
+    ['sales', '銷貨管理', WalletCards],
+    ['transactions', '收支管理', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['accounting', '會計中心', Layers],
@@ -562,7 +566,9 @@ function Shell({ onLogout }) {
   const constructionNav = [
     ['dashboard', '經營總覽', BarChart3],
     ['leads', '接案中心', FileText],
-    ['transactions', '進貨 / 銷貨', WalletCards],
+    ['purchases', '進貨管理', WalletCards],
+    ['sales', '銷貨管理', WalletCards],
+    ['transactions', '收支管理', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '材料 / 工具庫存 ERP', Package],
@@ -685,6 +691,8 @@ if (!me || !company) {
         {page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
         {page === 'leads' && <LeadCenterMock companyId={companyId} />}
         {page === 'transactions' && <Transactions companyId={companyId} />}
+        {page === 'purchases' && <PurchasesManager companyId={companyId} />}
+        {page === 'sales' && <SalesManager companyId={companyId} />}
         {page === 'integrations' && (
           <Integrations
             companyId={companyId}
@@ -870,7 +878,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
               <strong>資料已同步</strong>
             </div>
             <div className="command-quick-actions">
-              <button type="button" onClick={() => onNavigate?.('transactions')}>新增進貨 / 銷貨</button>
+              <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
+              <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
               <button type="button" onClick={() => onNavigate?.('leads')}>新增案源</button>
               <button type="button" onClick={() => onNavigate?.('jobsites')}>新增案場</button>
               <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
@@ -879,12 +888,12 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
         </div>
 
         <div className="command-metrics">
-          <Card title="本月營收" value={money(constructionStats.received)} sub={`收款率 ${constructionStats.collectionRate}%`} />
-          <Card title="未收款金額" value={money(constructionStats.unpaid)} sub="需持續追蹤請款" />
+          <Card title="本月銷貨總額" value={money(s.monthlySales || constructionStats.received)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
+          <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} sub={`未付款 ${money(s.unpaidPurchases || 0)}`} />
+          <Card title="未收款金額" value={money((s.unpaidSales || 0) + constructionStats.unpaid)} sub="需持續追蹤請款" />
           <Card title="進行中案場" value={activeSites} sub={`總案場 ${constructionStats.sites.length} 件`} />
           <Card title="預估毛利" value={money(constructionStats.profit)} sub={`毛利率 ${constructionStats.marginRate}%`} />
           <Card title="接案中心狀態" value={`${priorityLeads} 件`} sub={`案源總數 ${leads.length} 件`} />
-          <Card title="標案雷達機會" value={`${tenderLeads} 件`} sub="政府 / 地方案源" />
         </div>
 
         <div className="command-layout">
@@ -902,7 +911,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
 
           <div className="panel command-actions">
             <h2>快速操作</h2>
-            <button type="button" onClick={() => onNavigate?.('transactions')}>新增進貨 / 銷貨</button>
+            <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
+            <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
             <button type="button" onClick={() => onNavigate?.('leads')}>檢查接案中心</button>
             <button type="button" onClick={() => onNavigate?.('jobsites')}>管理案場中心</button>
             <button type="button" onClick={() => onNavigate?.('jobsites')}>登記收款</button>
@@ -939,7 +949,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
             <strong>資料已同步</strong>
           </div>
           <div className="command-quick-actions">
-            <button type="button" onClick={() => onNavigate?.('transactions')}>新增進貨 / 銷貨</button>
+            <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
+            <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
             <button type="button" onClick={() => onNavigate?.('inventory')}>檢查庫存</button>
             <button type="button" onClick={() => onNavigate?.('invoices')}>處理發票</button>
             <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
@@ -948,8 +959,11 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
       </div>
 
       <div className="command-metrics">
+        <Card title="本月銷貨總額" value={money(s.monthlySales || 0)} />
+        <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} />
+        <Card title="未收款金額" value={money(s.unpaidSales || 0)} />
+        <Card title="未付款金額" value={money(s.unpaidPurchases || 0)} />
         <Card title="總營收" value={money(s.revenue)} />
-        <Card title="總支出" value={money(s.expenses)} />
         <Card title="淨利" value={money(s.netProfit)} />
         <Card title="低庫存警示" value={s.lowStock} />
       </div>
@@ -972,13 +986,267 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
         <div className="panel">
           <h2>營運摘要</h2>
           <ul className="summary">
-            <li>交易筆數：{s.txCount}</li>
+          <li>本月銷貨總額：{money(s.monthlySales || 0)}</li>
+          <li>本月進貨總額：{money(s.monthlyPurchases || 0)}</li>
+          <li>未收款金額：{money(s.unpaidSales || 0)}</li>
+          <li>未付款金額：{money(s.unpaidPurchases || 0)}</li>
+          <li>交易筆數：{s.txCount}</li>
             <li>平台手續費：{money(s.fees)}</li>
             <li>商品成本：{money(s.cogs)}</li>
             <li>待處理發票：{s.invoicesPending}</li>
           </ul>
         </div>
       </div>
+    </section>
+  );
+}
+
+function PurchasesManager({ companyId }) {
+  const [rows, setRows] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({
+    supplierName: '',
+    supplierId: '',
+    purchaseDate: new Date().toISOString().slice(0, 10),
+    category: '商品',
+    itemName: '',
+    productId: '',
+    quantity: 1,
+    unit: '',
+    unitCost: 0,
+    tax: '',
+    paymentStatus: '未付款',
+    paidAmount: 0,
+    note: ''
+  });
+
+  async function load() {
+    const [purchaseRows, productRows, supplierRows] = await Promise.all([
+      api(`/purchases/list?companyId=${companyId}`),
+      api(`/companies/${companyId}/products`),
+      api(`/suppliers/list?companyId=${companyId}`)
+    ]);
+    setRows(purchaseRows || []);
+    setProducts(productRows || []);
+    setSuppliers(supplierRows || []);
+  }
+
+  useEffect(() => {
+    load().catch((err) => setError(err.message || '讀取進貨資料失敗'));
+  }, [companyId]);
+
+  function selectProduct(productId) {
+    const product = products.find((p) => String(p.id) === String(productId));
+    setForm({
+      ...form,
+      productId,
+      itemName: product?.name || form.itemName,
+      unit: product?.unit || form.unit,
+      unitCost: product?.cost || form.unitCost
+    });
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      setMessage('');
+      setError('');
+      const supplier = suppliers.find((s) => String(s.id) === String(form.supplierId));
+      await api(`/purchases/create?companyId=${companyId}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          supplierId: form.supplierId || null,
+          supplierName: supplier?.name || form.supplierName,
+          purchaseDate: form.purchaseDate,
+          category: form.category,
+          tax: form.tax === '' ? undefined : Number(form.tax),
+          paymentStatus: form.paymentStatus,
+          paidAmount: Number(form.paidAmount || 0),
+          note: form.note,
+          items: [{
+            productId: form.productId || null,
+            itemName: form.itemName,
+            quantity: Number(form.quantity || 0),
+            unit: form.unit,
+            unitCost: Number(form.unitCost || 0)
+          }]
+        })
+      });
+      setMessage('進貨單已建立，庫存已同步更新');
+      setForm({ ...form, itemName: '', productId: '', quantity: 1, unitCost: 0, note: '' });
+      await load();
+    } catch (err) {
+      setError(err.message || '建立進貨單失敗');
+    }
+  }
+
+  const subtotal = Number(form.quantity || 0) * Number(form.unitCost || 0);
+
+  return (
+    <section>
+      <Title title="進貨管理" desc="建立進貨單、同步庫存、追蹤付款狀態。" />
+      {message && <div className="notice">{message}</div>}
+      {error && <div className="error">{error}</div>}
+
+      <form className="form erp-form" onSubmit={submit}>
+        <label><span>供應商</span><select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })}><option value="">手動填寫</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
+        <label><span>供應商名稱</span><input value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} /></label>
+        <label><span>進貨日期</span><input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} /></label>
+        <label><span>類別</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>商品</option><option>材料</option><option>食材</option><option>耗材</option><option>其他</option></select></label>
+        <label><span>連動庫存品項</span><select value={form.productId} onChange={(e) => selectProduct(e.target.value)}><option value="">不連動庫存</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}｜庫存 {p.stock}</option>)}</select></label>
+        <label><span>品項名稱</span><input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} required /></label>
+        <label><span>數量</span><input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
+        <label><span>單位</span><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></label>
+        <label><span>單價</span><input type="number" min="0" step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: e.target.value })} /></label>
+        <label><span>稅額</span><input type="number" min="0" step="0.01" placeholder={`預設 ${Math.round(subtotal * 0.05)}`} value={form.tax} onChange={(e) => setForm({ ...form, tax: e.target.value })} /></label>
+        <label><span>付款狀態</span><select value={form.paymentStatus} onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}><option>未付款</option><option>部分付款</option><option>已付款</option></select></label>
+        <label><span>已付款金額</span><input type="number" min="0" step="0.01" value={form.paidAmount} onChange={(e) => setForm({ ...form, paidAmount: e.target.value })} /></label>
+        <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+        <div className="erp-form-total"><span>小計</span><strong>{money(subtotal)}</strong></div>
+        <button>建立進貨單</button>
+      </form>
+
+      <Table
+        cols={['日期', '單號', '供應商', '類別', '總額', '付款狀態', '已付款', '備註']}
+        rows={rows.map((row) => [
+          row.purchaseDate,
+          row.purchaseNo,
+          row.supplierName || '-',
+          row.category || '-',
+          money(row.total),
+          row.paymentStatus,
+          money(row.paidAmount),
+          row.note || '-'
+        ])}
+      />
+    </section>
+  );
+}
+
+function SalesManager({ companyId }) {
+  const [rows, setRows] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({
+    customerName: '',
+    customerId: '',
+    saleDate: new Date().toISOString().slice(0, 10),
+    category: '商品銷售',
+    itemName: '',
+    productId: '',
+    quantity: 1,
+    unit: '',
+    unitPrice: 0,
+    tax: '',
+    collectionStatus: '未收款',
+    receivedAmount: 0,
+    note: ''
+  });
+
+  async function load() {
+    const [saleRows, productRows, customerRows] = await Promise.all([
+      api(`/sales/list?companyId=${companyId}`),
+      api(`/companies/${companyId}/products`),
+      api(`/customers/list?companyId=${companyId}`)
+    ]);
+    setRows(saleRows || []);
+    setProducts(productRows || []);
+    setCustomers(customerRows || []);
+  }
+
+  useEffect(() => {
+    load().catch((err) => setError(err.message || '讀取銷貨資料失敗'));
+  }, [companyId]);
+
+  function selectProduct(productId) {
+    const product = products.find((p) => String(p.id) === String(productId));
+    setForm({
+      ...form,
+      productId,
+      itemName: product?.name || form.itemName,
+      unit: product?.unit || form.unit,
+      unitPrice: product?.price || form.unitPrice
+    });
+  }
+
+  async function submit(e) {
+    e.preventDefault();
+    try {
+      setMessage('');
+      setError('');
+      const customer = customers.find((c) => String(c.id) === String(form.customerId));
+      await api(`/sales/create?companyId=${companyId}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          customerId: form.customerId || null,
+          customerName: customer?.name || form.customerName,
+          saleDate: form.saleDate,
+          category: form.category,
+          tax: form.tax === '' ? undefined : Number(form.tax),
+          collectionStatus: form.collectionStatus,
+          receivedAmount: Number(form.receivedAmount || 0),
+          note: form.note,
+          items: [{
+            productId: form.productId || null,
+            itemName: form.itemName,
+            quantity: Number(form.quantity || 0),
+            unit: form.unit,
+            unitPrice: Number(form.unitPrice || 0)
+          }]
+        })
+      });
+      setMessage('銷貨單已建立，庫存已同步扣減');
+      setForm({ ...form, itemName: '', productId: '', quantity: 1, unitPrice: 0, note: '' });
+      await load();
+    } catch (err) {
+      setError(err.message || '建立銷貨單失敗');
+    }
+  }
+
+  const subtotal = Number(form.quantity || 0) * Number(form.unitPrice || 0);
+
+  return (
+    <section>
+      <Title title="銷貨管理" desc="建立銷貨單、同步扣減庫存、追蹤收款狀態。" />
+      {message && <div className="notice">{message}</div>}
+      {error && <div className="error">{error}</div>}
+
+      <form className="form erp-form" onSubmit={submit}>
+        <label><span>客戶</span><select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}><option value="">手動填寫</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
+        <label><span>客戶名稱</span><input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} /></label>
+        <label><span>銷貨日期</span><input type="date" value={form.saleDate} onChange={(e) => setForm({ ...form, saleDate: e.target.value })} /></label>
+        <label><span>類別</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>商品銷售</option><option>工程服務</option><option>餐飲營收</option><option>其他</option></select></label>
+        <label><span>連動庫存品項</span><select value={form.productId} onChange={(e) => selectProduct(e.target.value)}><option value="">不連動庫存</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}｜庫存 {p.stock}</option>)}</select></label>
+        <label><span>品項名稱</span><input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} required /></label>
+        <label><span>數量</span><input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
+        <label><span>單位</span><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></label>
+        <label><span>單價</span><input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: e.target.value })} /></label>
+        <label><span>稅額</span><input type="number" min="0" step="0.01" placeholder={`預設 ${Math.round(subtotal * 0.05)}`} value={form.tax} onChange={(e) => setForm({ ...form, tax: e.target.value })} /></label>
+        <label><span>收款狀態</span><select value={form.collectionStatus} onChange={(e) => setForm({ ...form, collectionStatus: e.target.value })}><option>未收款</option><option>部分收款</option><option>已收款</option></select></label>
+        <label><span>已收款金額</span><input type="number" min="0" step="0.01" value={form.receivedAmount} onChange={(e) => setForm({ ...form, receivedAmount: e.target.value })} /></label>
+        <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
+        <div className="erp-form-total"><span>小計</span><strong>{money(subtotal)}</strong></div>
+        <button>建立銷貨單</button>
+      </form>
+
+      <Table
+        cols={['日期', '單號', '客戶', '類別', '總額', '收款狀態', '已收款', '備註']}
+        rows={rows.map((row) => [
+          row.saleDate,
+          row.saleNo,
+          row.customerName || '-',
+          row.category || '-',
+          money(row.total),
+          row.collectionStatus,
+          money(row.receivedAmount),
+          row.note || '-'
+        ])}
+      />
     </section>
   );
 }
@@ -996,7 +1264,7 @@ function Transactions({ companyId }) {
 
   return (
     <section>
-      <Title title="交易中心" desc="所有平台訂單統一轉成財務交易。" />
+      <Title title="收支管理" desc="整理手動交易、平台訂單與其他收入支出紀錄。" />
 
       <label>
         <span>平台篩選</span>

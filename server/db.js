@@ -350,6 +350,124 @@ export function initDb() {
   CREATE INDEX IF NOT EXISTS commerce_site_promotions_active_idx
   ON commerce_site_promotions(company_id, is_active);
 
+  CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    tax_id TEXT,
+    address TEXT,
+    contact_person TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS suppliers_company_idx
+  ON suppliers(company_id);
+
+  CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT,
+    email TEXT,
+    tax_id TEXT,
+    address TEXT,
+    contact_person TEXT,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS customers_company_idx
+  ON customers(company_id);
+
+  CREATE TABLE IF NOT EXISTS purchases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    supplier_id INTEGER,
+    supplier_name TEXT,
+    purchase_no TEXT,
+    purchase_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    category TEXT,
+    subtotal REAL DEFAULT 0,
+    tax REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    payment_status TEXT DEFAULT '未付款',
+    paid_amount REAL DEFAULT 0,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(supplier_id) REFERENCES suppliers(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS purchases_company_idx
+  ON purchases(company_id);
+
+  CREATE TABLE IF NOT EXISTS purchase_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    purchase_id INTEGER NOT NULL,
+    product_id INTEGER,
+    item_name TEXT NOT NULL,
+    quantity REAL DEFAULT 0,
+    unit TEXT,
+    unit_cost REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(purchase_id) REFERENCES purchases(id),
+    FOREIGN KEY(product_id) REFERENCES products(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS purchase_items_purchase_idx
+  ON purchase_items(company_id, purchase_id);
+
+  CREATE TABLE IF NOT EXISTS sales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    customer_id INTEGER,
+    customer_name TEXT,
+    sale_no TEXT,
+    sale_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    category TEXT,
+    subtotal REAL DEFAULT 0,
+    tax REAL DEFAULT 0,
+    total REAL DEFAULT 0,
+    collection_status TEXT DEFAULT '未收款',
+    received_amount REAL DEFAULT 0,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(customer_id) REFERENCES customers(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS sales_company_idx
+  ON sales(company_id);
+
+  CREATE TABLE IF NOT EXISTS sale_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    sale_id INTEGER NOT NULL,
+    product_id INTEGER,
+    item_name TEXT NOT NULL,
+    quantity REAL DEFAULT 0,
+    unit TEXT,
+    unit_price REAL DEFAULT 0,
+    subtotal REAL DEFAULT 0,
+    note TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    FOREIGN KEY(sale_id) REFERENCES sales(id),
+    FOREIGN KEY(product_id) REFERENCES products(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS sale_items_sale_idx
+  ON sale_items(company_id, sale_id);
+
   CREATE TABLE IF NOT EXISTS audit_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER,
