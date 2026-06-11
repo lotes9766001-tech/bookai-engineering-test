@@ -30,7 +30,7 @@ function section(title) {
 
 let hasError = false;
 
-section('BookAI v5.3 Launch Readiness 健康檢查');
+section('BookAI v5.4 Production Deployment 健康檢查');
 
 if (!fs.existsSync(dbPath)) {
   fail(`找不到 SQLite 資料庫：${dbPath}`);

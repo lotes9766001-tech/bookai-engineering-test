@@ -10,9 +10,12 @@ dist/
 # env / secrets
 .env
 .env.local
+.env.*
 .env.*.local
 server/.env
+server/.env.*
 client/.env
+client/.env.*
 
 # database backups
 backups/
@@ -37,9 +40,15 @@ temp/
 
 # SQLite local database files
 server/*.sqlite
+server/bookai.sqlite
 server/*.sqlite-shm
 server/*.sqlite-wal
 server/*.sqlite.bak*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+*.sqlite3
+*.db
 server/data/*.db
 
 # local backup code snapshots

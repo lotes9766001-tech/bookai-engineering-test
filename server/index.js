@@ -11,21 +11,56 @@ import { plans, hasFeature } from './plans.js';
 import { platforms } from './platforms.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
-initDb();
-
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 
 const PORT = process.env.PORT || 5050;
+const NODE_ENV = process.env.NODE_ENV || 'development';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
+const DEFAULT_ADMIN_EMAIL = 'lotes.9766001@gmail.com';
+const ADMIN_EMAIL_CONFIG = process.env.ADMIN_EMAIL || DEFAULT_ADMIN_EMAIL;
+const ADMIN_EMAILS = new Set(
+  ADMIN_EMAIL_CONFIG
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+);
+const ADMIN_EMAIL = [...ADMIN_EMAILS][0] || DEFAULT_ADMIN_EMAIL;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' ? '' : 'demo123456');
+const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || process.env.BOOKAI_BOOTSTRAP_SECRET || '';
+const ADMIN_NAME = 'BookAI Admin';
+const ADMIN_COMPANY = 'BookAI 管理控制塔';
 
-if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'dev-secret-change-me') {
-  console.error('安全設定錯誤：production 環境必須設定 JWT_SECRET');
-  process.exit(1);
+function assertProductionSecrets() {
+  if (NODE_ENV !== 'production') return;
+
+  const errors = [];
+  if (!process.env.JWT_SECRET || JWT_SECRET === 'dev-secret-change-me') {
+    errors.push('production 環境必須設定高強度 JWT_SECRET');
+  }
+  if (!BOOTSTRAP_SECRET) {
+    errors.push('production 環境必須設定 BOOTSTRAP_SECRET');
+  }
+  if (BOOTSTRAP_SECRET === 'test-secret') {
+    errors.push('production 環境不可使用 test-secret 作為 BOOTSTRAP_SECRET');
+  }
+  if (!process.env.ADMIN_PASSWORD) {
+    errors.push('production 環境必須設定 ADMIN_PASSWORD');
+  }
+  if (ADMIN_PASSWORD === 'demo123456') {
+    errors.push('production 環境不可使用 demo123456 作為 ADMIN_PASSWORD');
+  }
+
+  if (errors.length) {
+    console.error(`安全設定錯誤：${errors.join('；')}`);
+    process.exit(1);
+  }
 }
+
+assertProductionSecrets();
+initDb();
 
 app.use(cors());
 app.use(express.json());
@@ -58,17 +93,6 @@ function auth(req, res, next) {
     return res.status(401).json({ error: '登入已過期' });
   }
 }
-
-const ADMIN_EMAIL = 'lotes.9766001@gmail.com';
-const ADMIN_EMAILS = new Set(
-  String(process.env.ADMIN_EMAIL || ADMIN_EMAIL)
-    .split(',')
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean)
-);
-const ADMIN_PASSWORD = 'demo123456';
-const ADMIN_NAME = 'BookAI Admin';
-const ADMIN_COMPANY = 'BookAI 管理控制塔';
 
 function isAdminEmail(email) {
   return ADMIN_EMAILS.has(String(email || '').toLowerCase());
@@ -316,21 +340,41 @@ function ensureAdminBootstrapAccount() {
 }
 
 app.get('/api/health', (_, res) => {
-  res.json({
-    ok: true,
-    name: 'BookAI Commerce ERP Hub'
-  });
+  try {
+    db.prepare('SELECT 1 AS ok').get();
+    res.json({
+      ok: true,
+      status: 'healthy',
+      version: 'v5.4',
+      name: 'BookAI Commerce ERP Hub',
+      environment: NODE_ENV
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      status: 'unhealthy',
+      version: 'v5.4',
+      error: '資料庫健康檢查失敗'
+    });
+  }
 });
 
 app.post('/api/bootstrap/admin', (req, res) => {
-  const expectedSecret = process.env.BOOKAI_BOOTSTRAP_SECRET;
   const { secret } = req.body || {};
 
-  if (!expectedSecret) {
+  if (!BOOTSTRAP_SECRET) {
     return res.status(403).json({ error: 'Bootstrap 尚未啟用' });
   }
 
-  if (!secret || secret !== expectedSecret) {
+  if (NODE_ENV === 'production' && BOOTSTRAP_SECRET === 'test-secret') {
+    return res.status(403).json({ error: '正式環境不可使用測試 Bootstrap secret' });
+  }
+
+  if (NODE_ENV === 'production' && (!ADMIN_PASSWORD || ADMIN_PASSWORD === 'demo123456')) {
+    return res.status(403).json({ error: '正式環境尚未設定安全的 ADMIN_PASSWORD' });
+  }
+
+  if (!secret || secret !== BOOTSTRAP_SECRET) {
     return res.status(403).json({ error: 'Bootstrap secret 不正確' });
   }
 
@@ -339,7 +383,7 @@ app.post('/api/bootstrap/admin', (req, res) => {
     res.json({
       ok: true,
       email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
+      ...(NODE_ENV === 'production' ? {} : { password: ADMIN_PASSWORD }),
       message: 'Admin 已建立或重設'
     });
   } catch (err) {
