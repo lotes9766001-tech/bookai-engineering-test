@@ -22,6 +22,11 @@ const app = express();
 const PORT = process.env.PORT || 5050;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 
+if (process.env.NODE_ENV === 'production' && JWT_SECRET === 'dev-secret-change-me') {
+  console.error('安全設定錯誤：production 環境必須設定 JWT_SECRET');
+  process.exit(1);
+}
+
 app.use(cors());
 app.use(express.json());
 
@@ -54,16 +59,29 @@ function auth(req, res, next) {
   }
 }
 
-const ADMIN_EMAILS = new Set(['lotes.9766001@gmail.com']);
 const ADMIN_EMAIL = 'lotes.9766001@gmail.com';
+const ADMIN_EMAILS = new Set(
+  String(process.env.ADMIN_EMAIL || ADMIN_EMAIL)
+    .split(',')
+    .map((email) => email.trim().toLowerCase())
+    .filter(Boolean)
+);
 const ADMIN_PASSWORD = 'demo123456';
 const ADMIN_NAME = 'BookAI Admin';
 const ADMIN_COMPANY = 'BookAI 管理控制塔';
 
+function isAdminEmail(email) {
+  return ADMIN_EMAILS.has(String(email || '').toLowerCase());
+}
+
+function normalizeEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
+
 function requireAdmin(req, res, next) {
   const email = String(req.user?.email || '').toLowerCase();
 
-  if (ADMIN_EMAILS.has(email)) {
+  if (isAdminEmail(email)) {
     return next();
   }
 
@@ -341,8 +359,26 @@ app.post('/api/auth/register', (req, res) => {
     plan = 'business'
   } = req.body;
 
-  if (!email || !password || !companyName) {
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedEmail || !password || !companyName) {
     return res.status(400).json({ error: '請填寫必要欄位' });
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ error: 'Email 格式不正確' });
+  }
+
+  if (String(password).length < 8) {
+    return res.status(400).json({ error: '密碼至少需要 8 碼' });
+  }
+
+  if (isAdminEmail(normalizedEmail)) {
+    return res.status(403).json({ error: '此管理者帳號只能由 Bootstrap 建立或重設' });
+  }
+
+  if (!plans[plan]) {
+    return res.status(400).json({ error: '未知方案' });
   }
 
   const finalAddress = companyAddress || address || '';
@@ -356,7 +392,7 @@ app.post('/api/auth/register', (req, res) => {
         password_hash
       )
       VALUES (?,?,?)
-    `).run(name || '使用者', email, hash);
+    `).run(name || '使用者', normalizedEmail, hash);
 
     const companyRow = db.prepare(`
       INSERT INTO companies (
@@ -401,6 +437,8 @@ app.post('/api/auth/register', (req, res) => {
       WHERE id = ?
     `).get(user.lastInsertRowid);
 
+    newUser.isAdmin = false;
+
     res.json({
       token: sign(newUser),
       user: newUser,
@@ -416,12 +454,13 @@ app.post('/api/auth/register', (req, res) => {
 
 app.post('/api/auth/login', (req, res) => {
   const { email, password } = req.body;
+  const normalizedEmail = normalizeEmail(email);
 
   const user = db.prepare(`
     SELECT *
     FROM users
     WHERE email = ?
-  `).get(email);
+  `).get(normalizedEmail);
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
     return res.status(401).json({ error: '帳號或密碼錯誤' });
@@ -430,7 +469,8 @@ app.post('/api/auth/login', (req, res) => {
   const safe = {
     id: user.id,
     name: user.name,
-    email: user.email
+    email: user.email,
+    isAdmin: isAdminEmail(user.email)
   };
 
   res.json({
@@ -448,6 +488,10 @@ app.get('/api/me', auth, (req, res) => {
     FROM users
     WHERE id = ?
   `).get(req.user.id);
+
+  if (user) {
+    user.isAdmin = isAdminEmail(user.email);
+  }
 
   const companies = db.prepare(`
     SELECT
@@ -1134,7 +1178,7 @@ app.delete('/api/companies/:companyId/commerce-site/promotions/:promotionId', au
   res.json({ ok: true });
 });
 
-app.patch('/api/companies/:companyId/plan', auth, company, (req, res) => {
+app.patch('/api/companies/:companyId/plan', auth, company, requireRole('owner', 'admin'), (req, res) => {
   const { plan } = req.body;
 
   if (!plans[plan]) {
@@ -2640,7 +2684,7 @@ app.get('/api/companies/:companyId/integrations', auth, company, (req, res) => {
   );
 });
 
-app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, company, (req, res) => {
+app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, company, requireRole('owner', 'admin'), (req, res) => {
   const p = platforms.find((x) => x.platformKey === req.params.platformKey);
 
   if (!p) {
@@ -2665,7 +2709,7 @@ app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, co
   res.json({ ok: true });
 });
 
-app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, company, (req, res) => {
+app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
   const p = platforms.find((x) => x.platformKey === req.params.platformKey);
 
   if (!p) {
@@ -2783,7 +2827,7 @@ app.get('/api/companies/:companyId/transactions', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/transactions', auth, company, (req, res) => {
+app.post('/api/companies/:companyId/transactions', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
   const t = req.body;
   const { net, profit, tax } = calcTransaction(t);
 
@@ -2848,7 +2892,7 @@ app.get('/api/companies/:companyId/invoices', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/invoices', auth, company, (req, res) => {
+app.post('/api/companies/:companyId/invoices', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
   const b = req.body;
   const amount = Number(b.amountExclTax || 0);
   const tax = Math.round(amount * 0.05 * 100) / 100;
@@ -3158,7 +3202,7 @@ app.get('/api/companies/:companyId/vouchers', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/vouchers', auth, company, (req, res) => {
+app.post('/api/companies/:companyId/vouchers', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
   const v = req.body;
 
   const blocked = ['交際', '應酬', '娛樂', '個人', '私用', '禮品', '贈品']

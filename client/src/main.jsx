@@ -125,25 +125,25 @@ const industryLabel = {
 
 const navs = {
   business: [
-    ['dashboard', '老闆總覽', BarChart3],
-    ['transactions', '交易中心', WalletCards],
+    ['dashboard', '經營總覽', BarChart3],
+    ['transactions', '進貨 / 銷貨', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
-    ['reports', '月報表', BarChart3],
+    ['reports', '經營報表', BarChart3],
     ['settings', '公司設定', Building2]
   ],
   pro: [
-    ['dashboard', '老闆總覽', BarChart3],
-    ['transactions', '交易中心', WalletCards],
+    ['dashboard', '經營總覽', BarChart3],
+    ['transactions', '進貨 / 銷貨', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['accounting', '會計中心', Layers],
     ['tax', '稅務中心', ShieldCheck],
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
-    ['reports', '進階報表', BarChart3],
+    ['reports', '經營報表', BarChart3],
     ['settings', '公司設定', Building2]
   ],
   accountant: [
@@ -319,7 +319,7 @@ function getOfficialSiteStatusLabel(status) {
 }
 
 function isAdminUser(user) {
-  return String(user?.email || '').toLowerCase() === 'lotes.9766001@gmail.com';
+  return user?.isAdmin === true;
 }
 
 function BrandLogo({ compact = false, subtitle = 'AI 經營控制塔' }) {
@@ -382,8 +382,8 @@ function Auth({ onAuth }) {
   const [err, setErr] = useState('');
   const [form, setForm] = useState({
     name: '',
-    email: 'demo@bookai.com.tw',
-    password: 'demo123456',
+    email: '',
+    password: '',
     companyName: '珍珠奶茶王國有限公司',
     taxId: '',
     companyAddress: '',
@@ -411,9 +411,9 @@ function Auth({ onAuth }) {
     <div className="auth-page">
       <div className="auth-ambient" aria-hidden="true" />
       <div className="auth-card">
-        <BrandLogo subtitle="工程企業的 AI 經營控制塔" />
+        <BrandLogo subtitle="企業 AI 經營系統" />
         <h1>{mode === 'login' ? '登入 BookAI' : '建立 BookAI 帳號'}</h1>
-        <p>把不值得的辛苦交給系統，把值得的辛苦留給人。</p>
+        <p>正式公司帳號入口。登入後會進入你自己的公司系統。</p>
 
         <form onSubmit={submit}>
           {mode === 'register' && (
@@ -489,9 +489,9 @@ function Auth({ onAuth }) {
                   value={form.plan}
                   onChange={(e) => setForm({ ...form, plan: e.target.value })}
                 >
-                  <option value="business">Business 封閉測試</option>
-                  <option value="pro">Pro 封閉測試</option>
-                  <option value="accountant">Accountant 封閉測試</option>
+                  <option value="business">Business</option>
+                  <option value="pro">Pro</option>
+                  <option value="accountant">Accountant</option>
                 </select>
               </label>
             </>
@@ -518,7 +518,7 @@ function Auth({ onAuth }) {
 
           {err && <div className="error">{err}</div>}
 
-          <button>{mode === 'login' ? '進入經營控制塔' : '建立帳號'}</button>
+          <button>{mode === 'login' ? '登入 BookAI' : '建立帳號'}</button>
         </form>
 
         <button
@@ -528,7 +528,7 @@ function Auth({ onAuth }) {
           {mode === 'login' ? '建立新帳號' : '已有帳號，返回登入'}
         </button>
 
-        <div className="hint">測試帳號：demo@bookai.com.tw / demo123456</div>
+        <div className="hint">BookAI 營運管理工具僅限 GM / Admin 帳號使用。</div>
       </div>
     </div>
   );
@@ -556,12 +556,13 @@ function Shell({ onLogout }) {
   }, [sidebarCollapsed]);
 
   const company = me?.companies?.find((c) => c.id === companyId);
+  const userIsAdmin = isAdminUser(me?.user);
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
     ['dashboard', '經營總覽', BarChart3],
     ['leads', '接案中心', FileText],
-    ['transactions', '交易中心', WalletCards],
+    ['transactions', '進貨 / 銷貨', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '材料 / 工具庫存 ERP', Package],
@@ -579,9 +580,15 @@ function Shell({ onLogout }) {
         ...planNav.slice(5)
       ]
     : planNav;
-  const visibleNav = isAdminUser(me?.user)
+  const visibleNav = userIsAdmin
     ? [...commerceNav, ['admin', 'BookAI 後台', ShieldCheck]]
     : commerceNav;
+
+  useEffect(() => {
+    if (me && !userIsAdmin && page === 'admin') {
+      setPage('dashboard');
+    }
+  }, [me, userIsAdmin, page]);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -695,13 +702,15 @@ if (!me || !company) {
         {page === 'reports' && <Reports companyId={companyId} company={company} />}
         {page === 'settings' && <Settings company={company} />}
         {page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
-        {page === 'admin' && <AdminConsole />}
+        {page === 'admin' && userIsAdmin && <AdminConsole />}
       </main>
     </div>
   );
 }
 
 function Header({ company, onPlanChange }) {
+  const canManagePlan = ['owner', 'admin'].includes(company.role);
+
   return (
     <div className="header">
       <div>
@@ -713,11 +722,15 @@ function Header({ company, onPlanChange }) {
         </p>
       </div>
 
-      <select value={company.plan} onChange={(e) => onPlanChange(e.target.value)}>
-        <option value="business">Business 封閉測試</option>
-        <option value="pro">Pro 封閉測試</option>
-        <option value="accountant">Accountant 封閉測試</option>
-      </select>
+      {canManagePlan ? (
+        <select value={company.plan} onChange={(e) => onPlanChange(e.target.value)}>
+          <option value="business">Business</option>
+          <option value="pro">Pro</option>
+          <option value="accountant">Accountant</option>
+        </select>
+      ) : (
+        <div className="plan-badge">{planNames[company.plan] || company.plan}</div>
+      )}
     </div>
   );
 }
@@ -5506,7 +5519,7 @@ function Settings({ company }) {
       <Title title="公司設定" desc="公司基本資料、方案、行業別與稅籍資訊。" />
       <div className="panel">
         <h2>{company.name}</h2>
-        <p>測試狀態：封閉測試中</p>
+        <p>帳號狀態：依公司使用狀態與方案開放功能</p>
         <p>產業：{getIndustryName(company.industry)}</p>
         <p>統編：{company.tax_id || '未設定'}</p>
         <p>公司 / 營業地址：{company.address || company.company_address || '未設定'}</p>
@@ -5531,7 +5544,7 @@ function Locked({ feature }) {
       <main className="locked">
         <h1>此功能尚未開放</h1>
         <p>你正在開啟的功能：{feature}</p>
-        <p>封閉測試期間，此功能將依測試進度逐步開放。</p>
+        <p>此功能尚未包含在目前公司方案，請確認方案或聯絡 BookAI 官方。</p>
       </main>
     </div>
   );
