@@ -1,13 +1,14 @@
 import 'dotenv/config';
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
-import { db, initDb, audit } from './db.js';
-import { plans, hasFeature } from './plans.js';
+import { db, initDb, audit, DB_PATH } from './db.js';
+import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
@@ -28,10 +29,15 @@ const ADMIN_EMAILS = new Set(
     .filter(Boolean)
 );
 const ADMIN_EMAIL = [...ADMIN_EMAILS][0] || DEFAULT_ADMIN_EMAIL;
+const FOUNDER_EMAIL = normalizeFounderEmail(process.env.FOUNDER_EMAIL || DEFAULT_ADMIN_EMAIL);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' ? '' : 'demo123456');
 const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || process.env.BOOKAI_BOOTSTRAP_SECRET || '';
 const ADMIN_NAME = 'BookAI Admin';
 const ADMIN_COMPANY = 'BookAI 系統管理中心';
+
+function normalizeFounderEmail(email) {
+  return String(email || '').trim().toLowerCase();
+}
 
 const FEATURE_CATALOG = [
   { key: 'dashboard', label: '經營總覽', group: 'ERP 核心' },
@@ -77,6 +83,9 @@ function assertProductionSecrets() {
   }
   if (ADMIN_PASSWORD === 'demo123456') {
     errors.push('production 環境不可使用 demo123456 作為 ADMIN_PASSWORD');
+  }
+  if (!process.env.FOUNDER_EMAIL) {
+    console.warn('WARNING: production 環境建議設定 FOUNDER_EMAIL');
   }
 
   if (errors.length) {
@@ -137,6 +146,150 @@ function rateLimit({ windowMs, max }) {
   };
 }
 
+function requestIp(req) {
+  return String(req.headers['x-forwarded-for'] || req.ip || '')
+    .split(',')[0]
+    .trim();
+}
+
+function requestUserAgent(req) {
+  return String(req.headers['user-agent'] || '').slice(0, 500);
+}
+
+function normalizeSource({ utm_source, referrer } = {}) {
+  const utm = String(utm_source || '').trim().toLowerCase();
+  if (utm) {
+    if (utm.includes('line')) return 'line';
+    if (utm.includes('facebook') || utm === 'fb') return 'facebook';
+    if (utm.includes('instagram') || utm === 'ig') return 'instagram';
+    if (utm.includes('google')) return 'google';
+    if (utm.includes('official')) return 'official_website';
+    if (utm.includes('demo')) return 'demo_link';
+    return utm.replace(/[^a-z0-9_-]/g, '_').slice(0, 64) || 'unknown';
+  }
+
+  const ref = String(referrer || '').toLowerCase();
+  if (!ref) return 'direct';
+  if (ref.includes('line.me') || ref.includes('lin.ee')) return 'line';
+  if (ref.includes('facebook.com') || ref.includes('fb.com')) return 'facebook';
+  if (ref.includes('instagram.com')) return 'instagram';
+  if (ref.includes('google.')) return 'google';
+  if (ref.includes('bookai-engineering-official.onrender.com')) return 'official_website';
+  if (ref.includes('localhost') || ref.includes('127.0.0.1')) return 'direct';
+  return 'referral';
+}
+
+function sanitizeTrackingBody(body = {}) {
+  const safe = (value, max = 500) => String(value || '').slice(0, max);
+  const utm_source = safe(body.utm_source || body.utmSource, 120);
+  const referrer = safe(body.referrer, 500);
+  return {
+    visitorId: safe(body.visitorId || body.visitor_id, 120),
+    page: safe(body.page || '/', 300),
+    referrer,
+    utm_source,
+    utm_medium: safe(body.utm_medium || body.utmMedium, 120),
+    utm_campaign: safe(body.utm_campaign || body.utmCampaign, 160),
+    source: normalizeSource({ utm_source, referrer })
+  };
+}
+
+function recordTrafficEvent(req, eventType, { userId = null, tracking = null } = {}) {
+  const t = tracking || sanitizeTrackingBody(req.body || {});
+  db.prepare(`
+    INSERT INTO traffic_events (
+      visitor_id,
+      user_id,
+      event_type,
+      source,
+      page,
+      referrer,
+      utm_source,
+      utm_medium,
+      utm_campaign,
+      ip,
+      user_agent
+    )
+    VALUES (?,?,?,?,?,?,?,?,?,?,?)
+  `).run(
+    t.visitorId || null,
+    userId,
+    eventType,
+    t.source || 'unknown',
+    t.page || '/',
+    t.referrer || '',
+    t.utm_source || '',
+    t.utm_medium || '',
+    t.utm_campaign || '',
+    requestIp(req),
+    requestUserAgent(req)
+  );
+}
+
+function toSqlDateTime(date) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function taipeiDayRange(offsetDays = 0) {
+  const now = new Date();
+  const taipei = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  taipei.setHours(0, 0, 0, 0);
+  taipei.setDate(taipei.getDate() + offsetDays);
+  const start = new Date(taipei.getTime() - 8 * 60 * 60 * 1000);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { start: toSqlDateTime(start), end: toSqlDateTime(end) };
+}
+
+function daysAgoRange(days) {
+  const now = new Date();
+  const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  return { start: toSqlDateTime(start), end: toSqlDateTime(now) };
+}
+
+function countBetween(table, column, range, where = '1=1', params = []) {
+  return db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM ${table}
+    WHERE ${where}
+      AND datetime(${column}) >= datetime(?)
+      AND datetime(${column}) < datetime(?)
+  `).get(...params, range.start, range.end).count || 0;
+}
+
+function backupDir() {
+  return NODE_ENV === 'production' ? '/data/backups' : path.join(process.cwd(), 'backups');
+}
+
+function listBackups() {
+  const dir = backupDir();
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => /^bookai-backup-\d{8}-\d{6}\.db$/.test(name))
+    .map((filename) => {
+      const full = path.join(dir, filename);
+      const stat = fs.statSync(full);
+      return {
+        filename,
+        sizeMB: Math.round((stat.size / 1024 / 1024) * 100) / 100,
+        createdAt: toSqlDateTime(stat.mtime)
+      };
+    })
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+}
+
+function backupTimestamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate())
+  ].join('') + '-' + [
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds())
+  ].join('');
+}
+
 function sign(user) {
   return jwt.sign(
     {
@@ -174,6 +327,10 @@ function normalizeEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
+function isFounderEmail(email) {
+  return normalizeEmail(email) === FOUNDER_EMAIL;
+}
+
 function requireAdmin(req, res, next) {
   const user = db.prepare(`
     SELECT email
@@ -186,6 +343,20 @@ function requireAdmin(req, res, next) {
   }
 
   return res.status(403).json({ error: '沒有 BookAI 營運後台權限' });
+}
+
+function requireFounder(req, res, next) {
+  const user = db.prepare(`
+    SELECT email
+    FROM users
+    WHERE id = ?
+  `).get(req.user?.id);
+
+  if (user && isFounderEmail(user.email)) {
+    return next();
+  }
+
+  return res.status(403).json({ error: '沒有 Founder Dashboard 權限' });
 }
 
 function company(req, res, next) {
@@ -492,6 +663,42 @@ app.get('/api/health', (_, res) => {
   }
 });
 
+app.post('/api/track/visit', rateLimit({ windowMs: 60 * 1000, max: 120 }), (req, res) => {
+  try {
+    const tracking = sanitizeTrackingBody(req.body || {});
+
+    db.prepare(`
+      INSERT INTO visitor_logs (
+        visitor_id,
+        page,
+        referrer,
+        utm_source,
+        utm_medium,
+        utm_campaign,
+        source,
+        ip,
+        user_agent
+      )
+      VALUES (?,?,?,?,?,?,?,?,?)
+    `).run(
+      tracking.visitorId || null,
+      tracking.page || '/',
+      tracking.referrer || '',
+      tracking.utm_source || '',
+      tracking.utm_medium || '',
+      tracking.utm_campaign || '',
+      tracking.source || 'unknown',
+      requestIp(req),
+      requestUserAgent(req)
+    );
+
+    recordTrafficEvent(req, 'visit', { tracking });
+    res.json({ ok: true, source: tracking.source });
+  } catch (err) {
+    res.status(500).json({ error: '訪客紀錄失敗' });
+  }
+});
+
 app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), (req, res) => {
   const { secret } = req.body || {};
 
@@ -539,6 +746,7 @@ app.post('/api/auth/register', (req, res) => {
     address,
     plan = 'business'
   } = req.body;
+  const tracking = sanitizeTrackingBody(req.body || {});
 
   const normalizedEmail = normalizeEmail(email);
 
@@ -569,11 +777,19 @@ app.post('/api/auth/register', (req, res) => {
     const user = db.prepare(`
       INSERT INTO users (
         name,
-        email,
-        password_hash
-      )
-      VALUES (?,?,?)
-    `).run(name || '使用者', normalizedEmail, hash);
+      email,
+      password_hash,
+      created_source,
+      created_utm_source
+    )
+      VALUES (?,?,?,?,?)
+    `).run(
+      name || '使用者',
+      normalizedEmail,
+      hash,
+      tracking.source || '',
+      tracking.utm_source || ''
+    );
 
     const companyRow = db.prepare(`
       INSERT INTO companies (
@@ -608,6 +824,7 @@ app.post('/api/auth/register', (req, res) => {
     seedCompanyDefaults(companyRow.lastInsertRowid);
 
     audit(companyRow.lastInsertRowid, user.lastInsertRowid, 'register', '建立帳號與公司');
+    recordTrafficEvent(req, 'register', { userId: user.lastInsertRowid, tracking });
 
     const newUser = db.prepare(`
       SELECT
@@ -619,6 +836,7 @@ app.post('/api/auth/register', (req, res) => {
     `).get(user.lastInsertRowid);
 
     newUser.isAdmin = false;
+    newUser.isFounder = isFounderEmail(newUser.email);
 
     res.json({
       token: sign(newUser),
@@ -635,6 +853,7 @@ app.post('/api/auth/register', (req, res) => {
 app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = normalizeEmail(email);
+  const tracking = sanitizeTrackingBody(req.body || {});
 
   const user = db.prepare(`
     SELECT *
@@ -643,14 +862,54 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (r
   `).get(normalizedEmail);
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+    db.prepare(`
+      INSERT INTO user_login_logs (
+        user_id,
+        email,
+        ip,
+        user_agent,
+        status,
+        fail_reason
+      )
+      VALUES (?,?,?,?,?,?)
+    `).run(
+      user?.id || null,
+      normalizedEmail,
+      requestIp(req),
+      requestUserAgent(req),
+      'failed',
+      'invalid_credentials'
+    );
     return res.status(401).json({ error: '帳號或密碼錯誤' });
   }
+
+  db.prepare(`
+    UPDATE users
+    SET
+      last_login_at = CURRENT_TIMESTAMP,
+      login_count = COALESCE(login_count, 0) + 1
+    WHERE id = ?
+  `).run(user.id);
+
+  db.prepare(`
+    INSERT INTO user_login_logs (
+      user_id,
+      email,
+      ip,
+      user_agent,
+      status
+    )
+    VALUES (?,?,?,?,?)
+  `).run(user.id, user.email, requestIp(req), requestUserAgent(req), 'success');
+
+  recordTrafficEvent(req, 'login', { userId: user.id, tracking });
 
   const safe = {
     id: user.id,
     name: user.name,
     email: user.email,
-    isAdmin: isAdminEmail(user.email)
+    isAdmin: isAdminEmail(user.email),
+    isFounder: isFounderEmail(user.email)
   };
 
   res.json({
@@ -671,6 +930,7 @@ app.get('/api/me', auth, (req, res) => {
 
   if (user) {
     user.isAdmin = isAdminEmail(user.email);
+    user.isFounder = isFounderEmail(user.email);
   }
 
   const companies = db.prepare(`
@@ -699,6 +959,195 @@ app.get('/api/me', auth, (req, res) => {
 
 app.get('/api/plans', (_, res) => {
   res.json(plans);
+});
+
+function distinctVisitors(range) {
+  return db.prepare(`
+    SELECT COUNT(DISTINCT COALESCE(visitor_id, ip || ':' || user_agent)) AS count
+    FROM visitor_logs
+    WHERE datetime(created_at) >= datetime(?)
+      AND datetime(created_at) < datetime(?)
+  `).get(range.start, range.end).count || 0;
+}
+
+app.get('/api/founder/analytics', auth, requireFounder, (req, res) => {
+  const today = taipeiDayRange(0);
+  const yesterday = taipeiDayRange(-1);
+  const last7 = daysAgoRange(7);
+  const last30 = daysAgoRange(30);
+  const last24 = daysAgoRange(1);
+
+  const userCount = (range) => countBetween('users', 'created_at', range);
+  const loginCount = (range) => countBetween('user_login_logs', 'created_at', range, "status = 'success'");
+  const activeCount = (range) => db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM users
+    WHERE last_login_at IS NOT NULL
+      AND datetime(last_login_at) >= datetime(?)
+      AND datetime(last_login_at) < datetime(?)
+  `).get(range.start, range.end).count || 0;
+
+  const totalUsers = db.prepare('SELECT COUNT(*) AS count FROM users').get().count || 0;
+  const totalVisits = db.prepare(`
+    SELECT COUNT(DISTINCT COALESCE(visitor_id, ip || ':' || user_agent)) AS count
+    FROM visitor_logs
+  `).get().count || 0;
+  const totalRegisters = totalUsers;
+  const totalLogins = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM user_login_logs
+    WHERE status = 'success'
+  `).get().count || 0;
+
+  const sources = db.prepare(`
+    SELECT source
+    FROM traffic_events
+    GROUP BY source
+    ORDER BY COUNT(*) DESC
+  `).all().map((row) => row.source || 'unknown');
+
+  const sourceRows = (sources.length ? sources : ['direct']).map((source) => {
+    const visits = db.prepare(`
+      SELECT COUNT(DISTINCT COALESCE(visitor_id, ip || ':' || user_agent)) AS count
+      FROM traffic_events
+      WHERE event_type = 'visit'
+        AND COALESCE(source, 'unknown') = ?
+    `).get(source).count || 0;
+    const registers = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM traffic_events
+      WHERE event_type = 'register'
+        AND COALESCE(source, 'unknown') = ?
+    `).get(source).count || 0;
+    const logins = db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM traffic_events
+      WHERE event_type = 'login'
+        AND COALESCE(source, 'unknown') = ?
+    `).get(source).count || 0;
+    return {
+      source,
+      visits,
+      registers,
+      logins,
+      registerConversionRate: visits ? Math.round((registers / visits) * 10000) / 100 : 0,
+      loginConversionRate: visits ? Math.round((logins / visits) * 10000) / 100 : 0
+    };
+  });
+
+  const testers = db.prepare(`
+    SELECT
+      c.id,
+      c.name AS companyName,
+      c.industry,
+      c.created_at AS createdAt,
+      u.email,
+      u.last_login_at AS lastLoginAt,
+      COALESCE(u.login_count, 0) AS loginCount,
+      COALESCE(u.created_source, '') AS source
+    FROM companies c
+    LEFT JOIN users u ON u.id = c.owner_id
+    WHERE COALESCE(c.is_tester, 0) = 1
+    ORDER BY c.created_at DESC
+  `).all();
+
+  const backups = listBackups();
+  const alerts = [];
+  if (userCount(last24) === 0) alerts.push('過去 24 小時無註冊');
+  if (loginCount(last24) === 0) alerts.push('過去 24 小時無登入');
+  if (NODE_ENV === 'production' && DB_PATH !== '/data/bookai.db') alerts.push('資料庫不是 /data/bookai.db');
+  const lastBackup = backups[0]?.createdAt ? new Date(`${backups[0].createdAt.replace(' ', 'T')}Z`) : null;
+  if (!lastBackup || Date.now() - lastBackup.getTime() > 7 * 24 * 60 * 60 * 1000) {
+    alerts.push('備份超過 7 天未建立');
+  }
+
+  res.json({
+    users: {
+      total: totalUsers,
+      today: userCount(today),
+      yesterday: userCount(yesterday),
+      last7Days: userCount(last7),
+      last30Days: userCount(last30)
+    },
+    visitors: {
+      today: distinctVisitors(today),
+      yesterday: distinctVisitors(yesterday),
+      last7Days: distinctVisitors(last7),
+      last30Days: distinctVisitors(last30),
+      total: totalVisits
+    },
+    logins: {
+      today: loginCount(today),
+      yesterday: loginCount(yesterday),
+      last7Days: loginCount(last7),
+      last30Days: loginCount(last30)
+    },
+    activeUsers: {
+      last7Days: activeCount(last7),
+      last30Days: activeCount(last30)
+    },
+    sources: sourceRows,
+    funnel: {
+      visits: totalVisits,
+      registers: totalRegisters,
+      logins: totalLogins,
+      activeUsers: activeCount(last30)
+    },
+    testers,
+    alerts
+  });
+});
+
+app.get('/api/founder/db-health', auth, requireFounder, (req, res) => {
+  const backups = listBackups();
+  const exists = fs.existsSync(DB_PATH);
+  const stat = exists ? fs.statSync(DB_PATH) : null;
+  const isPersistentPath = DB_PATH === '/data/bookai.db';
+  const warning = NODE_ENV === 'production' && !isPersistentPath
+    ? 'Production database is not using /data/bookai.db'
+    : '';
+
+  res.json({
+    env: NODE_ENV,
+    dbPath: DB_PATH,
+    isPersistentPath,
+    dbExists: exists,
+    dbSizeMB: stat ? Math.round((stat.size / 1024 / 1024) * 100) / 100 : 0,
+    usersCount: db.prepare('SELECT COUNT(*) AS count FROM users').get().count || 0,
+    jobSitesCount: db.prepare('SELECT COUNT(*) AS count FROM job_sites').get().count || 0,
+    paymentsCount: db.prepare('SELECT COUNT(*) AS count FROM job_site_payments').get().count || 0,
+    lastUserCreatedAt: db.prepare('SELECT MAX(created_at) AS value FROM users').get().value || '',
+    lastBackupAt: backups[0]?.createdAt || '',
+    backupCount: backups.length,
+    renderEnvironment: process.env.RENDER ? 'render' : 'local',
+    warning
+  });
+});
+
+app.get('/api/founder/backups', auth, requireFounder, (req, res) => {
+  res.json(listBackups());
+});
+
+app.post('/api/founder/backup', auth, requireFounder, (req, res) => {
+  if (!fs.existsSync(DB_PATH)) {
+    return res.status(500).json({ error: '目前資料庫檔案不存在，無法備份' });
+  }
+
+  const dir = backupDir();
+  fs.mkdirSync(dir, { recursive: true });
+  db.pragma('wal_checkpoint(FULL)');
+
+  const stamp = backupTimestamp();
+  const filename = `bookai-backup-${stamp}.db`;
+  const target = path.join(dir, filename);
+  fs.copyFileSync(DB_PATH, target);
+  const stat = fs.statSync(target);
+
+  res.json({
+    filename,
+    sizeMB: Math.round((stat.size / 1024 / 1024) * 100) / 100,
+    createdAt: toSqlDateTime(stat.mtime)
+  });
 });
 
 const adminBillingStatuses = new Set(['trial', 'active', 'expired', 'paused']);

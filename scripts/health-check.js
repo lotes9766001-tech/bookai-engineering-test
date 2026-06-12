@@ -7,7 +7,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, '..');
 
-const dbPath = process.env.DB_PATH || path.join(rootDir, 'server', 'bookai.sqlite');
+const nodeEnv = process.env.NODE_ENV || 'development';
+const dbPath = process.env.DB_PATH || (
+  nodeEnv === 'production'
+    ? '/data/bookai.db'
+    : path.join(rootDir, 'bookai.db')
+);
 
 function ok(msg) {
   console.log(`✅ ${msg}`);
@@ -38,6 +43,14 @@ if (!fs.existsSync(dbPath)) {
 }
 
 ok(`SQLite 資料庫存在：${dbPath}`);
+ok(`NODE_ENV：${nodeEnv}`);
+
+if (nodeEnv === 'production' && dbPath !== '/data/bookai.db') {
+  hasError = true;
+  fail('CRITICAL: Production database is not using persistent storage.');
+} else if (nodeEnv === 'production') {
+  ok('Production database path 使用 /data/bookai.db。');
+}
 
 const stat = fs.statSync(dbPath);
 ok(`資料庫大小：約 ${Math.round(stat.size / 1024)} KB`);
@@ -70,6 +83,9 @@ const requiredTables = [
   'companies',
   'company_users',
   'company_feature_overrides',
+  'user_login_logs',
+  'visitor_logs',
+  'traffic_events',
   'products',
   'suppliers',
   'customers',
@@ -103,6 +119,10 @@ const requiredColumns = {
     'name',
     'email',
     'password_hash',
+    'last_login_at',
+    'created_source',
+    'created_utm_source',
+    'login_count',
     'created_at'
   ],
   companies: [
@@ -132,6 +152,44 @@ const requiredColumns = {
     'enabled',
     'note',
     'updated_at'
+  ],
+  user_login_logs: [
+    'id',
+    'user_id',
+    'email',
+    'ip',
+    'user_agent',
+    'status',
+    'fail_reason',
+    'created_at'
+  ],
+  visitor_logs: [
+    'id',
+    'visitor_id',
+    'page',
+    'referrer',
+    'utm_source',
+    'utm_medium',
+    'utm_campaign',
+    'source',
+    'ip',
+    'user_agent',
+    'created_at'
+  ],
+  traffic_events: [
+    'id',
+    'visitor_id',
+    'user_id',
+    'event_type',
+    'source',
+    'page',
+    'referrer',
+    'utm_source',
+    'utm_medium',
+    'utm_campaign',
+    'ip',
+    'user_agent',
+    'created_at'
   ],
   products: [
     'id',
@@ -339,6 +397,9 @@ const counts = {
   companies: countRows('companies'),
   company_users: countRows('company_users'),
   company_feature_overrides: countRows('company_feature_overrides'),
+  user_login_logs: countRows('user_login_logs'),
+  visitor_logs: countRows('visitor_logs'),
+  traffic_events: countRows('traffic_events'),
   products: countRows('products'),
   suppliers: countRows('suppliers'),
   customers: countRows('customers'),

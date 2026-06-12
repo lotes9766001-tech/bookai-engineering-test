@@ -3,6 +3,39 @@ const nav = document.querySelector('[data-nav]');
 const navToggle = document.querySelector('[data-nav-toggle]');
 const navMenu = document.querySelector('[data-nav-menu]');
 const backTop = document.querySelector('[data-back-top]');
+const BOOKAI_APP_URL = 'https://bookai-engineering-app.onrender.com';
+const VISITOR_KEY = 'bookai_visitor_id';
+
+function getVisitorId() {
+  let visitorId = localStorage.getItem(VISITOR_KEY);
+  if (!visitorId) {
+    visitorId = crypto?.randomUUID
+      ? crypto.randomUUID()
+      : `visitor_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(VISITOR_KEY, visitorId);
+  }
+  return visitorId;
+}
+
+function trackOfficialVisit() {
+  const params = new URLSearchParams(window.location.search);
+  fetch(`${BOOKAI_APP_URL}/api/track/visit`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      visitorId: getVisitorId(),
+      page: window.location.pathname || '/',
+      referrer: document.referrer || '',
+      utm_source: params.get('utm_source') || 'official_website',
+      utm_medium: params.get('utm_medium') || '',
+      utm_campaign: params.get('utm_campaign') || ''
+    })
+  }).catch(() => {});
+}
+
+trackOfficialVisit();
 
 function closeNav() {
   body.classList.remove('nav-open');

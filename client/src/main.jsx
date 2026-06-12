@@ -31,6 +31,7 @@ import {
   YAxis
 } from 'recharts';
 import { api, setToken, clearToken, getToken } from './lib/api';
+import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
 
@@ -47,6 +48,7 @@ const featureByPage = {
 };
 
 function getPageFeatureKey(page) {
+  if (page === 'founder') return null;
   return featureByPage[page] || page;
 }
 
@@ -360,6 +362,10 @@ function isAdminUser(user) {
   return user?.isAdmin === true;
 }
 
+function isFounderUser(user) {
+  return user?.isFounder === true;
+}
+
 function BrandLogo({ compact = false, subtitle = '智慧 ERP 系統' }) {
   return (
     <div className={`brand-logo ${compact ? 'compact' : ''}`}>
@@ -401,6 +407,10 @@ function fieldLabel(industry, type) {
 function App() {
   const [tokenReady, setTokenReady] = useState(Boolean(getToken()));
 
+  useEffect(() => {
+    trackVisit();
+  }, []);
+
   if (!tokenReady) {
     return <Auth onAuth={() => setTokenReady(true)} />;
   }
@@ -436,7 +446,10 @@ function Auth({ onAuth }) {
     try {
       const data = await api(`/auth/${mode}`, {
         method: 'POST',
-        body: JSON.stringify(form)
+        body: JSON.stringify({
+          ...form,
+          ...getTrackingPayload()
+        })
       });
       setToken(data.token);
       onAuth();
@@ -595,6 +608,7 @@ function Shell({ onLogout }) {
 
   const company = me?.companies?.find((c) => c.id === companyId);
   const userIsAdmin = isAdminUser(me?.user);
+  const userIsFounder = isFounderUser(me?.user);
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
@@ -629,15 +643,21 @@ function Shell({ onLogout }) {
   const visibleNav = userIsAdmin
     ? [...allowedCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
     : allowedCompanyNav;
+  const founderNav = userIsFounder
+    ? [...visibleNav, ['founder', '創辦人營運中心', ShieldCheck]]
+    : visibleNav;
 
   useEffect(() => {
     if (me && !userIsAdmin && page === 'admin') {
       setPage('dashboard');
     }
+    if (me && !userIsFounder && page === 'founder') {
+      setPage('dashboard');
+    }
     if (me && page !== 'admin' && !hasCompanyFeature(company, page)) {
       setPage('dashboard');
     }
-  }, [me, userIsAdmin, page, company]);
+  }, [me, userIsAdmin, userIsFounder, page, company]);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -645,7 +665,7 @@ if (!me || !company) {
 
   const lockedFeature = getPageFeatureKey(page);
 
-  if (page !== 'admin' && !hasCompanyFeature(company, page)) {
+  if (!['admin', 'founder'].includes(page) && !hasCompanyFeature(company, page)) {
     return <Locked feature={lockedFeature} />;
   }
 
@@ -699,7 +719,7 @@ if (!me || !company) {
         </div>
 
         <nav>
-          {visibleNav.map(([id, label, Icon]) => (
+          {founderNav.map(([id, label, Icon]) => (
             <button
               key={id}
               className={page === id ? 'active' : ''}
@@ -763,6 +783,7 @@ if (!me || !company) {
         {page === 'settings' && <Settings company={company} />}
         {page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
         {page === 'admin' && userIsAdmin && <AdminConsole />}
+        {page === 'founder' && userIsFounder && <FounderDashboard />}
       </main>
     </div>
   );
@@ -6012,6 +6033,230 @@ function CommerceSiteManager({ companyId, company }) {
             <div className="commerce-site-actions"><button type="button" onClick={() => editPromotion(promotion)}>編輯</button><button type="button" className="lead-danger-btn" onClick={() => deletePromotion(promotion.id)}>刪除</button></div>
           ])}
         />
+      </div>
+    </section>
+  );
+}
+
+function FounderDashboard() {
+  const [analytics, setAnalytics] = useState(null);
+  const [dbHealth, setDbHealth] = useState(null);
+  const [backups, setBackups] = useState([]);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function loadFounderData() {
+    try {
+      setError('');
+      const [analyticsData, healthData, backupRows] = await Promise.all([
+        api('/founder/analytics'),
+        api('/founder/db-health'),
+        api('/founder/backups')
+      ]);
+      setAnalytics(analyticsData);
+      setDbHealth(healthData);
+      setBackups(Array.isArray(backupRows) ? backupRows : []);
+    } catch (err) {
+      setError(err.message || '讀取創辦人營運中心失敗');
+    }
+  }
+
+  useEffect(() => {
+    loadFounderData();
+  }, []);
+
+  async function createBackup() {
+    try {
+      setMessage('');
+      setError('');
+      const backup = await api('/founder/backup', { method: 'POST' });
+      setMessage(`備份已建立：${backup.filename}`);
+      await loadFounderData();
+    } catch (err) {
+      setError(err.message || '建立備份失敗');
+    }
+  }
+
+  if (!analytics || !dbHealth) {
+    return <div className="loading">讀取創辦人營運中心...</div>;
+  }
+
+  const sourceLabel = {
+    line: 'LINE',
+    official_website: '官方網站',
+    facebook: 'Facebook',
+    instagram: 'Instagram',
+    google: 'Google',
+    direct: 'Direct',
+    referral: 'Referral',
+    demo_link: '測試連結',
+    unknown: 'Unknown'
+  };
+
+  return (
+    <section className="founder-dashboard">
+      <div className="founder-hero">
+        <div>
+          <p className="command-kicker">Founder Dashboard</p>
+          <h1>創辦人營運中心</h1>
+          <p>追蹤訪客、註冊、登入、活躍會員、來源轉換、資料庫健康與備份狀態。</p>
+        </div>
+        <button type="button" onClick={loadFounderData}>重新整理</button>
+      </div>
+
+      {message && <div className="admin-message">{message}</div>}
+      {error && <div className="admin-error">{error}</div>}
+
+      <div className="command-metrics">
+        <Card title="總會員數" value={analytics.users.total} />
+        <Card title="今日訪客" value={analytics.visitors.today} sub={`昨日 ${analytics.visitors.yesterday}`} />
+        <Card title="今日註冊" value={analytics.users.today} sub={`本週 ${analytics.users.last7Days}`} />
+        <Card title="今日登入" value={analytics.logins.today} sub={`本週 ${analytics.logins.last7Days}`} />
+        <Card title="7日活躍會員" value={analytics.activeUsers.last7Days} />
+        <Card title="30日活躍會員" value={analytics.activeUsers.last30Days} />
+      </div>
+
+      <div className="command-metrics">
+        <Card title="7日訪客" value={analytics.visitors.last7Days} />
+        <Card title="7日註冊" value={analytics.users.last7Days} />
+        <Card title="7日登入" value={analytics.logins.last7Days} />
+        <Card title="30日訪客" value={analytics.visitors.last30Days} />
+        <Card title="30日註冊" value={analytics.users.last30Days} />
+        <Card title="30日登入" value={analytics.logins.last30Days} />
+      </div>
+
+      <div className="panel-grid">
+        <div className="panel">
+          <h2>流量來源</h2>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>來源</th>
+                  <th>訪客數</th>
+                  <th>註冊數</th>
+                  <th>登入數</th>
+                  <th>註冊轉換率</th>
+                  <th>登入轉換率</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.sources.map((row) => (
+                  <tr key={row.source}>
+                    <td>{sourceLabel[row.source] || row.source}</td>
+                    <td>{row.visits}</td>
+                    <td>{row.registers}</td>
+                    <td>{row.logins}</td>
+                    <td>{row.registerConversionRate}%</td>
+                    <td>{row.loginConversionRate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>漏斗分析</h2>
+          <div className="founder-funnel">
+            <div><span>訪客</span><strong>{analytics.funnel.visits}</strong></div>
+            <div><span>註冊</span><strong>{analytics.funnel.registers}</strong></div>
+            <div><span>登入</span><strong>{analytics.funnel.logins}</strong></div>
+            <div><span>活躍</span><strong>{analytics.funnel.activeUsers}</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>測試者名單</h2>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>公司名稱</th>
+                <th>Email</th>
+                <th>產業別</th>
+                <th>註冊時間</th>
+                <th>最後登入</th>
+                <th>登入次數</th>
+                <th>來源</th>
+              </tr>
+            </thead>
+            <tbody>
+              {analytics.testers.map((row) => (
+                <tr key={row.id}>
+                  <td>{row.companyName}</td>
+                  <td>{row.email || '-'}</td>
+                  <td>{getIndustryName(row.industry)}</td>
+                  <td>{row.createdAt || '-'}</td>
+                  <td>{row.lastLoginAt || '-'}</td>
+                  <td>{row.loginCount || 0}</td>
+                  <td>{sourceLabel[row.source] || row.source || '-'}</td>
+                </tr>
+              ))}
+              {!analytics.testers.length && (
+                <tr><td colSpan="7">目前沒有早期體驗使用者。</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="panel-grid">
+        <div className="panel">
+          <h2>DB Health</h2>
+          <ul className="summary">
+            <li>資料庫位置：{dbHealth.dbPath}</li>
+            <li>資料庫大小：{dbHealth.dbSizeMB} MB</li>
+            <li>Persistent Disk：{dbHealth.isPersistentPath ? '正常' : '需檢查'}</li>
+            <li>Render 環境：{dbHealth.renderEnvironment}</li>
+            <li>會員數：{dbHealth.usersCount}</li>
+            <li>案場數：{dbHealth.jobSitesCount}</li>
+            <li>收款紀錄：{dbHealth.paymentsCount}</li>
+            <li>最後註冊：{dbHealth.lastUserCreatedAt || '-'}</li>
+            {dbHealth.warning && <li className="danger-text">{dbHealth.warning}</li>}
+          </ul>
+        </div>
+
+        <div className="panel">
+          <div className="panel-heading-row">
+            <h2>備份中心</h2>
+            <button type="button" onClick={createBackup}>建立備份</button>
+          </div>
+          <ul className="summary">
+            <li>備份數量：{dbHealth.backupCount}</li>
+            <li>最後備份：{dbHealth.lastBackupAt || '-'}</li>
+          </ul>
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>檔名</th>
+                  <th>大小</th>
+                  <th>建立時間</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backups.slice(0, 8).map((row) => (
+                  <tr key={row.filename}>
+                    <td>{row.filename}</td>
+                    <td>{row.sizeMB} MB</td>
+                    <td>{row.createdAt}</td>
+                  </tr>
+                ))}
+                {!backups.length && <tr><td colSpan="3">目前尚無備份。</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>異常提醒</h2>
+        <ul className="summary">
+          {analytics.alerts.map((alert) => <li key={alert}>{alert}</li>)}
+          {!analytics.alerts.length && <li>目前沒有異常提醒。</li>}
+        </ul>
       </div>
     </section>
   );

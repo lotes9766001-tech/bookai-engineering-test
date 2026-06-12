@@ -49,6 +49,8 @@ server/*.sqlite.bak*
 *.sqlite-wal
 *.sqlite3
 *.db
+*.db-shm
+*.db-wal
 server/data/*.db
 
 # local backup code snapshots

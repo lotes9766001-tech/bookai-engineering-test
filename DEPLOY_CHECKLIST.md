@@ -7,6 +7,10 @@
 - Build Command：`npm install && npm run build`
 - Start Command：`npm start`
 - Health Check Path：`/api/health`
+- Persistent Disk：必須掛載到 `/data`
+- Production SQLite path：`/data/bookai.db`
+
+Render Web Service 必須新增 Persistent Disk，Mount Path 設為 `/data`。BookAI production 會固定使用 `/data/bookai.db`，不要使用專案目錄內的 SQLite 檔案作為正式資料庫。
 
 ## 2. 必要環境變數
 
@@ -16,6 +20,8 @@
 - `BOOTSTRAP_SECRET`：只用於 `/api/bootstrap/admin` 初始化或重設系統管理員。
 - `ADMIN_EMAIL`：BookAI 系統管理員 Email，例如 `lotes.9766001@gmail.com`。
 - `ADMIN_PASSWORD`：正式系統管理員密碼，必須由 Render env 設定。
+- `FOUNDER_EMAIL=lotes.9766001@gmail.com`：唯一可使用 Founder Dashboard / 創辦人營運中心的帳號。
+- `CORS_ORIGIN`：正式前端來源白名單，可填正式系統網址；多個來源用逗號分隔。
 
 相容說明：舊環境若已設定 `BOOKAI_BOOTSTRAP_SECRET` 仍可運作，但正式部署建議改用 `BOOTSTRAP_SECRET`。
 
@@ -31,6 +37,8 @@
 3. 使用 `ADMIN_EMAIL` / `ADMIN_PASSWORD` 登入 BookAI。
 4. 進入 BookAI 營運後台，建立或檢查公司資料。
 5. 使用一般公司帳號登入，確認看不到 BookAI 營運後台。
+6. 使用 `FOUNDER_EMAIL` 登入，確認可看到「創辦人營運中心」。
+7. 在「創辦人營運中心」檢查 DB Health：`dbPath` 必須是 `/data/bookai.db`，Persistent Disk 必須正常。
 
 正式環境 bootstrap 回傳不會包含明文密碼；請以 Render env 中的 `ADMIN_PASSWORD` 登入。
 
@@ -56,6 +64,10 @@
 - 接案中心、案場中心、標案雷達可正常開啟。
 - Commerce 官網後台不影響工程業公司。
 - BookAI 營運後台只給系統管理員看到。
+- 創辦人營運中心只給 `FOUNDER_EMAIL` 帳號看到。
+- `/api/founder/analytics`、`/api/founder/db-health`、`/api/founder/backups` 非 Founder 必須回 403。
+- DB Health 顯示 production DB path 為 `/data/bookai.db`。
+- 備份中心可建立 `/data/backups/bookai-backup-YYYYMMDD-HHmmss.db`。
 - 一般帳號直接呼叫 `/api/admin/*` 應回 403。
 - 官方網站「登入 BookAI」按鈕導向 production app。
 - 手機版登入、Sidebar、表格與表單不橫向破版。
@@ -66,6 +78,8 @@
 - 不要使用 `demo123456` 作為正式 `ADMIN_PASSWORD`。
 - 不要提交 `.env`。
 - 不要提交 SQLite 正式資料庫，例如 `server/bookai.sqlite`。
+- 不要提交 `bookai.db` 或 `/data/bookai.db` 的副本。
+- 不要把 Render Persistent Disk 掛到非 `/data` 路徑。
 - 不要提交 `node_modules`。
 - 不要把 `JWT_SECRET`、`BOOTSTRAP_SECRET`、`ADMIN_PASSWORD` 寫進前端或程式碼。
 - Bootstrap 完成後，建議輪替或移除 `BOOTSTRAP_SECRET`。

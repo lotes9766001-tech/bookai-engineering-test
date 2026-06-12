@@ -1,12 +1,30 @@
 import Database from 'better-sqlite3';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export const db = new Database(
-  process.env.DB_PATH || path.join(__dirname, 'bookai.sqlite')
+const NODE_ENV = process.env.NODE_ENV || 'development';
+export const DB_PATH = process.env.DB_PATH || (
+  NODE_ENV === 'production'
+    ? '/data/bookai.db'
+    : path.join(process.cwd(), 'bookai.db')
 );
+
+console.log('BOOKAI_DB_PATH =', DB_PATH);
+console.log('NODE_ENV =', NODE_ENV);
+
+if (NODE_ENV === 'production' && DB_PATH !== '/data/bookai.db') {
+  console.error('CRITICAL: Production database is not using persistent storage.');
+}
+
+try {
+  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+} catch (error) {
+  console.warn(`Unable to ensure database directory exists: ${error.message}`);
+}
+
+export const db = new Database(DB_PATH);
 
 db.pragma('journal_mode = WAL');
 
@@ -288,6 +306,65 @@ export function initDb() {
     value TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS user_login_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    email TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    status TEXT NOT NULL,
+    fail_reason TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS user_login_logs_user_idx
+  ON user_login_logs(user_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS user_login_logs_email_idx
+  ON user_login_logs(email, created_at);
+
+  CREATE TABLE IF NOT EXISTS visitor_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visitor_id TEXT,
+    page TEXT,
+    referrer TEXT,
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+    source TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS visitor_logs_visitor_idx
+  ON visitor_logs(visitor_id, created_at);
+
+  CREATE INDEX IF NOT EXISTS visitor_logs_source_idx
+  ON visitor_logs(source, created_at);
+
+  CREATE TABLE IF NOT EXISTS traffic_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    visitor_id TEXT,
+    user_id INTEGER,
+    event_type TEXT NOT NULL,
+    source TEXT,
+    page TEXT,
+    referrer TEXT,
+    utm_source TEXT,
+    utm_medium TEXT,
+    utm_campaign TEXT,
+    ip TEXT,
+    user_agent TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS traffic_events_type_idx
+  ON traffic_events(event_type, created_at);
+
+  CREATE INDEX IF NOT EXISTS traffic_events_source_idx
+  ON traffic_events(source, created_at);
 
   CREATE TABLE IF NOT EXISTS company_feature_overrides (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -593,6 +670,10 @@ export function initDb() {
   safeAddColumn('companies', 'tester_started_at', 'TEXT');
   safeAddColumn('companies', 'tester_note', 'TEXT');
   safeAddColumn('companies', 'tester_feedback_status', "TEXT DEFAULT '尚未回饋'");
+  safeAddColumn('users', 'last_login_at', 'TEXT');
+  safeAddColumn('users', 'created_source', 'TEXT');
+  safeAddColumn('users', 'created_utm_source', 'TEXT');
+  safeAddColumn('users', 'login_count', 'INTEGER DEFAULT 0');
 
   const defaultSettings = {
     official_site_url: 'https://bookai-engineering-official.onrender.com',
@@ -625,6 +706,7 @@ export function initDb() {
 
   safeAddColumn('job_sites', 'site_name', 'TEXT');
   safeAddColumn('job_sites', 'project_type', 'TEXT');
+  safeAddColumn('job_sites', 'client_phone', 'TEXT');
   safeAddColumn('job_sites', 'quote_amount', 'REAL NOT NULL DEFAULT 0');
   safeAddColumn('job_sites', 'received_amount', 'REAL NOT NULL DEFAULT 0');
   safeAddColumn('job_sites', 'material_cost', 'REAL NOT NULL DEFAULT 0');
