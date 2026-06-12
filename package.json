@@ -33,7 +33,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.17.0",
     "nanoid": "^5.1.11",
-    "pg": "^8.13.1",
+    "pg": "^8.21.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "^3.8.1",

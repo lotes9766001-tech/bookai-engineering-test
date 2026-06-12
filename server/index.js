@@ -21,6 +21,7 @@ const __dirname = path.dirname(__filename);
 const app = express();
 
 const PORT = process.env.PORT || 5050;
+const HOST = '0.0.0.0';
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const DEFAULT_ADMIN_EMAIL = 'lotes.9766001@gmail.com';
@@ -37,6 +38,9 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' 
 const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || process.env.BOOKAI_BOOTSTRAP_SECRET || '';
 const ADMIN_NAME = 'BookAI Admin';
 const ADMIN_COMPANY = 'BookAI 系統管理中心';
+let postgresReady = false;
+let postgresError = null;
+let postgresCheckedAt = null;
 
 function normalizeFounderEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -98,10 +102,38 @@ function assertProductionSecrets() {
 }
 
 assertProductionSecrets();
-if (PG_ENABLED) {
-  await initPostgresDb();
-  console.log('BOOKAI_POSTGRES_SCHEMA = ready');
-} else {
+
+function recordPostgresError(error) {
+  postgresReady = false;
+  postgresCheckedAt = new Date().toISOString();
+  postgresError = {
+    code: error?.code || '',
+    message: error?.message || String(error || 'Unknown PostgreSQL error')
+  };
+}
+
+async function checkPostgresStartup() {
+  if (!PG_ENABLED) return;
+
+  postgresCheckedAt = new Date().toISOString();
+  console.log('POSTGRES_STARTUP: initializing');
+
+  try {
+    await initPostgresDb();
+    postgresReady = true;
+    postgresError = null;
+    postgresCheckedAt = new Date().toISOString();
+    console.log('POSTGRES_STARTUP: ready');
+  } catch (error) {
+    recordPostgresError(error);
+    console.error('POSTGRES_STARTUP_FAILED:', {
+      code: postgresError.code,
+      message: postgresError.message
+    });
+  }
+}
+
+if (!PG_ENABLED) {
   initDb();
 }
 
@@ -1100,26 +1132,48 @@ async function ensureFounderBootstrapAccount() {
 }
 
 app.get('/api/health', async (_, res) => {
+  const base = {
+    version: 'v5.4',
+    name: 'BookAI Commerce ERP Hub',
+    environment: NODE_ENV,
+    provider: PG_ENABLED ? 'postgresql' : 'sqlite',
+    storage: PG_ENABLED ? 'postgresql' : 'sqlite',
+    port: String(PORT),
+    databaseUrlDetected: Boolean(DATABASE_URL),
+    postgresReady,
+    postgresCheckedAt,
+    postgresErrorCode: postgresError?.code || '',
+    postgresErrorMessage: postgresError?.message || ''
+  };
+
   try {
     if (PG_ENABLED) {
+      if (!postgresReady) {
+        return res.status(NODE_ENV === 'production' ? 500 : 503).json({
+          ...base,
+          ok: false,
+          status: 'database_unhealthy'
+        });
+      }
       await pgOne('SELECT 1 AS ok');
     } else {
       db.prepare('SELECT 1 AS ok').get();
     }
     res.json({
+      ...base,
       ok: true,
       status: 'healthy',
-      version: 'v5.4',
-      name: 'BookAI Commerce ERP Hub',
-      environment: NODE_ENV,
-      provider: PG_ENABLED ? 'postgresql' : 'sqlite',
-      storage: PG_ENABLED ? 'postgresql' : 'sqlite'
+      postgresReady: PG_ENABLED ? true : postgresReady
     });
   } catch (err) {
+    if (PG_ENABLED) recordPostgresError(err);
     res.status(500).json({
+      ...base,
       ok: false,
       status: 'unhealthy',
-      version: 'v5.4',
+      postgresReady,
+      postgresErrorCode: postgresError?.code || '',
+      postgresErrorMessage: postgresError?.message || '',
       error: '資料庫健康檢查失敗'
     });
   }
@@ -6512,8 +6566,7 @@ try {
 }
 
 
-const HOST = process.env.HOST || '0.0.0.0';
-
 app.listen(PORT, HOST, () => {
   console.log(`BookAI API running on http://${HOST}:${PORT}`);
+  checkPostgresStartup();
 });

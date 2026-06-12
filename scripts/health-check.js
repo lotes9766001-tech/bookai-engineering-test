@@ -35,6 +35,52 @@ let hasError = false;
 
 section('BookAI v5.6 Commercial Readiness 健康檢查');
 
+section('Render 啟動設定檢查');
+
+const serverIndexPath = path.join(rootDir, 'server', 'index.js');
+const serverPgDbPath = path.join(rootDir, 'server', 'pg-db.js');
+const serverPackageLockPath = path.join(rootDir, 'server', 'package-lock.json');
+const serverIndexSource = fs.readFileSync(serverIndexPath, 'utf8');
+const serverPgDbSource = fs.readFileSync(serverPgDbPath, 'utf8');
+
+if (
+  serverIndexSource.includes("app.listen(PORT, '0.0.0.0'") ||
+  serverIndexSource.includes('app.listen(PORT, "0.0.0.0"') ||
+  (serverIndexSource.includes("const HOST = '0.0.0.0'") && serverIndexSource.includes('app.listen(PORT, HOST'))
+) {
+  ok('server/index.js 明確監聽 0.0.0.0');
+} else {
+  hasError = true;
+  fail('server/index.js 未明確使用 app.listen(PORT, 0.0.0.0)');
+}
+
+if (serverIndexSource.includes('postgresReady') && serverIndexSource.includes('postgresErrorCode') && serverIndexSource.includes('databaseUrlDetected')) {
+  ok('/api/health 包含 PostgreSQL 狀態欄位');
+} else {
+  hasError = true;
+  fail('/api/health 缺少 PostgreSQL 診斷欄位');
+}
+
+if (serverPgDbSource.includes('process.env.DATABASE_URL') && serverPgDbSource.includes('rejectUnauthorized: false')) {
+  ok('server/pg-db.js 使用 DATABASE_URL 並支援 Render/Supabase SSL');
+} else {
+  hasError = true;
+  fail('server/pg-db.js PostgreSQL 連線設定不完整');
+}
+
+if (fs.existsSync(serverPackageLockPath)) {
+  const serverPackageLock = fs.readFileSync(serverPackageLockPath, 'utf8');
+  if (serverPackageLock.includes('"node_modules/pg"') || serverPackageLock.includes('"pg":')) {
+    ok('server/package-lock.json 已包含 pg dependency');
+  } else {
+    hasError = true;
+    fail('server/package-lock.json 未包含 pg dependency');
+  }
+} else {
+  hasError = true;
+  fail('缺少 server/package-lock.json');
+}
+
 const pgCoreTables = [
   'users',
   'companies',
