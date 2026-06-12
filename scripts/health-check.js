@@ -8,11 +8,9 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, '..');
 
 const nodeEnv = process.env.NODE_ENV || 'development';
-const dbPath = process.env.DB_PATH || (
-  nodeEnv === 'production'
-    ? '/data/bookai.db'
-    : path.join(rootDir, 'bookai.db')
-);
+const databaseUrl = process.env.DATABASE_URL || '';
+const dbProvider = databaseUrl ? 'postgresql' : 'sqlite';
+const dbPath = process.env.DB_PATH || path.join(rootDir, 'server', 'bookai.sqlite');
 
 function ok(msg) {
   console.log(`✅ ${msg}`);
@@ -44,12 +42,16 @@ if (!fs.existsSync(dbPath)) {
 
 ok(`SQLite 資料庫存在：${dbPath}`);
 ok(`NODE_ENV：${nodeEnv}`);
+ok(`DB Provider：${dbProvider}`);
 
-if (nodeEnv === 'production' && dbPath !== '/data/bookai.db') {
-  hasError = true;
-  fail('CRITICAL: Production database is not using persistent storage.');
-} else if (nodeEnv === 'production') {
-  ok('Production database path 使用 /data/bookai.db。');
+if (databaseUrl) {
+  ok('DATABASE_URL 已設定；正式 PostgreSQL 遷移前仍會檢查 SQLite 相容資料表。');
+}
+
+if (nodeEnv === 'production' && dbProvider === 'sqlite' && !dbPath.startsWith('/data/')) {
+  warn('Production 目前使用 SQLite fallback，Render Free 可啟動，但資料可能不會永久保存。');
+} else if (nodeEnv === 'production' && dbProvider === 'sqlite') {
+  ok('Production SQLite path 使用 /data persistent path。');
 }
 
 const stat = fs.statSync(dbPath);

@@ -7,10 +7,10 @@
 - Build Command：`npm install && npm run build`
 - Start Command：`npm start`
 - Health Check Path：`/api/health`
-- Persistent Disk：必須掛載到 `/data`
-- Production SQLite path：`/data/bookai.db`
+- Persistent Disk：Render Free 可暫時不掛載；正式商用建議掛載到 `/data`
+- Production SQLite path：若有 Persistent Disk，建議設定 `DB_PATH=/data/bookai.db`
 
-Render Web Service 必須新增 Persistent Disk，Mount Path 設為 `/data`。BookAI production 會固定使用 `/data/bookai.db`，不要使用專案目錄內的 SQLite 檔案作為正式資料庫。
+Render Free 可以先使用 SQLite fallback 讓服務正常啟動。正式商用前，請改用 Render Persistent Disk 或 PostgreSQL。
 
 ## 2. 必要環境變數
 
@@ -22,6 +22,8 @@ Render Web Service 必須新增 Persistent Disk，Mount Path 設為 `/data`。Bo
 - `ADMIN_PASSWORD`：正式系統管理員密碼，必須由 Render env 設定。
 - `FOUNDER_EMAIL=lotes.9766001@gmail.com`：唯一可使用 Founder Dashboard / 創辦人營運中心的帳號。
 - `CORS_ORIGIN`：正式前端來源白名單，可填正式系統網址；多個來源用逗號分隔。
+- `DATABASE_URL`：若使用 Render PostgreSQL，先設定此值；目前版本會做 PostgreSQL 連線檢查，資料存取仍保留 SQLite 相容層直到完整遷移。
+- `DB_PATH`：可選。若有 Persistent Disk，建議設為 `/data/bookai.db`。
 
 相容說明：舊環境若已設定 `BOOKAI_BOOTSTRAP_SECRET` 仍可運作，但正式部署建議改用 `BOOTSTRAP_SECRET`。
 
@@ -38,7 +40,7 @@ Render Web Service 必須新增 Persistent Disk，Mount Path 設為 `/data`。Bo
 4. 進入 BookAI 營運後台，建立或檢查公司資料。
 5. 使用一般公司帳號登入，確認看不到 BookAI 營運後台。
 6. 使用 `FOUNDER_EMAIL` 登入，確認可看到「創辦人營運中心」。
-7. 在「創辦人營運中心」檢查 DB Health：`dbPath` 必須是 `/data/bookai.db`，Persistent Disk 必須正常。
+7. 在「創辦人營運中心」檢查 DB Health：Render Free 可顯示 SQLite fallback；正式商用前請確認 Persistent Disk 或 PostgreSQL 狀態。
 
 正式環境 bootstrap 回傳不會包含明文密碼；請以 Render env 中的 `ADMIN_PASSWORD` 登入。
 
@@ -66,8 +68,8 @@ Render Web Service 必須新增 Persistent Disk，Mount Path 設為 `/data`。Bo
 - BookAI 營運後台只給系統管理員看到。
 - 創辦人營運中心只給 `FOUNDER_EMAIL` 帳號看到。
 - `/api/founder/analytics`、`/api/founder/db-health`、`/api/founder/backups` 非 Founder 必須回 403。
-- DB Health 顯示 production DB path 為 `/data/bookai.db`。
-- 備份中心可建立 `/data/backups/bookai-backup-YYYYMMDD-HHmmss.db`。
+- DB Health 可顯示目前 provider、SQLite path、PostgreSQL 連線檢查與備份狀態。
+- 備份中心可建立 `bookai-backup-YYYYMMDD-HHmmss.db`；有 `/data` 時使用 `/data/backups`，Render Free fallback 使用專案 `backups/`。
 - 一般帳號直接呼叫 `/api/admin/*` 應回 403。
 - 官方網站「登入 BookAI」按鈕導向 production app。
 - 手機版登入、Sidebar、表格與表單不橫向破版。
@@ -79,7 +81,7 @@ Render Web Service 必須新增 Persistent Disk，Mount Path 設為 `/data`。Bo
 - 不要提交 `.env`。
 - 不要提交 SQLite 正式資料庫，例如 `server/bookai.sqlite`。
 - 不要提交 `bookai.db` 或 `/data/bookai.db` 的副本。
-- 不要把 Render Persistent Disk 掛到非 `/data` 路徑。
+- 若啟用 Render Persistent Disk，建議掛到 `/data` 並設定 `DB_PATH=/data/bookai.db`。
 - 不要提交 `node_modules`。
 - 不要把 `JWT_SECRET`、`BOOTSTRAP_SECRET`、`ADMIN_PASSWORD` 寫進前端或程式碼。
 - Bootstrap 完成後，建議輪替或移除 `BOOTSTRAP_SECRET`。

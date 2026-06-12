@@ -6207,8 +6207,10 @@ function FounderDashboard() {
           <h2>DB Health</h2>
           <ul className="summary">
             <li>資料庫位置：{dbHealth.dbPath}</li>
+            <li>資料庫模式：{dbHealth.provider || 'sqlite'}</li>
+            <li>PostgreSQL：{dbHealth.postgres?.checked ? dbHealth.postgres.message : '未啟用'}</li>
             <li>資料庫大小：{dbHealth.dbSizeMB} MB</li>
-            <li>Persistent Disk：{dbHealth.isPersistentPath ? '正常' : '需檢查'}</li>
+            <li>儲存狀態：{dbHealth.isPersistentPath ? 'Persistent Disk' : 'SQLite fallback'}</li>
             <li>Render 環境：{dbHealth.renderEnvironment}</li>
             <li>會員數：{dbHealth.usersCount}</li>
             <li>案場數：{dbHealth.jobSitesCount}</li>

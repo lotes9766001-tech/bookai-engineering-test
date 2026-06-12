@@ -5,17 +5,20 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const NODE_ENV = process.env.NODE_ENV || 'development';
-export const DB_PATH = process.env.DB_PATH || (
-  NODE_ENV === 'production'
-    ? '/data/bookai.db'
-    : path.join(process.cwd(), 'bookai.db')
-);
+export const DATABASE_URL = process.env.DATABASE_URL || '';
+export const DB_PROVIDER = DATABASE_URL ? 'postgresql' : 'sqlite';
+export const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'bookai.sqlite');
 
 console.log('BOOKAI_DB_PATH =', DB_PATH);
 console.log('NODE_ENV =', NODE_ENV);
+console.log('BOOKAI_DB_PROVIDER =', DB_PROVIDER);
 
-if (NODE_ENV === 'production' && DB_PATH !== '/data/bookai.db') {
-  console.error('CRITICAL: Production database is not using persistent storage.');
+if (NODE_ENV === 'production' && DB_PROVIDER === 'sqlite' && !DB_PATH.startsWith('/data/')) {
+  console.warn('WARNING: Production SQLite is not using persistent storage. Render Free can start, but data may not survive redeploys.');
+}
+
+if (DATABASE_URL) {
+  console.log('DATABASE_URL detected. PostgreSQL connection check is enabled; SQLite compatibility storage remains active until full migration.');
 }
 
 try {

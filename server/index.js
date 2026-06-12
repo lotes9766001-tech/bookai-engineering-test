@@ -2,12 +2,14 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import net from 'net';
+import tls from 'tls';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
-import { db, initDb, audit, DB_PATH } from './db.js';
+import { db, initDb, audit, DB_PATH, DB_PROVIDER, DATABASE_URL } from './db.js';
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
@@ -257,7 +259,10 @@ function countBetween(table, column, range, where = '1=1', params = []) {
 }
 
 function backupDir() {
-  return NODE_ENV === 'production' ? '/data/backups' : path.join(process.cwd(), 'backups');
+  if (NODE_ENV === 'production' && fs.existsSync('/data')) {
+    return '/data/backups';
+  }
+  return path.join(process.cwd(), 'backups');
 }
 
 function listBackups() {
@@ -289,6 +294,72 @@ function backupTimestamp(date = new Date()) {
     pad(date.getSeconds())
   ].join('');
 }
+
+function checkPostgresConnection() {
+  if (!DATABASE_URL) {
+    return Promise.resolve({
+      provider: 'sqlite',
+      checked: false,
+      ok: false,
+      message: 'DATABASE_URL not set'
+    });
+  }
+
+  return new Promise((resolve) => {
+    let parsed;
+    try {
+      parsed = new URL(DATABASE_URL);
+    } catch {
+      resolve({
+        provider: 'postgresql',
+        checked: true,
+        ok: false,
+        message: 'DATABASE_URL format invalid'
+      });
+      return;
+    }
+
+    const port = Number(parsed.port || 5432);
+    const host = parsed.hostname;
+    const useTls = parsed.searchParams.get('sslmode') !== 'disable';
+    const socket = useTls
+      ? tls.connect({ host, port, servername: host, rejectUnauthorized: false })
+      : net.connect({ host, port });
+
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve({
+        provider: 'postgresql',
+        checked: true,
+        ...result
+      });
+    };
+
+    socket.setTimeout(3000);
+    socket.once('connect', () => done({ ok: true, message: 'PostgreSQL network connection ok' }));
+    socket.once('secureConnect', () => done({ ok: true, message: 'PostgreSQL TLS connection ok' }));
+    socket.once('timeout', () => done({ ok: false, message: 'PostgreSQL connection timeout' }));
+    socket.once('error', (error) => done({ ok: false, message: error.message }));
+  });
+}
+
+let postgresStatus = {
+  provider: DB_PROVIDER,
+  checked: false,
+  ok: false,
+  message: DATABASE_URL ? 'PostgreSQL check pending' : 'DATABASE_URL not set'
+};
+
+checkPostgresConnection().then((status) => {
+  postgresStatus = status;
+  if (DATABASE_URL) {
+    const log = status.ok ? console.log : console.warn;
+    log(`POSTGRES_CHECK: ${status.message}`);
+  }
+});
 
 function sign(user) {
   return jwt.sign(
@@ -1055,7 +1126,9 @@ app.get('/api/founder/analytics', auth, requireFounder, (req, res) => {
   const alerts = [];
   if (userCount(last24) === 0) alerts.push('過去 24 小時無註冊');
   if (loginCount(last24) === 0) alerts.push('過去 24 小時無登入');
-  if (NODE_ENV === 'production' && DB_PATH !== '/data/bookai.db') alerts.push('資料庫不是 /data/bookai.db');
+  if (NODE_ENV === 'production' && DB_PROVIDER === 'sqlite' && !DB_PATH.startsWith('/data/')) {
+    alerts.push('目前使用 Render Free SQLite 暫存儲存，正式商用前建議改用 Persistent Disk 或 PostgreSQL');
+  }
   const lastBackup = backups[0]?.createdAt ? new Date(`${backups[0].createdAt.replace(' ', 'T')}Z`) : null;
   if (!lastBackup || Date.now() - lastBackup.getTime() > 7 * 24 * 60 * 60 * 1000) {
     alerts.push('備份超過 7 天未建立');
@@ -1102,13 +1175,15 @@ app.get('/api/founder/db-health', auth, requireFounder, (req, res) => {
   const backups = listBackups();
   const exists = fs.existsSync(DB_PATH);
   const stat = exists ? fs.statSync(DB_PATH) : null;
-  const isPersistentPath = DB_PATH === '/data/bookai.db';
-  const warning = NODE_ENV === 'production' && !isPersistentPath
-    ? 'Production database is not using /data/bookai.db'
+  const isPersistentPath = DB_PATH.startsWith('/data/');
+  const warning = NODE_ENV === 'production' && DB_PROVIDER === 'sqlite' && !isPersistentPath
+    ? 'Render Free SQLite fallback is active. Deploy can start, but data may not survive redeploys.'
     : '';
 
   res.json({
     env: NODE_ENV,
+    provider: DB_PROVIDER,
+    postgres: postgresStatus,
     dbPath: DB_PATH,
     isPersistentPath,
     dbExists: exists,
