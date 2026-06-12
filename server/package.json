@@ -9,13 +9,13 @@
     "seed": "node seed.js"
   },
   "dependencies": {
-    "better-sqlite3": "^11.9.1",
     "bcryptjs": "^3.0.2",
+    "better-sqlite3": "^11.9.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "nanoid": "^5.0.9",
-    "pg": "^8.13.1"
+    "pg": "^8.21.0"
   }
 }
