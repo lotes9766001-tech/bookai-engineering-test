@@ -124,6 +124,18 @@ app.use(cors(corsOrigins.length ? {
 
 app.use(express.json({ limit: '1mb' }));
 
+app.use((err, req, res, next) => {
+  if (err instanceof SyntaxError && 'body' in err) {
+    return res.status(400).json({ error: 'Body 必須是合法 JSON' });
+  }
+
+  if (err?.message === '不允許的跨網域請求') {
+    return res.status(403).json({ error: '不允許的跨網域請求' });
+  }
+
+  next(err);
+});
+
 const rateLimitBuckets = new Map();
 
 function rateLimit({ windowMs, max }) {
@@ -400,6 +412,44 @@ function normalizeEmail(email) {
 
 function isFounderEmail(email) {
   return normalizeEmail(email) === FOUNDER_EMAIL;
+}
+
+function bootstrapSecretFromRequest(req) {
+  return String(
+    req.headers['x-bootstrap-secret'] ||
+    req.query?.secret ||
+    req.body?.secret ||
+    ''
+  );
+}
+
+function getAuthUserFromRequest(req) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  if (!token) return null;
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    return db.prepare(`
+      SELECT
+        id,
+        email
+      FROM users
+      WHERE id = ?
+    `).get(payload.id);
+  } catch {
+    return null;
+  }
+}
+
+function hasFounderDebugAccess(req) {
+  const secret = bootstrapSecretFromRequest(req);
+  if (BOOTSTRAP_SECRET && secret && secret === BOOTSTRAP_SECRET) {
+    return true;
+  }
+
+  const user = getAuthUserFromRequest(req);
+  return Boolean(user && isFounderEmail(user.email));
 }
 
 function requireAdmin(req, res, next) {
@@ -714,6 +764,134 @@ function ensureAdminBootstrapAccount() {
   };
 }
 
+function ensureFounderBootstrapAccount() {
+  const founderEmail = FOUNDER_EMAIL || normalizeEmail(ADMIN_EMAIL);
+  const hash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+  const existingUser = db.prepare(`
+    SELECT *
+    FROM users
+    WHERE email = ?
+  `).get(founderEmail);
+
+  let userId;
+
+  if (existingUser) {
+    userId = existingUser.id;
+    db.prepare(`
+      UPDATE users
+      SET
+        name = ?,
+        password_hash = ?
+      WHERE id = ?
+    `).run('BookAI Founder', hash, userId);
+  } else {
+    const user = db.prepare(`
+      INSERT INTO users (
+        name,
+        email,
+        password_hash,
+        created_source,
+        created_utm_source
+      )
+      VALUES (?,?,?,?,?)
+    `).run('BookAI Founder', founderEmail, hash, 'bootstrap', 'bootstrap');
+    userId = user.lastInsertRowid;
+  }
+
+  const companyName = 'BookAI 創辦人管理中心';
+  const existingCompany = db.prepare(`
+    SELECT id
+    FROM companies
+    WHERE name = ?
+      AND owner_id = ?
+    ORDER BY id ASC
+    LIMIT 1
+  `).get(companyName, userId);
+
+  let companyId;
+
+  if (existingCompany) {
+    companyId = existingCompany.id;
+    db.prepare(`
+      UPDATE companies
+      SET
+        name = ?,
+        industry = ?,
+        plan = ?,
+        owner_id = ?,
+        billing_status = ?,
+        subscription_plan = ?,
+        is_paid_customer = ?,
+        billing_note = ?
+      WHERE id = ?
+    `).run(
+      companyName,
+      'admin',
+      'pro',
+      userId,
+      'active',
+      'engineering_premium',
+      1,
+      'BookAI 創辦人帳號',
+      companyId
+    );
+  } else {
+    const companyRow = db.prepare(`
+      INSERT INTO companies (
+        name,
+        tax_id,
+        industry,
+        companyAddress,
+        address,
+        plan,
+        owner_id,
+        billing_status,
+        subscription_plan,
+        is_paid_customer,
+        billing_note
+      )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    `).run(
+      companyName,
+      '',
+      'admin',
+      '',
+      '',
+      'pro',
+      userId,
+      'active',
+      'engineering_premium',
+      1,
+      'BookAI 創辦人帳號'
+    );
+    companyId = companyRow.lastInsertRowid;
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO company_users (
+      company_id,
+      user_id,
+      role
+    )
+    VALUES (?,?,?)
+  `).run(companyId, userId, 'owner');
+
+  db.prepare(`
+    UPDATE company_users
+    SET role = 'owner'
+    WHERE company_id = ?
+      AND user_id = ?
+  `).run(companyId, userId);
+
+  seedCompanyDefaults(companyId);
+
+  return {
+    userId,
+    companyId,
+    email: founderEmail
+  };
+}
+
 app.get('/api/health', (_, res) => {
   try {
     db.prepare('SELECT 1 AS ok').get();
@@ -803,6 +981,54 @@ app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }
       detail: err.message
     });
   }
+});
+
+app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), (req, res) => {
+  const secret = bootstrapSecretFromRequest(req);
+
+  if (!BOOTSTRAP_SECRET) {
+    return res.status(403).json({ error: 'Bootstrap 尚未啟用' });
+  }
+
+  if (!secret || secret !== BOOTSTRAP_SECRET) {
+    return res.status(403).json({ error: 'Bootstrap secret 不正確' });
+  }
+
+  if (NODE_ENV === 'production' && (!ADMIN_PASSWORD || ADMIN_PASSWORD === 'demo123456')) {
+    return res.status(403).json({ error: '正式環境尚未設定安全的 ADMIN_PASSWORD' });
+  }
+
+  try {
+    const result = ensureFounderBootstrapAccount();
+    res.json({
+      ok: true,
+      email: result.email,
+      userId: result.userId,
+      companyId: result.companyId,
+      message: 'Founder 已建立或重設'
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: 'Founder 建立或重設失敗'
+    });
+  }
+});
+
+app.get('/api/debug/auth-shape', (req, res) => {
+  if (!hasFounderDebugAccess(req)) {
+    return res.status(403).json({ error: '沒有 Founder Dashboard 權限' });
+  }
+
+  res.json({
+    ok: true,
+    loginRoute: '/api/auth/login',
+    method: 'POST',
+    contentType: 'application/json',
+    requiredFields: ['email', 'password'],
+    acceptedTrackingFields: ['visitorId', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign'],
+    founderEmailEnv: process.env.FOUNDER_EMAIL ? 'FOUNDER_EMAIL' : 'ADMIN_EMAIL fallback',
+    founderEmail: FOUNDER_EMAIL
+  });
 });
 
 app.post('/api/auth/register', (req, res) => {
@@ -922,9 +1148,13 @@ app.post('/api/auth/register', (req, res) => {
 });
 
 app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (req, res) => {
-  const { email, password } = req.body;
+  const { email, password } = req.body || {};
   const normalizedEmail = normalizeEmail(email);
   const tracking = sanitizeTrackingBody(req.body || {});
+
+  if (!normalizedEmail || !password) {
+    return res.status(400).json({ error: '缺少 email 或 password' });
+  }
 
   const user = db.prepare(`
     SELECT *
