@@ -20,6 +20,19 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
+
+// Lightweight health check for Render.
+// Do not check database here. This only proves the Express server is alive.
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    status: 'alive',
+    name: 'BookAI Commerce ERPHub',
+    environment: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  });
+});
+
 const PORT = process.env.PORT || 5050;
 const HOST = '0.0.0.0';
 const NODE_ENV = process.env.NODE_ENV || 'development';
