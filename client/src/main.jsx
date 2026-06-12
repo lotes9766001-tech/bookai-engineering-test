@@ -46,6 +46,18 @@ const featureByPage = {
   accountant: 'accountant_console'
 };
 
+function getPageFeatureKey(page) {
+  return featureByPage[page] || page;
+}
+
+function hasCompanyFeature(company, page) {
+  const key = getPageFeatureKey(page);
+  if (!key || key === 'admin') return true;
+  const effective = company?.effectiveFeatures;
+  if (!Array.isArray(effective) || !effective.length) return true;
+  return effective.includes(key);
+}
+
 const categoryLabel = {
   marketplace: '第三方商城',
   hosted_commerce: '品牌官網',
@@ -613,23 +625,31 @@ function Shell({ onLogout }) {
         ...planNav.slice(5)
       ]
     : planNav;
+  const allowedCompanyNav = commerceNav.filter(([id]) => hasCompanyFeature(company, id));
   const visibleNav = userIsAdmin
-    ? [...commerceNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
-    : commerceNav;
+    ? [...allowedCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
+    : allowedCompanyNav;
 
   useEffect(() => {
     if (me && !userIsAdmin && page === 'admin') {
       setPage('dashboard');
     }
-  }, [me, userIsAdmin, page]);
+    if (me && page !== 'admin' && !hasCompanyFeature(company, page)) {
+      setPage('dashboard');
+    }
+  }, [me, userIsAdmin, page, company]);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
   }
 
-  const lockedFeature = featureByPage[page];
+  const lockedFeature = getPageFeatureKey(page);
 
-  if (lockedFeature && !me.plans[plan].features.includes(lockedFeature)) {
+  if (page !== 'admin' && !hasCompanyFeature(company, page)) {
+    return <Locked feature={lockedFeature} />;
+  }
+
+  if (featureByPage[page] && !company.effectiveFeatures?.includes(lockedFeature)) {
     return <Locked feature={lockedFeature} />;
   }
 
@@ -6008,6 +6028,9 @@ function AdminConsole() {
   const [testerForm, setTesterForm] = useState({});
   const [settingsForm, setSettingsForm] = useState({});
   const [feedbacks, setFeedbacks] = useState([]);
+  const [featureCatalog, setFeatureCatalog] = useState([]);
+  const [featureForm, setFeatureForm] = useState({});
+  const [featureNote, setFeatureNote] = useState('');
   const [feedbackStatusFilter, setFeedbackStatusFilter] = useState('all');
   const [feedbackCategoryFilter, setFeedbackCategoryFilter] = useState('all');
   const [demoResult, setDemoResult] = useState(null);
@@ -6018,15 +6041,17 @@ function AdminConsole() {
   async function loadAdmin() {
     try {
       setError('');
-      const [companyRows, settingRows, feedbackRows] = await Promise.all([
+      const [companyRows, settingRows, feedbackRows, featureRows] = await Promise.all([
         api('/admin/companies'),
         api('/admin/settings'),
-        api('/admin/feedbacks')
+        api('/admin/feedbacks'),
+        api('/admin/features/catalog')
       ]);
       setCompanies(companyRows || []);
       setSettings(settingRows || {});
       setSettingsForm(settingRows || {});
       setFeedbacks(feedbackRows || []);
+      setFeatureCatalog(featureRows || []);
       setSelectedId((old) => old || companyRows?.[0]?.id || null);
     } catch (err) {
       setError(err.message || '讀取 BookAI 營運後台失敗');
@@ -6063,7 +6088,19 @@ function AdminConsole() {
       tester_feedback_status: selected.tester_feedback_status || '尚未回饋',
       tester_note: selected.tester_note || ''
     });
-  }, [selectedId, companies]);
+
+    api(`/admin/companies/${selected.id}/features`)
+      .then((data) => {
+        const enabledSet = new Set(data?.effectiveFeatures || []);
+        const next = {};
+        (featureCatalog || []).forEach((item) => {
+          next[item.key] = enabledSet.has(item.key);
+        });
+        setFeatureForm(next);
+        setFeatureNote('');
+      })
+      .catch((err) => setError(err.message || '讀取功能授權失敗'));
+  }, [selectedId, companies, featureCatalog]);
 
   const filteredCompanies = companies.filter((company) => {
     const statusMatched = statusFilter === 'all' || company.billing_status === statusFilter;
@@ -6155,6 +6192,27 @@ function AdminConsole() {
     }
   }
 
+  async function saveFeatureAccess(e) {
+    e.preventDefault();
+    if (!selected) return;
+
+    try {
+      setMessage('');
+      setError('');
+      await api(`/admin/companies/${selected.id}/features`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          features: featureForm,
+          note: featureNote || '系統管理員調整'
+        })
+      });
+      await loadAdmin();
+      setMessage('功能授權已更新');
+    } catch (err) {
+      setError(err.message || '更新功能授權失敗');
+    }
+  }
+
   async function saveSettings(e) {
     e.preventDefault();
 
@@ -6229,7 +6287,7 @@ function AdminConsole() {
           </div>
           <div className="admin-orbit">
             <span className="admin-status-light active" />
-            <strong>CONTROL TOWER ONLINE</strong>
+            <strong>系統狀態正常</strong>
           </div>
         </div>
 
@@ -6416,6 +6474,40 @@ function AdminConsole() {
                       <input value={testerForm.tester_note || ''} onChange={(e) => setTesterForm({ ...testerForm, tester_note: e.target.value })} />
                     </label>
                     <button>儲存早期體驗狀態</button>
+                  </form>
+
+                  <form className="admin-settings-panel" onSubmit={saveFeatureAccess}>
+                    <h3>功能授權管理</h3>
+                    <p className="admin-form-note">針對這家公司快速調整可使用功能。關閉後，使用者側邊欄會隱藏該功能，後端進階功能檢查也會套用有效授權。</p>
+                    <div className="admin-feature-grid">
+                      {Object.entries(
+                        (featureCatalog || []).reduce((groups, item) => {
+                          const group = item.group || '其他';
+                          groups[group] = groups[group] || [];
+                          groups[group].push(item);
+                          return groups;
+                        }, {})
+                      ).map(([group, items]) => (
+                        <div className="admin-feature-group" key={group}>
+                          <strong>{group}</strong>
+                          {items.map((item) => (
+                            <label key={item.key} className="admin-feature-toggle">
+                              <input
+                                type="checkbox"
+                                checked={featureForm[item.key] !== false}
+                                onChange={(e) => setFeatureForm({ ...featureForm, [item.key]: e.target.checked })}
+                              />
+                              <span>{item.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    <label>
+                      <span>調整備註</span>
+                      <input value={featureNote} onChange={(e) => setFeatureNote(e.target.value)} placeholder="例：早期體驗開通工程模組" />
+                    </label>
+                    <button>儲存功能授權</button>
                   </form>
 
                   <form className="admin-settings-panel" onSubmit={saveWebsite}>

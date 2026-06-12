@@ -33,6 +33,32 @@ const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || process.env.BOOKAI_BOOT
 const ADMIN_NAME = 'BookAI Admin';
 const ADMIN_COMPANY = 'BookAI 系統管理中心';
 
+const FEATURE_CATALOG = [
+  { key: 'dashboard', label: '經營總覽', group: 'ERP 核心' },
+  { key: 'purchases', label: '進貨管理', group: 'ERP 核心' },
+  { key: 'sales', label: '銷貨管理', group: 'ERP 核心' },
+  { key: 'receivables', label: '應收帳款', group: 'ERP 核心' },
+  { key: 'payables', label: '應付帳款', group: 'ERP 核心' },
+  { key: 'suppliers', label: '供應商管理', group: 'ERP 核心' },
+  { key: 'customers', label: '客戶管理', group: 'ERP 核心' },
+  { key: 'inventory', label: '商品 / 材料庫存', group: 'ERP 核心' },
+  { key: 'transactions', label: '收支管理', group: 'ERP 核心' },
+  { key: 'invoices', label: '發票中心', group: 'ERP 核心' },
+  { key: 'vouchers', label: '電子憑證', group: 'ERP 核心' },
+  { key: 'reports', label: '經營報表', group: 'ERP 核心' },
+  { key: 'leads', label: '接案中心', group: '工程業' },
+  { key: 'jobsites', label: '案場中心', group: '工程業' },
+  { key: 'integrations', label: '平台串接', group: '商務' },
+  { key: 'commerce_site', label: '官網後台', group: '商務' },
+  { key: 'accounting_engine', label: '會計中心', group: '進階管理' },
+  { key: 'tax_center', label: '稅務中心', group: '進階管理' },
+  { key: 'accountant_console', label: '事務所客戶管理', group: '進階管理' },
+  { key: 'feedbacks', label: '產品回饋', group: '支援' },
+  { key: 'settings', label: '公司設定', group: '系統' }
+];
+
+const FEATURE_KEYS = new Set(FEATURE_CATALOG.map((item) => item.key));
+
 function assertProductionSecrets() {
   if (NODE_ENV !== 'production') return;
 
@@ -62,8 +88,54 @@ function assertProductionSecrets() {
 assertProductionSecrets();
 initDb();
 
-app.use(cors());
-app.use(express.json());
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  next();
+});
+
+const corsOrigins = String(process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors(corsOrigins.length ? {
+  origin(origin, callback) {
+    if (!origin || corsOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('不允許的跨網域請求'));
+  }
+} : undefined));
+
+app.use(express.json({ limit: '1mb' }));
+
+const rateLimitBuckets = new Map();
+
+function rateLimit({ windowMs, max }) {
+  return (req, res, next) => {
+    const key = `${req.ip}:${req.path}`;
+    const now = Date.now();
+    const bucket = rateLimitBuckets.get(key) || { count: 0, resetAt: now + windowMs };
+
+    if (bucket.resetAt <= now) {
+      bucket.count = 0;
+      bucket.resetAt = now + windowMs;
+    }
+
+    bucket.count += 1;
+    rateLimitBuckets.set(key, bucket);
+
+    if (bucket.count > max) {
+      return res.status(429).json({ error: '操作太頻繁，請稍後再試' });
+    }
+
+    next();
+  };
+}
 
 function sign(user) {
   return jwt.sign(
@@ -157,8 +229,69 @@ function requireRole(...allowedRoles) {
   };
 }
 
+function getCompanyFeatureOverrides(companyId) {
+  return db.prepare(`
+    SELECT
+      feature_key,
+      enabled,
+      note,
+      updated_at
+    FROM company_feature_overrides
+    WHERE company_id = ?
+  `).all(companyId);
+}
+
+function getEffectiveFeatures(company) {
+  const companyId = Number(company?.id || 0);
+  const planFeatures = new Set(plans[company?.plan]?.features || []);
+
+  ['dashboard', 'purchases', 'sales', 'receivables', 'payables', 'suppliers', 'customers', 'inventory', 'reports', 'feedbacks', 'settings'].forEach((key) => {
+    planFeatures.add(key);
+  });
+
+  if (String(company?.industry || '').includes('construction') || [
+    'painting',
+    'water_electric',
+    'masonry',
+    'interior',
+    'aircon_repair',
+    'waterproof',
+    'demolition',
+    'low_voltage',
+    'other_construction',
+    'painting_water_electric'
+  ].includes(company?.industry)) {
+    planFeatures.add('leads');
+    planFeatures.add('jobsites');
+  }
+
+  if (['ecommerce', 'hosted_commerce', 'marketplace', 'social_commerce', 'food', 'restaurant', 'beverage', 'retail'].includes(company?.industry)) {
+    planFeatures.add('commerce_site');
+  }
+
+  if (!companyId) {
+    return [...planFeatures];
+  }
+
+  getCompanyFeatureOverrides(companyId).forEach((row) => {
+    if (!FEATURE_KEYS.has(row.feature_key)) return;
+    if (Number(row.enabled) === 1) {
+      planFeatures.add(row.feature_key);
+    } else {
+      planFeatures.delete(row.feature_key);
+    }
+  });
+
+  return [...planFeatures];
+}
+
+function hasCompanyFeature(company, feature) {
+  if (!feature) return true;
+  return getEffectiveFeatures(company).includes(feature);
+}
+
 const requireFeature = (feature) => (req, res, next) => {
-  if (!hasFeature(req.company.plan, feature)) {
+  if (!hasCompanyFeature(req.company, feature)) {
     return res.status(403).json({
       error: '此功能需要升級方案',
       feature
@@ -359,7 +492,7 @@ app.get('/api/health', (_, res) => {
   }
 });
 
-app.post('/api/bootstrap/admin', (req, res) => {
+app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), (req, res) => {
   const { secret } = req.body || {};
 
   if (!BOOTSTRAP_SECRET) {
@@ -499,7 +632,7 @@ app.post('/api/auth/register', (req, res) => {
   }
 });
 
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (req, res) => {
   const { email, password } = req.body;
   const normalizedEmail = normalizeEmail(email);
 
@@ -547,12 +680,20 @@ app.get('/api/me', auth, (req, res) => {
     FROM companies c
     JOIN company_users cu ON cu.company_id = c.id
     WHERE cu.user_id = ?
-  `).all(req.user.id);
+  `).all(req.user.id).map((row) => ({
+    ...row,
+    featureOverrides: getCompanyFeatureOverrides(row.id).reduce((acc, item) => {
+      acc[item.feature_key] = Number(item.enabled) === 1;
+      return acc;
+    }, {}),
+    effectiveFeatures: getEffectiveFeatures(row)
+  }));
 
   res.json({
     user,
     companies,
-    plans
+    plans,
+    featureCatalog: FEATURE_CATALOG
   });
 });
 
@@ -636,6 +777,106 @@ app.get('/api/admin/companies', auth, requireAdmin, (req, res) => {
   `).all();
 
   res.json(companies);
+});
+
+app.get('/api/admin/features/catalog', auth, requireAdmin, (req, res) => {
+  res.json(FEATURE_CATALOG);
+});
+
+app.get('/api/admin/companies/:companyId/features', auth, requireAdmin, (req, res) => {
+  const companyId = Number(req.params.companyId);
+
+  if (!companyId) {
+    return res.status(400).json({ error: '缺少 companyId' });
+  }
+
+  const companyRow = db.prepare(`
+    SELECT *
+    FROM companies
+    WHERE id = ?
+  `).get(companyId);
+
+  if (!companyRow) {
+    return res.status(404).json({ error: '找不到公司' });
+  }
+
+  const overrides = getCompanyFeatureOverrides(companyId).reduce((acc, row) => {
+    acc[row.feature_key] = {
+      enabled: Number(row.enabled) === 1,
+      note: row.note || '',
+      updatedAt: row.updated_at || ''
+    };
+    return acc;
+  }, {});
+
+  res.json({
+    companyId,
+    plan: companyRow.plan,
+    effectiveFeatures: getEffectiveFeatures(companyRow),
+    overrides
+  });
+});
+
+app.put('/api/admin/companies/:companyId/features', auth, requireAdmin, (req, res) => {
+  const companyId = Number(req.params.companyId);
+  const { features = {}, note = '' } = req.body || {};
+
+  if (!companyId) {
+    return res.status(400).json({ error: '缺少 companyId' });
+  }
+
+  const companyRow = db.prepare(`
+    SELECT id
+    FROM companies
+    WHERE id = ?
+  `).get(companyId);
+
+  if (!companyRow) {
+    return res.status(404).json({ error: '找不到公司' });
+  }
+
+  const entries = Object.entries(features).filter(([key]) => FEATURE_KEYS.has(key));
+
+  if (!entries.length) {
+    return res.status(400).json({ error: '沒有可更新的功能權限' });
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO company_feature_overrides (
+      company_id,
+      feature_key,
+      enabled,
+      note,
+      updated_at
+    )
+    VALUES (?,?,?,?,CURRENT_TIMESTAMP)
+    ON CONFLICT(company_id, feature_key)
+    DO UPDATE SET
+      enabled = excluded.enabled,
+      note = excluded.note,
+      updated_at = CURRENT_TIMESTAMP
+  `);
+
+  const trx = db.transaction(() => {
+    entries.forEach(([key, enabled]) => {
+      stmt.run(companyId, key, toAdminBoolean(enabled), String(note || '系統管理員調整'));
+    });
+  });
+
+  trx();
+
+  audit(companyId, req.user.id, 'admin_feature_access_updated', JSON.stringify(
+    Object.fromEntries(entries.map(([key, enabled]) => [key, Boolean(Number(enabled) || enabled === true)]))
+  ));
+
+  res.json({
+    ok: true,
+    companyId,
+    overrides: getCompanyFeatureOverrides(companyId).reduce((acc, row) => {
+      acc[row.feature_key] = Number(row.enabled) === 1;
+      return acc;
+    }, {})
+  });
 });
 
 app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, res) => {

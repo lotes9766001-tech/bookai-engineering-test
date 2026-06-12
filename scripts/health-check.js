@@ -69,6 +69,7 @@ const requiredTables = [
   'users',
   'companies',
   'company_users',
+  'company_feature_overrides',
   'products',
   'suppliers',
   'customers',
@@ -123,6 +124,14 @@ const requiredColumns = {
     'user_id',
     'role',
     'created_at'
+  ],
+  company_feature_overrides: [
+    'id',
+    'company_id',
+    'feature_key',
+    'enabled',
+    'note',
+    'updated_at'
   ],
   products: [
     'id',
@@ -329,6 +338,7 @@ const counts = {
   users: countRows('users'),
   companies: countRows('companies'),
   company_users: countRows('company_users'),
+  company_feature_overrides: countRows('company_feature_overrides'),
   products: countRows('products'),
   suppliers: countRows('suppliers'),
   customers: countRows('customers'),
@@ -360,6 +370,29 @@ if (counts.companies === 0) {
 section('RBAC 權限資料檢查');
 
 const allowedRoles = ['owner', 'admin', 'accounting', 'staff', 'viewer'];
+const allowedFeatureKeys = [
+  'dashboard',
+  'purchases',
+  'sales',
+  'receivables',
+  'payables',
+  'suppliers',
+  'customers',
+  'inventory',
+  'transactions',
+  'invoices',
+  'vouchers',
+  'reports',
+  'leads',
+  'jobsites',
+  'integrations',
+  'commerce_site',
+  'accounting_engine',
+  'tax_center',
+  'accountant_console',
+  'feedbacks',
+  'settings'
+];
 
 if (!tableExists('company_users')) {
   hasError = true;
@@ -434,6 +467,34 @@ if (!tableExists('company_users')) {
     fail('已有公司資料，但 company_users 為 0，權限系統資料不完整。');
   } else {
     ok(`company_users 目前共有 ${counts.company_users} 筆角色關聯。`);
+  }
+}
+
+section('公司功能授權檢查');
+
+if (!tableExists('company_feature_overrides')) {
+  hasError = true;
+  fail('缺少 company_feature_overrides，系統管理員無法快速調整公司功能授權。');
+} else {
+  const invalidFeatureRows = db.prepare(`
+    SELECT
+      id,
+      company_id AS companyId,
+      feature_key AS featureKey,
+      enabled
+    FROM company_feature_overrides
+    WHERE feature_key NOT IN (${allowedFeatureKeys.map(() => '?').join(',')})
+       OR enabled NOT IN (0, 1)
+  `).all(...allowedFeatureKeys);
+
+  if (invalidFeatureRows.length) {
+    hasError = true;
+    fail(`發現 ${invalidFeatureRows.length} 筆非法功能授權資料。`);
+    invalidFeatureRows.forEach((row) => {
+      console.log(`  - override #${row.id}: company_id=${row.companyId}, feature=${row.featureKey}, enabled=${row.enabled}`);
+    });
+  } else {
+    ok('公司功能授權資料皆為合法 feature key 與 0/1 開關。');
   }
 }
 

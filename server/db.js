@@ -289,6 +289,20 @@ export function initDb() {
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS company_feature_overrides (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    feature_key TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    note TEXT,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(company_id, feature_key),
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS company_feature_overrides_company_idx
+  ON company_feature_overrides(company_id);
+
   CREATE TABLE IF NOT EXISTS commerce_site_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER NOT NULL UNIQUE,
@@ -586,7 +600,7 @@ export function initDb() {
     default_trial_days: '30',
     renewal_reminder_days: '7',
     enable_website_backend: 'true',
-    system_announcement: 'BookAI 控制塔已啟用。'
+    system_announcement: 'BookAI 系統管理中心已啟用。'
   };
 
   const settingStmt = db.prepare(`

@@ -3297,6 +3297,59 @@ tr:hover td {
   color: #991b1b;
 }
 
+.admin-form-note {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.admin-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.admin-feature-group {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.admin-feature-group > strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.admin-feature-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.admin-feature-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand-blue);
+}
+
+.admin-feature-toggle span {
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .admin-feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .commerce-site-page {
   color: var(--text);
 }
