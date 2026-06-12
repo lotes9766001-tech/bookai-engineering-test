@@ -9,7 +9,8 @@ import cors from 'cors';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
-import { db, initDb, audit, DB_PATH, DB_PROVIDER, DATABASE_URL } from './db.js';
+import { db, initDb, audit as sqliteAudit, DB_PATH, DB_PROVIDER, DATABASE_URL } from './db.js';
+import { PG_ENABLED, initPostgresDb, pgAll, pgOne, pgQuery } from './pg-db.js';
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
@@ -97,7 +98,12 @@ function assertProductionSecrets() {
 }
 
 assertProductionSecrets();
-initDb();
+if (PG_ENABLED) {
+  await initPostgresDb();
+  console.log('BOOKAI_POSTGRES_SCHEMA = ready');
+} else {
+  initDb();
+}
 
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -160,6 +166,18 @@ function rateLimit({ windowMs, max }) {
   };
 }
 
+function audit(companyId, userId, action, detail = '') {
+  if (PG_ENABLED) {
+    pgQuery(
+      `INSERT INTO audit_logs (company_id, user_id, action, detail) VALUES ($1,$2,$3,$4)`,
+      [companyId || null, userId || null, action, detail || '']
+    ).catch((error) => console.warn('PostgreSQL audit write failed:', error.message));
+    return;
+  }
+
+  sqliteAudit(companyId, userId, action, detail);
+}
+
 function requestIp(req) {
   return String(req.headers['x-forwarded-for'] || req.ip || '')
     .split(',')[0]
@@ -210,6 +228,37 @@ function sanitizeTrackingBody(body = {}) {
 
 function recordTrafficEvent(req, eventType, { userId = null, tracking = null } = {}) {
   const t = tracking || sanitizeTrackingBody(req.body || {});
+  if (PG_ENABLED) {
+    return pgQuery(`
+      INSERT INTO traffic_events (
+        visitor_id,
+        user_id,
+        event_type,
+        source,
+        page,
+        referrer,
+        utm_source,
+        utm_medium,
+        utm_campaign,
+        ip,
+        user_agent
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+    `, [
+      t.visitorId || null,
+      userId,
+      eventType,
+      t.source || 'unknown',
+      t.page || '/',
+      t.referrer || '',
+      t.utm_source || '',
+      t.utm_medium || '',
+      t.utm_campaign || '',
+      requestIp(req),
+      requestUserAgent(req)
+    ]);
+  }
+
   db.prepare(`
     INSERT INTO traffic_events (
       visitor_id,
@@ -268,6 +317,17 @@ function countBetween(table, column, range, where = '1=1', params = []) {
       AND datetime(${column}) >= datetime(?)
       AND datetime(${column}) < datetime(?)
   `).get(...params, range.start, range.end).count || 0;
+}
+
+async function pgCountBetween(table, column, range, where = 'TRUE', params = []) {
+  const row = await pgOne(`
+    SELECT COUNT(*)::int AS count
+    FROM ${table}
+    WHERE ${where}
+      AND ${column} >= $${params.length + 1}::timestamptz
+      AND ${column} < $${params.length + 2}::timestamptz
+  `, [...params, range.start, range.end]);
+  return row?.count || 0;
 }
 
 function backupDir() {
@@ -423,13 +483,16 @@ function bootstrapSecretFromRequest(req) {
   );
 }
 
-function getAuthUserFromRequest(req) {
+async function getAuthUserFromRequest(req) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return null;
 
   try {
     const payload = jwt.verify(token, JWT_SECRET);
+    if (PG_ENABLED) {
+      return pgOne(`SELECT id, email FROM users WHERE id = $1`, [payload.id]);
+    }
     return db.prepare(`
       SELECT
         id,
@@ -442,22 +505,24 @@ function getAuthUserFromRequest(req) {
   }
 }
 
-function hasFounderDebugAccess(req) {
+async function hasFounderDebugAccess(req) {
   const secret = bootstrapSecretFromRequest(req);
   if (BOOTSTRAP_SECRET && secret && secret === BOOTSTRAP_SECRET) {
     return true;
   }
 
-  const user = getAuthUserFromRequest(req);
+  const user = await getAuthUserFromRequest(req);
   return Boolean(user && isFounderEmail(user.email));
 }
 
-function requireAdmin(req, res, next) {
-  const user = db.prepare(`
-    SELECT email
-    FROM users
-    WHERE id = ?
-  `).get(req.user?.id);
+async function requireAdmin(req, res, next) {
+  const user = PG_ENABLED
+    ? await pgOne(`SELECT email FROM users WHERE id = $1`, [req.user?.id])
+    : db.prepare(`
+      SELECT email
+      FROM users
+      WHERE id = ?
+    `).get(req.user?.id);
 
   if (user && isAdminEmail(user.email)) {
     return next();
@@ -466,12 +531,14 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ error: '沒有 BookAI 營運後台權限' });
 }
 
-function requireFounder(req, res, next) {
-  const user = db.prepare(`
-    SELECT email
-    FROM users
-    WHERE id = ?
-  `).get(req.user?.id);
+async function requireFounder(req, res, next) {
+  const user = PG_ENABLED
+    ? await pgOne(`SELECT email FROM users WHERE id = $1`, [req.user?.id])
+    : db.prepare(`
+      SELECT email
+      FROM users
+      WHERE id = ?
+    `).get(req.user?.id);
 
   if (user && isFounderEmail(user.email)) {
     return next();
@@ -480,22 +547,32 @@ function requireFounder(req, res, next) {
   return res.status(403).json({ error: '沒有 Founder Dashboard 權限' });
 }
 
-function company(req, res, next) {
+async function company(req, res, next) {
   const companyId = Number(req.params.companyId || req.query.companyId || req.body.companyId);
 
   if (!companyId) {
     return res.status(400).json({ error: '缺少 companyId' });
   }
 
-  const row = db.prepare(`
-    SELECT
-      c.*,
-      cu.role
-    FROM companies c
-    JOIN company_users cu ON cu.company_id = c.id
-    WHERE c.id = ?
-      AND cu.user_id = ?
-  `).get(companyId, req.user.id);
+  const row = PG_ENABLED
+    ? await pgOne(`
+      SELECT
+        c.*,
+        cu.role
+      FROM companies c
+      JOIN company_users cu ON cu.company_id = c.id
+      WHERE c.id = $1
+        AND cu.user_id = $2
+    `, [companyId, req.user.id])
+    : db.prepare(`
+      SELECT
+        c.*,
+        cu.role
+      FROM companies c
+      JOIN company_users cu ON cu.company_id = c.id
+      WHERE c.id = ?
+        AND cu.user_id = ?
+    `).get(companyId, req.user.id);
 
   if (!row) {
     return res.status(403).json({ error: '沒有公司權限' });
@@ -522,6 +599,7 @@ function requireRole(...allowedRoles) {
 }
 
 function getCompanyFeatureOverrides(companyId) {
+  if (PG_ENABLED) return [];
   return db.prepare(`
     SELECT
       feature_key,
@@ -641,8 +719,72 @@ function seedCompanyDefaults(companyId) {
   accounts.forEach((a) => stmt.run(companyId, ...a));
 }
 
-function ensureAdminBootstrapAccount() {
+async function ensureAdminBootstrapAccount() {
   const hash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+  if (PG_ENABLED) {
+    const existingUser = await pgOne('SELECT * FROM users WHERE email = $1', [ADMIN_EMAIL]);
+    let userId;
+
+    if (existingUser) {
+      userId = existingUser.id;
+      await pgQuery(`
+        UPDATE users
+        SET name = $1, password_hash = $2
+        WHERE id = $3
+      `, [ADMIN_NAME, hash, userId]);
+    } else {
+      const created = await pgOne(`
+        INSERT INTO users (name, email, password_hash, created_source, created_utm_source)
+        VALUES ($1,$2,$3,$4,$5)
+        RETURNING id
+      `, [ADMIN_NAME, ADMIN_EMAIL, hash, 'bootstrap', 'bootstrap']);
+      userId = created.id;
+    }
+
+    const existingCompany = await pgOne(`
+      SELECT id
+      FROM companies
+      WHERE name = $1 AND owner_id = $2
+      ORDER BY id ASC
+      LIMIT 1
+    `, [ADMIN_COMPANY, userId]);
+
+    let companyId;
+    if (existingCompany) {
+      companyId = existingCompany.id;
+      await pgQuery(`
+        UPDATE companies
+        SET name = $1,
+            industry = $2,
+            plan = $3,
+            owner_id = $4,
+            billing_status = $5,
+            subscription_plan = $6,
+            is_paid_customer = $7,
+            billing_note = $8
+        WHERE id = $9
+      `, [ADMIN_COMPANY, 'admin', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 系統管理員帳號', companyId]);
+    } else {
+      const company = await pgOne(`
+        INSERT INTO companies (
+          name, tax_id, industry, companyAddress, address, plan, owner_id,
+          billing_status, subscription_plan, is_paid_customer, billing_note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING id
+      `, [ADMIN_COMPANY, '', 'admin', '', '', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 系統管理員帳號']);
+      companyId = company.id;
+    }
+
+    await pgQuery(`
+      INSERT INTO company_users (company_id, user_id, role)
+      VALUES ($1,$2,$3)
+      ON CONFLICT (company_id, user_id) DO UPDATE SET role = EXCLUDED.role
+    `, [companyId, userId, 'owner']);
+
+    return { userId, companyId };
+  }
+
   const existingUser = db.prepare(`
     SELECT *
     FROM users
@@ -764,9 +906,74 @@ function ensureAdminBootstrapAccount() {
   };
 }
 
-function ensureFounderBootstrapAccount() {
+async function ensureFounderBootstrapAccount() {
   const founderEmail = FOUNDER_EMAIL || normalizeEmail(ADMIN_EMAIL);
   const hash = bcrypt.hashSync(ADMIN_PASSWORD, 10);
+  if (PG_ENABLED) {
+    const existingUser = await pgOne('SELECT * FROM users WHERE email = $1', [founderEmail]);
+    let userId;
+
+    if (existingUser) {
+      userId = existingUser.id;
+      await pgQuery(`
+        UPDATE users
+        SET name = $1, password_hash = $2
+        WHERE id = $3
+      `, ['BookAI Founder', hash, userId]);
+    } else {
+      const user = await pgOne(`
+        INSERT INTO users (name, email, password_hash, created_source, created_utm_source)
+        VALUES ($1,$2,$3,$4,$5)
+        RETURNING id
+      `, ['BookAI Founder', founderEmail, hash, 'bootstrap', 'bootstrap']);
+      userId = user.id;
+    }
+
+    const companyName = 'BookAI 創辦人管理中心';
+    const existingCompany = await pgOne(`
+      SELECT id
+      FROM companies
+      WHERE name = $1 AND owner_id = $2
+      ORDER BY id ASC
+      LIMIT 1
+    `, [companyName, userId]);
+
+    let companyId;
+    if (existingCompany) {
+      companyId = existingCompany.id;
+      await pgQuery(`
+        UPDATE companies
+        SET name = $1,
+            industry = $2,
+            plan = $3,
+            owner_id = $4,
+            billing_status = $5,
+            subscription_plan = $6,
+            is_paid_customer = $7,
+            billing_note = $8
+        WHERE id = $9
+      `, [companyName, 'admin', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 創辦人帳號', companyId]);
+    } else {
+      const company = await pgOne(`
+        INSERT INTO companies (
+          name, tax_id, industry, companyAddress, address, plan, owner_id,
+          billing_status, subscription_plan, is_paid_customer, billing_note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        RETURNING id
+      `, [companyName, '', 'admin', '', '', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 創辦人帳號']);
+      companyId = company.id;
+    }
+
+    await pgQuery(`
+      INSERT INTO company_users (company_id, user_id, role)
+      VALUES ($1,$2,$3)
+      ON CONFLICT (company_id, user_id) DO UPDATE SET role = EXCLUDED.role
+    `, [companyId, userId, 'owner']);
+
+    return { userId, companyId, email: founderEmail };
+  }
+
   const existingUser = db.prepare(`
     SELECT *
     FROM users
@@ -892,15 +1099,21 @@ function ensureFounderBootstrapAccount() {
   };
 }
 
-app.get('/api/health', (_, res) => {
+app.get('/api/health', async (_, res) => {
   try {
-    db.prepare('SELECT 1 AS ok').get();
+    if (PG_ENABLED) {
+      await pgOne('SELECT 1 AS ok');
+    } else {
+      db.prepare('SELECT 1 AS ok').get();
+    }
     res.json({
       ok: true,
       status: 'healthy',
       version: 'v5.4',
       name: 'BookAI Commerce ERP Hub',
-      environment: NODE_ENV
+      environment: NODE_ENV,
+      provider: PG_ENABLED ? 'postgresql' : 'sqlite',
+      storage: PG_ENABLED ? 'postgresql' : 'sqlite'
     });
   } catch (err) {
     res.status(500).json({
@@ -912,11 +1125,37 @@ app.get('/api/health', (_, res) => {
   }
 });
 
-app.post('/api/track/visit', rateLimit({ windowMs: 60 * 1000, max: 120 }), (req, res) => {
+app.post('/api/track/visit', rateLimit({ windowMs: 60 * 1000, max: 120 }), async (req, res) => {
   try {
     const tracking = sanitizeTrackingBody(req.body || {});
 
-    db.prepare(`
+    if (PG_ENABLED) {
+      await pgQuery(`
+        INSERT INTO visitor_logs (
+          visitor_id,
+          page,
+          referrer,
+          utm_source,
+          utm_medium,
+          utm_campaign,
+          source,
+          ip,
+          user_agent
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      `, [
+        tracking.visitorId || null,
+        tracking.page || '/',
+        tracking.referrer || '',
+        tracking.utm_source || '',
+        tracking.utm_medium || '',
+        tracking.utm_campaign || '',
+        tracking.source || 'unknown',
+        requestIp(req),
+        requestUserAgent(req)
+      ]);
+    } else {
+      db.prepare(`
       INSERT INTO visitor_logs (
         visitor_id,
         page,
@@ -940,15 +1179,16 @@ app.post('/api/track/visit', rateLimit({ windowMs: 60 * 1000, max: 120 }), (req,
       requestIp(req),
       requestUserAgent(req)
     );
+    }
 
-    recordTrafficEvent(req, 'visit', { tracking });
+    await recordTrafficEvent(req, 'visit', { tracking });
     res.json({ ok: true, source: tracking.source });
   } catch (err) {
     res.status(500).json({ error: '訪客紀錄失敗' });
   }
 });
 
-app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), (req, res) => {
+app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), async (req, res) => {
   const { secret } = req.body || {};
 
   if (!BOOTSTRAP_SECRET) {
@@ -968,7 +1208,7 @@ app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }
   }
 
   try {
-    ensureAdminBootstrapAccount();
+    await ensureAdminBootstrapAccount();
     res.json({
       ok: true,
       email: ADMIN_EMAIL,
@@ -983,7 +1223,7 @@ app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }
   }
 });
 
-app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), (req, res) => {
+app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), async (req, res) => {
   const secret = bootstrapSecretFromRequest(req);
 
   if (!BOOTSTRAP_SECRET) {
@@ -999,7 +1239,7 @@ app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10
   }
 
   try {
-    const result = ensureFounderBootstrapAccount();
+    const result = await ensureFounderBootstrapAccount();
     res.json({
       ok: true,
       email: result.email,
@@ -1014,8 +1254,8 @@ app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10
   }
 });
 
-app.get('/api/debug/auth-shape', (req, res) => {
-  if (!hasFounderDebugAccess(req)) {
+app.get('/api/debug/auth-shape', async (req, res) => {
+  if (!(await hasFounderDebugAccess(req))) {
     return res.status(403).json({ error: '沒有 Founder Dashboard 權限' });
   }
 
@@ -1031,7 +1271,7 @@ app.get('/api/debug/auth-shape', (req, res) => {
   });
 });
 
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', async (req, res) => {
   const {
     name,
     email,
@@ -1071,6 +1311,70 @@ app.post('/api/auth/register', (req, res) => {
   const hash = bcrypt.hashSync(password, 10);
 
   try {
+    if (PG_ENABLED) {
+      const user = await pgOne(`
+        INSERT INTO users (
+          name,
+          email,
+          password_hash,
+          created_source,
+          created_utm_source
+        )
+        VALUES ($1,$2,$3,$4,$5)
+        RETURNING id, name, email
+      `, [
+        name || '使用者',
+        normalizedEmail,
+        hash,
+        tracking.source || '',
+        tracking.utm_source || ''
+      ]);
+
+      const companyRow = await pgOne(`
+        INSERT INTO companies (
+          name,
+          tax_id,
+          industry,
+          companyAddress,
+          address,
+          plan,
+          owner_id
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id
+      `, [
+        companyName,
+        taxId || '',
+        industry || '',
+        finalAddress,
+        finalAddress,
+        plan,
+        user.id
+      ]);
+
+      await pgQuery(`
+        INSERT INTO company_users (company_id, user_id, role)
+        VALUES ($1,$2,$3)
+      `, [companyRow.id, user.id, 'owner']);
+
+      audit(companyRow.id, user.id, 'register', '建立帳號與公司');
+      await recordTrafficEvent(req, 'register', { userId: user.id, tracking });
+
+      const newUser = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        isAdmin: false,
+        isFounder: isFounderEmail(user.email)
+      };
+
+      return res.json({
+        token: sign(newUser),
+        user: newUser,
+        companyId: companyRow.id
+      });
+    }
+
     const user = db.prepare(`
       INSERT INTO users (
         name,
@@ -1121,7 +1425,7 @@ app.post('/api/auth/register', (req, res) => {
     seedCompanyDefaults(companyRow.lastInsertRowid);
 
     audit(companyRow.lastInsertRowid, user.lastInsertRowid, 'register', '建立帳號與公司');
-    recordTrafficEvent(req, 'register', { userId: user.lastInsertRowid, tracking });
+    await recordTrafficEvent(req, 'register', { userId: user.lastInsertRowid, tracking });
 
     const newUser = db.prepare(`
       SELECT
@@ -1147,7 +1451,7 @@ app.post('/api/auth/register', (req, res) => {
   }
 });
 
-app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (req, res) => {
+app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), async (req, res) => {
   const { email, password } = req.body || {};
   const normalizedEmail = normalizeEmail(email);
   const tracking = sanitizeTrackingBody(req.body || {});
@@ -1156,14 +1460,40 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (r
     return res.status(400).json({ error: '缺少 email 或 password' });
   }
 
-  const user = db.prepare(`
+  const user = PG_ENABLED
+    ? await pgOne(`
+      SELECT *
+      FROM users
+      WHERE email = $1
+    `, [normalizedEmail])
+    : db.prepare(`
     SELECT *
     FROM users
     WHERE email = ?
   `).get(normalizedEmail);
 
   if (!user || !bcrypt.compareSync(password, user.password_hash)) {
-    db.prepare(`
+    if (PG_ENABLED) {
+      await pgQuery(`
+        INSERT INTO user_login_logs (
+          user_id,
+          email,
+          ip,
+          user_agent,
+          status,
+          fail_reason
+        )
+        VALUES ($1,$2,$3,$4,$5,$6)
+      `, [
+        user?.id || null,
+        normalizedEmail,
+        requestIp(req),
+        requestUserAgent(req),
+        'failed',
+        'invalid_credentials'
+      ]);
+    } else {
+      db.prepare(`
       INSERT INTO user_login_logs (
         user_id,
         email,
@@ -1181,10 +1511,31 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (r
       'failed',
       'invalid_credentials'
     );
+    }
     return res.status(401).json({ error: '帳號或密碼錯誤' });
   }
 
-  db.prepare(`
+  if (PG_ENABLED) {
+    await pgQuery(`
+      UPDATE users
+      SET
+        last_login_at = CURRENT_TIMESTAMP,
+        login_count = COALESCE(login_count, 0) + 1
+      WHERE id = $1
+    `, [user.id]);
+
+    await pgQuery(`
+      INSERT INTO user_login_logs (
+        user_id,
+        email,
+        ip,
+        user_agent,
+        status
+      )
+      VALUES ($1,$2,$3,$4,$5)
+    `, [user.id, user.email, requestIp(req), requestUserAgent(req), 'success']);
+  } else {
+    db.prepare(`
     UPDATE users
     SET
       last_login_at = CURRENT_TIMESTAMP,
@@ -1192,7 +1543,7 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (r
     WHERE id = ?
   `).run(user.id);
 
-  db.prepare(`
+    db.prepare(`
     INSERT INTO user_login_logs (
       user_id,
       email,
@@ -1202,8 +1553,9 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (r
     )
     VALUES (?,?,?,?,?)
   `).run(user.id, user.email, requestIp(req), requestUserAgent(req), 'success');
+  }
 
-  recordTrafficEvent(req, 'login', { userId: user.id, tracking });
+  await recordTrafficEvent(req, 'login', { userId: user.id, tracking });
 
   const safe = {
     id: user.id,
@@ -1219,8 +1571,17 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), (r
   });
 });
 
-app.get('/api/me', auth, (req, res) => {
-  const user = db.prepare(`
+app.get('/api/me', auth, async (req, res) => {
+  const user = PG_ENABLED
+    ? await pgOne(`
+      SELECT
+        id,
+        name,
+        email
+      FROM users
+      WHERE id = $1
+    `, [req.user.id])
+    : db.prepare(`
     SELECT
       id,
       name,
@@ -1234,15 +1595,27 @@ app.get('/api/me', auth, (req, res) => {
     user.isFounder = isFounderEmail(user.email);
   }
 
-  const companies = db.prepare(`
+  const rawCompanies = PG_ENABLED
+    ? await pgAll(`
+      SELECT
+        c.*,
+        cu.role
+      FROM companies c
+      JOIN company_users cu ON cu.company_id = c.id
+      WHERE cu.user_id = $1
+    `, [req.user.id])
+    : db.prepare(`
     SELECT
       c.*,
       cu.role
     FROM companies c
     JOIN company_users cu ON cu.company_id = c.id
     WHERE cu.user_id = ?
-  `).all(req.user.id).map((row) => ({
+  `).all(req.user.id);
+
+  const companies = rawCompanies.map((row) => ({
     ...row,
+    companyAddress: row.companyAddress ?? row.companyaddress ?? row.address ?? '',
     featureOverrides: getCompanyFeatureOverrides(row.id).reduce((acc, item) => {
       acc[item.feature_key] = Number(item.enabled) === 1;
       return acc;
@@ -1271,12 +1644,139 @@ function distinctVisitors(range) {
   `).get(range.start, range.end).count || 0;
 }
 
-app.get('/api/founder/analytics', auth, requireFounder, (req, res) => {
+async function pgDistinctVisitors(range) {
+  const row = await pgOne(`
+    SELECT COUNT(DISTINCT COALESCE(visitor_id, ip || ':' || user_agent))::int AS count
+    FROM visitor_logs
+    WHERE created_at >= $1::timestamptz
+      AND created_at < $2::timestamptz
+  `, [range.start, range.end]);
+  return row?.count || 0;
+}
+
+app.get('/api/founder/analytics', auth, requireFounder, async (req, res) => {
   const today = taipeiDayRange(0);
   const yesterday = taipeiDayRange(-1);
   const last7 = daysAgoRange(7);
   const last30 = daysAgoRange(30);
   const last24 = daysAgoRange(1);
+
+  if (PG_ENABLED) {
+    const userCount = (range) => pgCountBetween('users', 'created_at', range);
+    const loginCount = (range) => pgCountBetween('user_login_logs', 'created_at', range, 'status = $1', ['success']);
+    const activeCount = async (range) => {
+      const row = await pgOne(`
+        SELECT COUNT(*)::int AS count
+        FROM users
+        WHERE last_login_at IS NOT NULL
+          AND last_login_at >= $1::timestamptz
+          AND last_login_at < $2::timestamptz
+      `, [range.start, range.end]);
+      return row?.count || 0;
+    };
+
+    const totalUsers = (await pgOne('SELECT COUNT(*)::int AS count FROM users'))?.count || 0;
+    const totalVisits = (await pgOne(`
+      SELECT COUNT(DISTINCT COALESCE(visitor_id, ip || ':' || user_agent))::int AS count
+      FROM visitor_logs
+    `))?.count || 0;
+    const totalLogins = (await pgOne(`
+      SELECT COUNT(*)::int AS count
+      FROM user_login_logs
+      WHERE status = 'success'
+    `))?.count || 0;
+    const sourceNames = (await pgAll(`
+      SELECT COALESCE(source, 'unknown') AS source
+      FROM traffic_events
+      GROUP BY COALESCE(source, 'unknown')
+      ORDER BY COUNT(*) DESC
+    `)).map((row) => row.source || 'unknown');
+
+    const sourceRows = await Promise.all((sourceNames.length ? sourceNames : ['direct']).map(async (source) => {
+      const visits = (await pgOne(`
+        SELECT COUNT(DISTINCT COALESCE(visitor_id, ip || ':' || user_agent))::int AS count
+        FROM traffic_events
+        WHERE event_type = 'visit'
+          AND COALESCE(source, 'unknown') = $1
+      `, [source]))?.count || 0;
+      const registers = (await pgOne(`
+        SELECT COUNT(*)::int AS count
+        FROM traffic_events
+        WHERE event_type = 'register'
+          AND COALESCE(source, 'unknown') = $1
+      `, [source]))?.count || 0;
+      const logins = (await pgOne(`
+        SELECT COUNT(*)::int AS count
+        FROM traffic_events
+        WHERE event_type = 'login'
+          AND COALESCE(source, 'unknown') = $1
+      `, [source]))?.count || 0;
+      return {
+        source,
+        visits,
+        registers,
+        logins,
+        registerConversionRate: visits ? Math.round((registers / visits) * 10000) / 100 : 0,
+        loginConversionRate: visits ? Math.round((logins / visits) * 10000) / 100 : 0
+      };
+    }));
+
+    const testers = await pgAll(`
+      SELECT
+        c.id,
+        c.name AS "companyName",
+        c.industry,
+        c.created_at AS "createdAt",
+        u.email,
+        u.last_login_at AS "lastLoginAt",
+        COALESCE(u.login_count, 0) AS "loginCount",
+        COALESCE(u.created_source, '') AS source
+      FROM companies c
+      LEFT JOIN users u ON u.id = c.owner_id
+      WHERE COALESCE(c.is_tester, 0) = 1
+      ORDER BY c.created_at DESC
+    `);
+
+    const alerts = [];
+    if ((await userCount(last24)) === 0) alerts.push('過去 24 小時無註冊');
+    if ((await loginCount(last24)) === 0) alerts.push('過去 24 小時無登入');
+
+    return res.json({
+      users: {
+        total: totalUsers,
+        today: await userCount(today),
+        yesterday: await userCount(yesterday),
+        last7Days: await userCount(last7),
+        last30Days: await userCount(last30)
+      },
+      visitors: {
+        today: await pgDistinctVisitors(today),
+        yesterday: await pgDistinctVisitors(yesterday),
+        last7Days: await pgDistinctVisitors(last7),
+        last30Days: await pgDistinctVisitors(last30),
+        total: totalVisits
+      },
+      logins: {
+        today: await loginCount(today),
+        yesterday: await loginCount(yesterday),
+        last7Days: await loginCount(last7),
+        last30Days: await loginCount(last30)
+      },
+      activeUsers: {
+        last7Days: await activeCount(last7),
+        last30Days: await activeCount(last30)
+      },
+      sources: sourceRows,
+      funnel: {
+        visits: totalVisits,
+        registers: totalUsers,
+        logins: totalLogins,
+        activeUsers: await activeCount(last30)
+      },
+      testers,
+      alerts
+    });
+  }
 
   const userCount = (range) => countBetween('users', 'created_at', range);
   const loginCount = (range) => countBetween('user_login_logs', 'created_at', range, "status = 'success'");
@@ -1401,13 +1901,46 @@ app.get('/api/founder/analytics', auth, requireFounder, (req, res) => {
   });
 });
 
-app.get('/api/founder/db-health', auth, requireFounder, (req, res) => {
+app.get('/api/founder/db-health', auth, requireFounder, async (req, res) => {
+  if (PG_ENABLED) {
+    const [
+      usersCount,
+      jobSitesCount,
+      paymentsCount,
+      lastUserCreatedAt
+    ] = await Promise.all([
+      pgOne('SELECT COUNT(*)::int AS count FROM users'),
+      pgOne('SELECT COUNT(*)::int AS count FROM job_sites'),
+      pgOne('SELECT COUNT(*)::int AS count FROM job_site_payments'),
+      pgOne('SELECT MAX(created_at) AS value FROM users')
+    ]);
+
+    return res.json({
+      env: NODE_ENV,
+      provider: 'postgresql',
+      storage: 'postgresql',
+      postgres: postgresStatus,
+      dbPath: 'DATABASE_URL',
+      isPersistentPath: true,
+      dbExists: true,
+      dbSizeMB: 0,
+      usersCount: usersCount?.count || 0,
+      jobSitesCount: jobSitesCount?.count || 0,
+      paymentsCount: paymentsCount?.count || 0,
+      lastUserCreatedAt: lastUserCreatedAt?.value || '',
+      lastBackupAt: '',
+      backupCount: 0,
+      renderEnvironment: process.env.RENDER ? 'render' : 'local',
+      warning: ''
+    });
+  }
+
   const backups = listBackups();
   const exists = fs.existsSync(DB_PATH);
   const stat = exists ? fs.statSync(DB_PATH) : null;
   const isPersistentPath = DB_PATH.startsWith('/data/');
   const warning = NODE_ENV === 'production' && DB_PROVIDER === 'sqlite' && !isPersistentPath
-    ? 'Render Free SQLite fallback is active. Deploy can start, but data may not survive redeploys.'
+    ? '目前使用 SQLite 開發模式。正式環境請設定 DATABASE_URL 以使用 PostgreSQL。'
     : '';
 
   res.json({
@@ -1500,7 +2033,39 @@ function feedbackRow(row) {
   };
 }
 
-app.get('/api/admin/companies', auth, requireAdmin, (req, res) => {
+app.get('/api/admin/companies', auth, requireAdmin, async (req, res) => {
+  if (PG_ENABLED) {
+    const companies = await pgAll(`
+      SELECT
+        c.id,
+        c.name,
+        c.tax_id,
+        c.industry,
+        c.plan,
+        c.billing_status,
+        c.subscription_plan,
+        c.subscription_started_at,
+        c.subscription_expires_at,
+        c.is_paid_customer,
+        c.billing_note,
+        c.has_official_site,
+        c.official_site_url,
+        c.official_site_status,
+        c.official_site_note,
+        c.is_tester,
+        c.tester_started_at,
+        c.tester_note,
+        c.tester_feedback_status,
+        c.created_at,
+        u.name AS owner_name,
+        u.email AS owner_email
+      FROM companies c
+      LEFT JOIN users u ON u.id = c.owner_id
+      ORDER BY c.created_at DESC, c.id DESC
+    `);
+    return res.json(companies);
+  }
+
   const companies = db.prepare(`
     SELECT
       c.id,
@@ -1633,7 +2198,7 @@ app.put('/api/admin/companies/:companyId/features', auth, requireAdmin, (req, re
   });
 });
 
-app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, res) => {
+app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const {
     billing_status,
@@ -1651,7 +2216,9 @@ app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, r
     return res.status(400).json({ error: '不支援的使用狀態' });
   }
 
-  const existing = db.prepare(`
+  const existing = PG_ENABLED
+    ? await pgOne('SELECT id FROM companies WHERE id = $1', [companyId])
+    : db.prepare(`
     SELECT id
     FROM companies
     WHERE id = ?
@@ -1661,7 +2228,25 @@ app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, r
     return res.status(404).json({ error: '找不到公司' });
   }
 
-  db.prepare(`
+  if (PG_ENABLED) {
+    await pgQuery(`
+      UPDATE companies
+      SET billing_status = $1,
+          subscription_plan = $2,
+          subscription_expires_at = $3,
+          is_paid_customer = $4,
+          billing_note = $5
+      WHERE id = $6
+    `, [
+      billing_status || 'trial',
+      subscription_plan || 'engineering_trial',
+      subscription_expires_at || '',
+      toAdminBoolean(is_paid_customer),
+      billing_note || '',
+      companyId
+    ]);
+  } else {
+    db.prepare(`
     UPDATE companies
     SET
       billing_status = ?,
@@ -1678,6 +2263,7 @@ app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, r
     billing_note || '',
     companyId
   );
+  }
 
   audit(companyId, req.user.id, 'admin_billing_updated', JSON.stringify({
     billing_status,
@@ -1688,7 +2274,7 @@ app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, (req, r
   res.json({ ok: true });
 });
 
-app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, (req, res) => {
+app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const {
     has_official_site,
@@ -1705,7 +2291,9 @@ app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, (req, r
     return res.status(400).json({ error: '不支援的網站狀態' });
   }
 
-  const existing = db.prepare(`
+  const existing = PG_ENABLED
+    ? await pgOne('SELECT id FROM companies WHERE id = $1', [companyId])
+    : db.prepare(`
     SELECT id
     FROM companies
     WHERE id = ?
@@ -1715,7 +2303,23 @@ app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, (req, r
     return res.status(404).json({ error: '找不到公司' });
   }
 
-  db.prepare(`
+  if (PG_ENABLED) {
+    await pgQuery(`
+      UPDATE companies
+      SET has_official_site = $1,
+          official_site_url = $2,
+          official_site_status = $3,
+          official_site_note = $4
+      WHERE id = $5
+    `, [
+      toAdminBoolean(has_official_site),
+      official_site_url || '',
+      official_site_status || 'none',
+      official_site_note || '',
+      companyId
+    ]);
+  } else {
+    db.prepare(`
     UPDATE companies
     SET
       has_official_site = ?,
@@ -1730,13 +2334,14 @@ app.patch('/api/admin/companies/:companyId/website', auth, requireAdmin, (req, r
     official_site_note || '',
     companyId
   );
+  }
 
   audit(companyId, req.user.id, 'admin_website_updated', official_site_status || 'none');
 
   res.json({ ok: true });
 });
 
-app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res) => {
+app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const {
     is_tester,
@@ -1753,7 +2358,9 @@ app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res)
     return res.status(400).json({ error: '不支援的使用回饋狀態' });
   }
 
-  const existing = db.prepare(`
+  const existing = PG_ENABLED
+    ? await pgOne('SELECT id FROM companies WHERE id = $1', [companyId])
+    : db.prepare(`
     SELECT id
     FROM companies
     WHERE id = ?
@@ -1764,7 +2371,23 @@ app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res)
   }
 
   const isTester = toAdminBoolean(is_tester);
-  db.prepare(`
+  if (PG_ENABLED) {
+    await pgQuery(`
+      UPDATE companies
+      SET is_tester = $1,
+          tester_started_at = $2,
+          tester_note = $3,
+          tester_feedback_status = $4
+      WHERE id = $5
+    `, [
+      isTester,
+      tester_started_at || (isTester ? new Date().toISOString().slice(0, 10) : ''),
+      tester_note || '',
+      tester_feedback_status || '尚未回饋',
+      companyId
+    ]);
+  } else {
+    db.prepare(`
     UPDATE companies
     SET
       is_tester = ?,
@@ -1779,6 +2402,7 @@ app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res)
     tester_feedback_status || '尚未回饋',
     companyId
   );
+  }
 
   audit(companyId, req.user.id, 'admin_tester_status_updated', JSON.stringify({
     is_tester: isTester,
@@ -1788,7 +2412,16 @@ app.put('/api/admin/companies/:companyId/tester', auth, requireAdmin, (req, res)
   res.json({ ok: true });
 });
 
-app.get('/api/admin/settings', auth, requireAdmin, (req, res) => {
+app.get('/api/admin/settings', auth, requireAdmin, async (req, res) => {
+  if (PG_ENABLED) {
+    const rows = await pgAll(`
+      SELECT key, value
+      FROM platform_settings
+      ORDER BY key
+    `);
+    return res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
+  }
+
   const rows = db.prepare(`
     SELECT key, value
     FROM platform_settings
@@ -1798,8 +2431,31 @@ app.get('/api/admin/settings', auth, requireAdmin, (req, res) => {
   res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
 });
 
-app.patch('/api/admin/settings', auth, requireAdmin, (req, res) => {
+app.patch('/api/admin/settings', auth, requireAdmin, async (req, res) => {
   const body = req.body || {};
+  if (PG_ENABLED) {
+    for (const [key, value] of Object.entries(body)) {
+      if (adminSettingKeys.has(key)) {
+        await pgQuery(`
+          INSERT INTO platform_settings (key, value, updated_at)
+          VALUES ($1,$2,CURRENT_TIMESTAMP)
+          ON CONFLICT (key) DO UPDATE SET
+            value = EXCLUDED.value,
+            updated_at = CURRENT_TIMESTAMP
+        `, [key, String(value ?? '')]);
+      }
+    }
+
+    audit(null, req.user.id, 'admin_settings_updated', Object.keys(body).join(','));
+
+    const rows = await pgAll(`
+      SELECT key, value
+      FROM platform_settings
+      ORDER BY key
+    `);
+    return res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
+  }
+
   const stmt = db.prepare(`
     INSERT INTO platform_settings (
       key,
@@ -3694,7 +4350,48 @@ try {
 }
 
 
-app.get('/api/companies/:companyId/jobsites', auth, company, (req, res) => {
+app.get('/api/companies/:companyId/jobsites', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    const rows = await pgAll(`
+      SELECT
+        id,
+        company_id AS "companyId",
+        COALESCE(site_name, name) AS "siteName",
+        COALESCE(client_name, '') AS "clientName",
+        COALESCE(client_phone, '') AS "clientPhone",
+        COALESCE(address, '') AS address,
+        COALESCE(project_type, '') AS "projectType",
+        COALESCE(area_pings, 0) AS "areaPings",
+        COALESCE(price_per_ping, 0) AS "pricePerPing",
+        COALESCE(food_cost, 0) AS "foodCost",
+        COALESCE(quote_amount, 0) AS "quoteAmount",
+        COALESCE(estimate_cost_total, 0) AS "estimateCostTotal",
+        COALESCE(tax_mode, 'not_taxed') AS "taxMode",
+        COALESCE(tax_rate, 0.05) AS "taxRate",
+        COALESCE(subtotal_amount, quote_amount, 0) AS "subtotalAmount",
+        COALESCE(tax_amount, 0) AS "taxAmount",
+        COALESCE(total_amount, quote_amount, 0) AS "totalAmount",
+        COALESCE((
+          SELECT SUM(jsp.amount)
+          FROM job_site_payments jsp
+          WHERE jsp.company_id = job_sites.company_id
+            AND jsp.job_site_id = job_sites.id
+        ), 0) AS "receivedAmount",
+        COALESCE(material_cost, 0) AS "materialCost",
+        COALESCE(labor_cost, 0) AS "laborCost",
+        COALESCE(outsourced_cost, 0) AS "outsourcedCost",
+        COALESCE(misc_cost, 0) AS "miscCost",
+        COALESCE(status, '已報價') AS status,
+        COALESCE(note, '') AS note,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM job_sites
+      WHERE company_id = $1
+      ORDER BY id DESC
+    `, [req.company.id]);
+    return res.json(rows);
+  }
+
   const rows = db.prepare(`
     SELECT
       id,
@@ -3736,7 +4433,7 @@ app.get('/api/companies/:companyId/jobsites', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const {
     siteName,
     name,
@@ -3769,6 +4466,99 @@ app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner
 
   if (!finalSiteName.trim()) {
     return res.status(400).json({ error: '請輸入案場名稱' });
+  }
+
+  if (PG_ENABLED) {
+    const created = await pgOne(`
+      INSERT INTO job_sites (
+        company_id,
+        name,
+        site_name,
+        client_name,
+        client_phone,
+        address,
+        project_type,
+        area_pings,
+        price_per_ping,
+        food_cost,
+        quote_amount,
+        tax_mode,
+        tax_rate,
+        subtotal_amount,
+        tax_amount,
+        total_amount,
+        received_amount,
+        material_cost,
+        labor_cost,
+        outsourced_cost,
+        misc_cost,
+        status,
+        note,
+        created_at,
+        updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      RETURNING id
+    `, [
+      req.company.id,
+      finalSiteName.trim(),
+      finalSiteName.trim(),
+      clientName || '',
+      clientPhone || '',
+      address || '',
+      projectType || '',
+      Number(areaPings ?? areaPing ?? paintAreaPing ?? 0),
+      Number(pricePerPing ?? paintPricePerPing ?? 0),
+      Number(foodCost || 0),
+      Number(quoteAmount || totalAmount || 0),
+      taxMode || 'not_taxed',
+      Number(taxRate ?? 0.05),
+      Number(subtotalAmount ?? quoteAmount ?? totalAmount ?? 0),
+      Number(taxAmount || 0),
+      Number(totalAmount ?? quoteAmount ?? 0),
+      Number(receivedAmount || 0),
+      Number(materialCost || 0),
+      Number(laborCost || 0),
+      Number(outsourcedCost || 0),
+      Number(miscCost || 0),
+      status || '已報價',
+      note || ''
+    ]);
+
+    audit(req.company.id, req.user.id, 'jobsite_created', String(created.id));
+
+    const row = (await pgAll(`
+      SELECT
+        id,
+        company_id AS "companyId",
+        COALESCE(site_name, name) AS "siteName",
+        COALESCE(client_name, '') AS "clientName",
+        COALESCE(client_phone, '') AS "clientPhone",
+        COALESCE(address, '') AS address,
+        COALESCE(project_type, '') AS "projectType",
+        COALESCE(area_pings, 0) AS "areaPings",
+        COALESCE(price_per_ping, 0) AS "pricePerPing",
+        COALESCE(food_cost, 0) AS "foodCost",
+        COALESCE(quote_amount, 0) AS "quoteAmount",
+        COALESCE(tax_mode, 'not_taxed') AS "taxMode",
+        COALESCE(tax_rate, 0.05) AS "taxRate",
+        COALESCE(subtotal_amount, quote_amount, 0) AS "subtotalAmount",
+        COALESCE(tax_amount, 0) AS "taxAmount",
+        COALESCE(total_amount, quote_amount, 0) AS "totalAmount",
+        COALESCE(received_amount, 0) AS "receivedAmount",
+        COALESCE(material_cost, 0) AS "materialCost",
+        COALESCE(labor_cost, 0) AS "laborCost",
+        COALESCE(outsourced_cost, 0) AS "outsourcedCost",
+        COALESCE(misc_cost, 0) AS "miscCost",
+        COALESCE(status, '已報價') AS status,
+        COALESCE(note, '') AS note,
+        created_at AS "createdAt",
+        updated_at AS "updatedAt"
+      FROM job_sites
+      WHERE id = $1 AND company_id = $2
+    `, [created.id, req.company.id]))[0];
+
+    return res.json(row);
   }
 
   const row = db.prepare(`
@@ -4505,11 +5295,41 @@ function refreshJobSiteReceivedAmount(companyId, jobsiteId) {
   return total;
 }
 
-app.get('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company, (req, res) => {
+app.get('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company, async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
   if (!jobsiteId) {
     return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  if (PG_ENABLED) {
+    const jobsite = await pgOne(`
+      SELECT id
+      FROM job_sites
+      WHERE id = $1 AND company_id = $2
+    `, [jobsiteId, req.company.id]);
+
+    if (!jobsite) {
+      return res.status(404).json({ error: '找不到此案場，或你沒有權限查看' });
+    }
+
+    const payments = await pgAll(`
+      SELECT
+        id,
+        company_id AS "companyId",
+        job_site_id AS "jobSiteId",
+        amount,
+        payment_date AS "paymentDate",
+        method,
+        note,
+        created_at AS "createdAt"
+      FROM job_site_payments
+      WHERE company_id = $1
+        AND job_site_id = $2
+      ORDER BY payment_date DESC, id DESC
+    `, [req.company.id, jobsiteId]);
+
+    return res.json(payments);
   }
 
   const jobsite = ensureJobSite(req.company.id, jobsiteId);
@@ -4537,17 +5357,11 @@ app.get('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company,
   res.json(payments);
 });
 
-app.post('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+app.post('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company, requireRole('owner', 'admin', 'accounting'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
   if (!jobsiteId) {
     return res.status(400).json({ error: '缺少 jobsiteId' });
-  }
-
-  const jobsite = ensureJobSite(req.company.id, jobsiteId);
-
-  if (!jobsite) {
-    return res.status(404).json({ error: '找不到此案場，或你沒有權限新增收款' });
   }
 
   const {
@@ -4561,6 +5375,80 @@ app.post('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company
 
   if (finalAmount <= 0) {
     return res.status(400).json({ error: '收款金額必須大於 0' });
+  }
+
+  if (PG_ENABLED) {
+    const jobsite = await pgOne(`
+      SELECT id
+      FROM job_sites
+      WHERE id = $1 AND company_id = $2
+    `, [jobsiteId, req.company.id]);
+
+    if (!jobsite) {
+      return res.status(404).json({ error: '找不到此案場，或你沒有權限新增收款' });
+    }
+
+    const row = await pgOne(`
+      INSERT INTO job_site_payments (
+        company_id,
+        job_site_id,
+        amount,
+        payment_date,
+        method,
+        note,
+        created_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,CURRENT_TIMESTAMP)
+      RETURNING id
+    `, [
+      req.company.id,
+      jobsiteId,
+      finalAmount,
+      paymentDate || new Date().toISOString().slice(0, 10),
+      method || '現金',
+      note || ''
+    ]);
+
+    const totalRow = await pgOne(`
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM job_site_payments
+      WHERE company_id = $1
+        AND job_site_id = $2
+    `, [req.company.id, jobsiteId]);
+    const receivedAmount = Number(totalRow?.total || 0);
+
+    await pgQuery(`
+      UPDATE job_sites
+      SET received_amount = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+        AND company_id = $3
+    `, [receivedAmount, jobsiteId, req.company.id]);
+
+    audit(req.company.id, req.user.id, 'jobsite_payment_created', String(row.id));
+
+    const payment = await pgOne(`
+      SELECT
+        id,
+        company_id AS "companyId",
+        job_site_id AS "jobSiteId",
+        amount,
+        payment_date AS "paymentDate",
+        method,
+        note,
+        created_at AS "createdAt"
+      FROM job_site_payments
+      WHERE id = $1
+        AND company_id = $2
+    `, [row.id, req.company.id]);
+
+    return res.json({ payment, receivedAmount });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限新增收款' });
   }
 
   const row = db.prepare(`
@@ -4609,7 +5497,7 @@ app.post('/api/companies/:companyId/jobsites/:jobsiteId/payments', auth, company
 });
 
 
-app.put('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+app.put('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', auth, company, requireRole('owner', 'admin', 'accounting'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
   const paymentId = Number(req.params.paymentId);
   const { amount, paymentDate, method, note } = req.body || {};
@@ -4618,16 +5506,85 @@ app.put('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', aut
     return res.status(400).json({ error: '缺少 jobsiteId 或 paymentId' });
   }
 
-  const jobsite = ensureJobSite(req.company.id, jobsiteId);
-
-  if (!jobsite) {
-    return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯收款' });
-  }
-
   const finalAmount = Number(amount || 0);
 
   if (finalAmount <= 0) {
     return res.status(400).json({ error: '收款金額必須大於 0' });
+  }
+
+  if (PG_ENABLED) {
+    const existing = await pgOne(`
+      SELECT jsp.id
+      FROM job_site_payments jsp
+      JOIN job_sites js ON js.id = jsp.job_site_id AND js.company_id = jsp.company_id
+      WHERE jsp.id = $1
+        AND jsp.job_site_id = $2
+        AND jsp.company_id = $3
+    `, [paymentId, jobsiteId, req.company.id]);
+
+    if (!existing) {
+      return res.status(404).json({ error: '找不到此收款紀錄' });
+    }
+
+    await pgQuery(`
+      UPDATE job_site_payments
+      SET amount = $1,
+          payment_date = $2,
+          method = $3,
+          note = $4
+      WHERE id = $5
+        AND job_site_id = $6
+        AND company_id = $7
+    `, [
+      finalAmount,
+      paymentDate || new Date().toISOString().slice(0, 10),
+      method || '現金',
+      note || '',
+      paymentId,
+      jobsiteId,
+      req.company.id
+    ]);
+
+    const totalRow = await pgOne(`
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM job_site_payments
+      WHERE company_id = $1
+        AND job_site_id = $2
+    `, [req.company.id, jobsiteId]);
+    const receivedAmount = Number(totalRow?.total || 0);
+
+    await pgQuery(`
+      UPDATE job_sites
+      SET received_amount = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+        AND company_id = $3
+    `, [receivedAmount, jobsiteId, req.company.id]);
+
+    audit(req.company.id, req.user.id, 'jobsite_payment_updated', String(paymentId));
+
+    const payment = await pgOne(`
+      SELECT
+        id,
+        company_id AS "companyId",
+        job_site_id AS "jobSiteId",
+        amount,
+        payment_date AS "paymentDate",
+        method,
+        note,
+        created_at AS "createdAt"
+      FROM job_site_payments
+      WHERE id = $1
+        AND company_id = $2
+    `, [paymentId, req.company.id]);
+
+    return res.json({ payment, receivedAmount });
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯收款' });
   }
 
   const existing = db.prepare(`
@@ -4687,12 +5644,55 @@ app.put('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', aut
   });
 });
 
-app.delete('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+app.delete('/api/companies/:companyId/jobsites/:jobsiteId/payments/:paymentId', auth, company, requireRole('owner', 'admin', 'accounting'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
   const paymentId = Number(req.params.paymentId);
 
   if (!jobsiteId || !paymentId) {
     return res.status(400).json({ error: '缺少 jobsiteId 或 paymentId' });
+  }
+
+  if (PG_ENABLED) {
+    const jobsite = await pgOne(`
+      SELECT id
+      FROM job_sites
+      WHERE id = $1 AND company_id = $2
+    `, [jobsiteId, req.company.id]);
+
+    if (!jobsite) {
+      return res.status(404).json({ error: '找不到此案場，或你沒有權限刪除收款' });
+    }
+
+    const result = await pgQuery(`
+      DELETE FROM job_site_payments
+      WHERE id = $1
+        AND job_site_id = $2
+        AND company_id = $3
+    `, [paymentId, jobsiteId, req.company.id]);
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: '找不到此收款紀錄' });
+    }
+
+    const totalRow = await pgOne(`
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM job_site_payments
+      WHERE company_id = $1
+        AND job_site_id = $2
+    `, [req.company.id, jobsiteId]);
+    const receivedAmount = Number(totalRow?.total || 0);
+
+    await pgQuery(`
+      UPDATE job_sites
+      SET received_amount = $1,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = $2
+        AND company_id = $3
+    `, [receivedAmount, jobsiteId, req.company.id]);
+
+    audit(req.company.id, req.user.id, 'jobsite_payment_deleted', String(paymentId));
+
+    return res.json({ ok: true, receivedAmount });
   }
 
   const jobsite = ensureJobSite(req.company.id, jobsiteId);

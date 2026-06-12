@@ -13,6 +13,7 @@
     "billing:activate": "node scripts/activate-company.js",
     "demo:engineering": "node scripts/prepare-engineering-demo.js",
     "health": "node scripts/health-check.js",
+    "migrate:pg": "node scripts/migrate-sqlite-to-postgres.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:clean": "node scripts/smoke-clean.js",
     "rbac:smoke": "node scripts/rbac-smoke-test.js"
@@ -32,6 +33,7 @@
     "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.17.0",
     "nanoid": "^5.1.11",
+    "pg": "^8.13.1",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "recharts": "^3.8.1",

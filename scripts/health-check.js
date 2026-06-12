@@ -35,6 +35,106 @@ let hasError = false;
 
 section('BookAI v5.6 Commercial Readiness 健康檢查');
 
+const pgCoreTables = [
+  'users',
+  'companies',
+  'company_users',
+  'job_sites',
+  'job_site_payments',
+  'visitor_logs',
+  'traffic_events',
+  'audit_logs',
+  'user_login_logs'
+];
+
+const pgCoreColumns = {
+  users: ['id', 'name', 'email', 'password_hash', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'created_at'],
+  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'billing_status', 'subscription_plan', 'is_paid_customer', 'is_tester', 'tester_feedback_status', 'created_at'],
+  company_users: ['id', 'company_id', 'user_id', 'role', 'created_at'],
+  job_sites: ['id', 'company_id', 'name', 'site_name', 'client_name', 'quote_amount', 'received_amount', 'status', 'created_at', 'updated_at'],
+  job_site_payments: ['id', 'company_id', 'job_site_id', 'amount', 'payment_date', 'method', 'note', 'created_at'],
+  visitor_logs: ['id', 'visitor_id', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'source', 'ip', 'user_agent', 'created_at'],
+  traffic_events: ['id', 'visitor_id', 'user_id', 'event_type', 'source', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'ip', 'user_agent', 'created_at'],
+  audit_logs: ['id', 'company_id', 'user_id', 'action', 'detail', 'created_at'],
+  user_login_logs: ['id', 'user_id', 'email', 'ip', 'user_agent', 'status', 'fail_reason', 'created_at']
+};
+
+if (databaseUrl) {
+  const { Pool } = await import('pg');
+  const pool = new Pool({
+    connectionString: databaseUrl,
+    ssl: databaseUrl.includes('sslmode=disable') ? false : { rejectUnauthorized: false }
+  });
+
+  try {
+    await pool.query('SELECT 1');
+    ok('PostgreSQL 連線成功');
+    ok('DB Provider：postgresql');
+    ok('Storage：postgresql');
+
+    section('PostgreSQL 核心資料表檢查');
+
+    for (const table of pgCoreTables) {
+      const exists = await pool.query(`
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_name = $1
+      `, [table]);
+
+      if (exists.rowCount) {
+        ok(`資料表存在：${table}`);
+      } else {
+        hasError = true;
+        fail(`缺少 PostgreSQL 資料表：${table}`);
+      }
+    }
+
+    section('PostgreSQL 欄位檢查');
+
+    for (const [table, columns] of Object.entries(pgCoreColumns)) {
+      const rows = await pool.query(`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+      `, [table]);
+      const actual = new Set(rows.rows.map((row) => row.column_name));
+
+      for (const column of columns) {
+        if (actual.has(column.toLowerCase())) {
+          ok(`${table}.${column}`);
+        } else {
+          hasError = true;
+          fail(`缺少欄位：${table}.${column}`);
+        }
+      }
+    }
+
+    section('PostgreSQL 資料品質檢查');
+    const negativePayment = await pool.query('SELECT COUNT(*)::int AS count FROM job_site_payments WHERE amount < 0');
+    if ((negativePayment.rows[0]?.count || 0) === 0) {
+      ok('案場收款金額沒有負數');
+    } else {
+      hasError = true;
+      fail('發現案場收款金額為負數');
+    }
+
+    if (hasError) {
+      fail('健康檢查未通過');
+      process.exit(1);
+    }
+
+    ok('健康檢查通過');
+    process.exit(0);
+  } catch (err) {
+    fail(`PostgreSQL 健康檢查失敗：${err.message}`);
+    process.exit(1);
+  } finally {
+    await pool.end().catch(() => {});
+  }
+}
+
 if (!fs.existsSync(dbPath)) {
   fail(`找不到 SQLite 資料庫：${dbPath}`);
   process.exit(1);
@@ -49,7 +149,7 @@ if (databaseUrl) {
 }
 
 if (nodeEnv === 'production' && dbProvider === 'sqlite' && !dbPath.startsWith('/data/')) {
-  warn('Production 目前使用 SQLite fallback，Render Free 可啟動，但資料可能不會永久保存。');
+  warn('Production 目前使用 SQLite 開發模式；正式環境請設定 DATABASE_URL 以使用 PostgreSQL。');
 } else if (nodeEnv === 'production' && dbProvider === 'sqlite') {
   ok('Production SQLite path 使用 /data persistent path。');
 }
