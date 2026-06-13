@@ -3121,24 +3121,49 @@ app.post('/api/admin/demo/engineering', auth, requireAdmin, (req, res) => {
   }
 });
 
-app.get('/api/feedbacks/my', auth, company, (req, res) => {
-  const rows = db.prepare(`
-    SELECT
-      f.*,
-      c.name AS company_name,
-      u.name AS user_name,
-      u.email AS user_email
-    FROM feedbacks f
-    LEFT JOIN companies c ON c.id = f.company_id
-    LEFT JOIN users u ON u.id = f.user_id
-    WHERE f.company_id = ?
-    ORDER BY f.created_at DESC, f.id DESC
-  `).all(req.company.id);
+app.get('/api/feedbacks/my', auth, company, async (req, res) => {
+  try {
+    const rows = PG_ENABLED
+      ? await pgAll(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.company_id = $1
+        ORDER BY f.created_at DESC, f.id DESC
+      `, [req.company.id])
+      : db.prepare(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.company_id = ?
+        ORDER BY f.created_at DESC, f.id DESC
+      `).all(req.company.id);
 
-  res.json(rows.map(feedbackRow));
+    res.json(rows.map(feedbackRow));
+  } catch (err) {
+    console.error('[feedbacks] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      companyId: req.company?.id,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: '回饋資料讀取失敗，請稍後再試。', code: 'DATABASE_ERROR' });
+  }
 });
 
-app.post('/api/feedbacks/create', auth, company, (req, res) => {
+app.post('/api/feedbacks/create', auth, company, async (req, res) => {
   const body = req.body || {};
   const message = String(body.message || '').trim();
   if (!message) return res.status(400).json({ error: '請填寫回饋內容' });
@@ -3147,35 +3172,80 @@ app.post('/api/feedbacks/create', auth, company, (req, res) => {
   const rating = normalizeRating(body.rating);
   const page = String(body.page || '').trim();
 
-  const row = db.prepare(`
-    INSERT INTO feedbacks (
-      company_id,
-      user_id,
-      category,
-      rating,
-      message,
-      page,
-      status
-    )
-    VALUES (?,?,?,?,?,?,?)
-  `).run(req.company.id, req.user.id, category, rating, message, page, 'new');
+  try {
+    let created;
 
-  audit(req.company.id, req.user.id, 'feedback_created', String(row.lastInsertRowid));
+    if (PG_ENABLED) {
+      const row = await pgOne(`
+        INSERT INTO feedbacks (
+          company_id,
+          user_id,
+          category,
+          rating,
+          message,
+          page,
+          status
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        RETURNING id
+      `, [req.company.id, req.user.id, category, rating, message, page, 'new']);
 
-  const created = db.prepare(`
-    SELECT
-      f.*,
-      c.name AS company_name,
-      u.name AS user_name,
-      u.email AS user_email
-    FROM feedbacks f
-    LEFT JOIN companies c ON c.id = f.company_id
-    LEFT JOIN users u ON u.id = f.user_id
-    WHERE f.id = ?
-      AND f.company_id = ?
-  `).get(row.lastInsertRowid, req.company.id);
+      audit(req.company.id, req.user.id, 'feedback_created', String(row.id));
 
-  res.json(feedbackRow(created));
+      created = await pgOne(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.id = $1
+          AND f.company_id = $2
+      `, [row.id, req.company.id]);
+    } else {
+      const row = db.prepare(`
+        INSERT INTO feedbacks (
+          company_id,
+          user_id,
+          category,
+          rating,
+          message,
+          page,
+          status
+        )
+        VALUES (?,?,?,?,?,?,?)
+      `).run(req.company.id, req.user.id, category, rating, message, page, 'new');
+
+      audit(req.company.id, req.user.id, 'feedback_created', String(row.lastInsertRowid));
+
+      created = db.prepare(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.id = ?
+          AND f.company_id = ?
+      `).get(row.lastInsertRowid, req.company.id);
+    }
+
+    res.json(feedbackRow(created));
+  } catch (err) {
+    console.error('[feedback create] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      companyId: req.company?.id,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: '回饋送出失敗，請稍後再試。', code: 'DATABASE_ERROR' });
+  }
 });
 
 app.get('/api/admin/feedbacks', auth, requireAdmin, async (req, res) => {

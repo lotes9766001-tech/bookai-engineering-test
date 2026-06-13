@@ -1277,7 +1277,7 @@ function FeedbackCenter({ companyId }) {
   useEffect(() => {
     setMessage('');
     setError('');
-    load().catch((err) => setError(err.message || '讀取回饋資料失敗'));
+    load().catch(() => setError('回饋資料讀取失敗，請稍後再試。'));
   }, [companyId]);
 
   async function submit(e) {
@@ -1299,7 +1299,7 @@ function FeedbackCenter({ companyId }) {
       setMessage('回饋已送出，BookAI 團隊會依狀態追蹤處理。');
       await load();
     } catch (err) {
-      setError(err.message || '送出回饋失敗');
+      setError('回饋送出失敗，請稍後再試。');
     }
   }
 
