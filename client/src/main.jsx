@@ -433,7 +433,13 @@ function Auth({ onAuth }) {
     email: '',
     password: '',
     companyName: '珍珠奶茶王國有限公司',
+    contactName: '',
+    phone: '',
     taxId: '',
+    lineContact: '',
+    companyStage: '剛創業',
+    useCase: '',
+    termsAccepted: false,
     companyAddress: '',
     industry: 'beverage',
     plan: 'pro'
@@ -474,7 +480,7 @@ function Auth({ onAuth }) {
                 <input
                   placeholder="例：王小明"
                   value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  onChange={(e) => setForm({ ...form, name: e.target.value, contactName: form.contactName || e.target.value })}
                 />
               </label>
 
@@ -488,12 +494,48 @@ function Auth({ onAuth }) {
               </label>
 
               <label>
-                <span>統一編號</span>
+                <span>聯絡人姓名</span>
+                <input
+                  placeholder="例：王小明"
+                  value={form.contactName}
+                  onChange={(e) => setForm({ ...form, contactName: e.target.value })}
+                />
+              </label>
+
+              <label>
+                <span>聯絡電話</span>
+                <input
+                  placeholder="例：0912-345-678"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                />
+              </label>
+
+              <label>
+                <span>統一編號（選填）</span>
                 <input
                   placeholder="例：12345678，尚未設立可先空白"
                   value={form.taxId}
                   onChange={(e) => setForm({ ...form, taxId: e.target.value })}
                 />
+                <small>若已有公司 / 行號可填寫統一編號；若尚未成立，可先留空，BookAI 將透過官方客服人工審核。</small>
+              </label>
+
+              <label>
+                <span>公司階段</span>
+                <select
+                  value={form.companyStage}
+                  onChange={(e) => setForm({ ...form, companyStage: e.target.value })}
+                >
+                  <option value="已成立公司">已成立公司</option>
+                  <option value="已成立行號">已成立行號</option>
+                  <option value="工作室">工作室</option>
+                  <option value="剛創業">剛創業</option>
+                  <option value="尚未成立">尚未成立</option>
+                  <option value="個人接案">個人接案</option>
+                  <option value="情侶 / 夥伴共同創業">情侶 / 夥伴共同創業</option>
+                  <option value="其他">其他</option>
+                </select>
               </label>
 
               <label>
@@ -545,6 +587,33 @@ function Auth({ onAuth }) {
                   <option value="accountant">Accountant</option>
                 </select>
               </label>
+
+              <label>
+                <span>官方 LINE / 聯絡方式（選填）</span>
+                <input
+                  placeholder="可填 LINE ID 或方便聯繫方式"
+                  value={form.lineContact}
+                  onChange={(e) => setForm({ ...form, lineContact: e.target.value })}
+                />
+              </label>
+
+              <label>
+                <span>使用需求</span>
+                <textarea
+                  placeholder="請簡短說明你想用 BookAI 管理哪些流程，例如進貨、銷貨、庫存、工程案場或報表。"
+                  value={form.useCase}
+                  onChange={(e) => setForm({ ...form, useCase: e.target.value })}
+                />
+              </label>
+
+              <label className="check-line">
+                <input
+                  type="checkbox"
+                  checked={form.termsAccepted}
+                  onChange={(e) => setForm({ ...form, termsAccepted: e.target.checked })}
+                />
+                <span>我已閱讀並同意 BookAI 測試會員服務條款，並理解目前服務仍處於測試階段，功能可能調整、中斷或發生錯誤。</span>
+              </label>
             </>
           )}
 
@@ -585,6 +654,52 @@ function Auth({ onAuth }) {
   );
 }
 
+function TermsBeta() {
+  return (
+    <div className="panel">
+      <Title title="BookAI 測試會員服務條款" subtitle="版本：v1.0" />
+      <div className="legal-text">
+        <p>歡迎申請使用 BookAI 測試服務。BookAI 目前處於產品測試與功能驗證階段，為確保服務品質、資料安全、測試環境穩定與使用者權益，本服務採人工審核制。使用者完成註冊或申請，並不代表帳號已正式開通；BookAI 保留依內部審核標準准許、拒絕、限制、暫停或終止帳號使用權限之權利。</p>
+        <p>使用者理解並同意，測試期間之功能、介面、資料結構、服務範圍與系統穩定性可能因產品開發、維護、安全或營運需求而調整、中斷、暫停或變更。BookAI 將盡合理努力維持服務可用性，但不保證測試期間服務完全不中斷、無錯誤或符合所有特定商業目的。</p>
+        <p>使用者應確保其提交之申請資料、聯絡資訊、公司或品牌資料、營運資料及其他輸入內容為真實、合法且已取得必要授權。若使用者尚未成立公司或行號，得以品牌名稱、團隊名稱、工作室名稱或創業狀態進行申請，BookAI 將透過官方客服與人工審核程序確認使用需求。</p>
+        <p>使用者不得進行未授權測試、壓力測試、爬蟲、掃描、逆向工程、繞過權限、濫用 API、建立大量帳號、干擾服務運作或其他可能影響系統安全與服務穩定之行為。</p>
+        <p>BookAI 所提供之 AI 分析、營運建議、報表摘要、稅務提示、會計分類、工程評估、標案判斷或其他輔助資訊，均僅作為一般參考，不構成法律、稅務、會計、財務、工程、投資或其他專業意見。</p>
+        <p>測試期間，使用者應避免將不可替代、高度敏感或唯一正式營運資料作為測試資料輸入系統，並應自行保留重要資料備份。BookAI 將採取合理安全措施維護服務與資料安全，但不承諾任何資料永久不遺失、不中斷或完全無風險。</p>
+        <p>若使用者違反本條款，或 BookAI 認定使用者行為可能影響服務安全、測試秩序、品牌形象、其他使用者權益或 BookAI 營運發展，BookAI 得不經事前通知限制、暫停或終止其帳號及相關服務使用權限。</p>
+      </div>
+    </div>
+  );
+}
+
+function PendingReviewPage({ user, company, onLogout, onNavigate }) {
+  return (
+    <div className="stack">
+      <div className="panel hero-panel">
+        <Title title="帳號審核中" subtitle="BookAI 目前採人工審核制，以維持系統品質、資料安全與測試環境穩定。" />
+        <p className="muted">
+          感謝您申請 BookAI。請透過官方 LINE 聯繫客服，完成身份與使用需求確認。審核通過後，系統將為您開通對應功能權限。
+        </p>
+        <div className="metric-grid">
+          <div className="metric-card"><span>申請 Email</span><strong>{user?.email}</strong></div>
+          <div className="metric-card"><span>公司 / 品牌名稱</span><strong>{company?.name}</strong></div>
+          <div className="metric-card"><span>目前狀態</span><strong>等待官方審核</strong></div>
+        </div>
+        <div className="actions">
+          <a className="primary-btn" href="https://lin.ee/pU6X4oP" target="_blank" rel="noreferrer">聯繫官方 LINE</a>
+          <button type="button" onClick={() => onNavigate('terms_beta')}>測試會員服務條款</button>
+          <button type="button" className="ghost-btn" onClick={onLogout}>登出</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function accountNeedsReview(user, company) {
+  if (!user || user.isAdmin || user.isFounder) return false;
+  const status = user.status || user.review_status || company?.review_status || 'pending_review';
+  return !['approved', 'founder', 'admin', 'demo'].includes(status) && company?.review_status !== 'approved';
+}
+
 function Shell({ onLogout }) {
   const [me, setMe] = useState(null);
   const [page, setPage] = useState('dashboard');
@@ -609,6 +724,7 @@ function Shell({ onLogout }) {
   const company = me?.companies?.find((c) => c.id === companyId);
   const userIsAdmin = isAdminUser(me?.user);
   const userIsFounder = isFounderUser(me?.user);
+  const needsReview = accountNeedsReview(me?.user, company);
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
@@ -646,18 +762,28 @@ function Shell({ onLogout }) {
   const founderNav = userIsFounder
     ? [...visibleNav, ['founder', '創辦人營運中心', ShieldCheck]]
     : visibleNav;
+  const reviewNav = [
+    ['review_waiting', '帳號審核中', ShieldCheck],
+    ['support', '官方客服', Users],
+    ['terms_beta', '測試會員條款', FileText]
+  ];
+  const activeNav = needsReview ? reviewNav : founderNav;
 
   useEffect(() => {
+    if (me && needsReview && !['review_waiting', 'support', 'terms_beta'].includes(page)) {
+      setPage('review_waiting');
+      return;
+    }
     if (me && !userIsAdmin && page === 'admin') {
       setPage('dashboard');
     }
     if (me && !userIsFounder && page === 'founder') {
       setPage('dashboard');
     }
-    if (me && page !== 'admin' && !hasCompanyFeature(company, page)) {
+    if (me && !needsReview && page !== 'admin' && !hasCompanyFeature(company, page)) {
       setPage('dashboard');
     }
-  }, [me, userIsAdmin, userIsFounder, page, company]);
+  }, [me, userIsAdmin, userIsFounder, page, company, needsReview]);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -665,11 +791,11 @@ if (!me || !company) {
 
   const lockedFeature = getPageFeatureKey(page);
 
-  if (!['admin', 'founder'].includes(page) && !hasCompanyFeature(company, page)) {
+  if (!needsReview && !['admin', 'founder'].includes(page) && !hasCompanyFeature(company, page)) {
     return <Locked feature={lockedFeature} />;
   }
 
-  if (featureByPage[page] && !company.effectiveFeatures?.includes(lockedFeature)) {
+  if (!needsReview && featureByPage[page] && !company.effectiveFeatures?.includes(lockedFeature)) {
     return <Locked feature={lockedFeature} />;
   }
 
@@ -719,7 +845,7 @@ if (!me || !company) {
         </div>
 
         <nav>
-          {founderNav.map(([id, label, Icon]) => (
+          {activeNav.map(([id, label, Icon]) => (
             <button
               key={id}
               className={page === id ? 'active' : ''}
@@ -743,7 +869,7 @@ if (!me || !company) {
       </aside>
 
       <main className="app-main">
-        {page !== 'admin' && (
+        {page !== 'admin' && !needsReview && (
           <Header
             company={company}
             onPlanChange={(p) => {
@@ -755,35 +881,38 @@ if (!me || !company) {
           />
         )}
 
-        {page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
-        {page === 'leads' && <LeadCenterMock companyId={companyId} />}
-        {page === 'transactions' && <Transactions companyId={companyId} />}
-        {page === 'purchases' && <PurchasesManager companyId={companyId} onNavigate={setPage} />}
-        {page === 'sales' && <SalesManager companyId={companyId} onNavigate={setPage} />}
-        {page === 'receivables' && <ReceivablesManager companyId={companyId} />}
-        {page === 'payables' && <PayablesManager companyId={companyId} />}
-        {page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
-        {page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
-        {page === 'feedbacks' && <FeedbackCenter companyId={companyId} />}
-        {page === 'integrations' && (
+        {needsReview && page === 'review_waiting' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
+        {needsReview && page === 'support' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
+        {needsReview && page === 'terms_beta' && <TermsBeta />}
+        {!needsReview && page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
+        {!needsReview && page === 'leads' && <LeadCenterMock companyId={companyId} />}
+        {!needsReview && page === 'transactions' && <Transactions companyId={companyId} />}
+        {!needsReview && page === 'purchases' && <PurchasesManager companyId={companyId} onNavigate={setPage} />}
+        {!needsReview && page === 'sales' && <SalesManager companyId={companyId} onNavigate={setPage} />}
+        {!needsReview && page === 'receivables' && <ReceivablesManager companyId={companyId} />}
+        {!needsReview && page === 'payables' && <PayablesManager companyId={companyId} />}
+        {!needsReview && page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
+        {!needsReview && page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
+        {!needsReview && page === 'feedbacks' && <FeedbackCenter companyId={companyId} />}
+        {!needsReview && page === 'integrations' && (
           <Integrations
             companyId={companyId}
             company={company}
             onSync={() => setRefresh((x) => x + 1)}
           />
         )}
-        {page === 'invoices' && <Invoices companyId={companyId} />}
-        {page === 'inventory' && <Inventory companyId={companyId} company={company} />}
-        {page === 'jobsites' && <JobSites companyId={companyId} company={company} />}
-        {page === 'vouchers' && <Vouchers companyId={companyId} />}
-        {page === 'accounting' && <Accounting companyId={companyId} />}
-        {page === 'tax' && <Tax companyId={companyId} />}
-        {page === 'accountant' && <Accountant companyId={companyId} />}
-        {page === 'reports' && <Reports companyId={companyId} company={company} />}
-        {page === 'settings' && <Settings company={company} />}
-        {page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
-        {page === 'admin' && userIsAdmin && <AdminConsole />}
-        {page === 'founder' && userIsFounder && <FounderDashboard />}
+        {!needsReview && page === 'invoices' && <Invoices companyId={companyId} />}
+        {!needsReview && page === 'inventory' && <Inventory companyId={companyId} company={company} />}
+        {!needsReview && page === 'jobsites' && <JobSites companyId={companyId} company={company} />}
+        {!needsReview && page === 'vouchers' && <Vouchers companyId={companyId} />}
+        {!needsReview && page === 'accounting' && <Accounting companyId={companyId} />}
+        {!needsReview && page === 'tax' && <Tax companyId={companyId} />}
+        {!needsReview && page === 'accountant' && <Accountant companyId={companyId} />}
+        {!needsReview && page === 'reports' && <Reports companyId={companyId} company={company} />}
+        {!needsReview && page === 'settings' && <Settings company={company} />}
+        {!needsReview && page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
+        {!needsReview && page === 'admin' && userIsAdmin && <AdminConsole />}
+        {!needsReview && page === 'founder' && userIsFounder && <FounderDashboard />}
       </main>
     </div>
   );
@@ -6276,6 +6405,7 @@ function AdminConsole() {
   const [testerForm, setTesterForm] = useState({});
   const [settingsForm, setSettingsForm] = useState({});
   const [feedbacks, setFeedbacks] = useState([]);
+  const [reviewUsers, setReviewUsers] = useState([]);
   const [featureCatalog, setFeatureCatalog] = useState([]);
   const [featureForm, setFeatureForm] = useState({});
   const [featureNote, setFeatureNote] = useState('');
@@ -6289,20 +6419,37 @@ function AdminConsole() {
   async function loadAdmin() {
     try {
       setError('');
-      const [companyRows, settingRows, feedbackRows, featureRows] = await Promise.all([
+      const [companyRows, settingRows, feedbackRows, featureRows, reviewRows] = await Promise.all([
         api('/admin/companies'),
         api('/admin/settings'),
         api('/admin/feedbacks'),
-        api('/admin/features/catalog')
+        api('/admin/features/catalog'),
+        api('/admin/review/users')
       ]);
       setCompanies(companyRows || []);
       setSettings(settingRows || {});
       setSettingsForm(settingRows || {});
       setFeedbacks(feedbackRows || []);
       setFeatureCatalog(featureRows || []);
+      setReviewUsers(reviewRows || []);
       setSelectedId((old) => old || companyRows?.[0]?.id || null);
     } catch (err) {
       setError(err.message || '讀取 BookAI 營運後台失敗');
+    }
+  }
+
+  async function reviewUser(userId, action, note = '') {
+    try {
+      setError('');
+      setMessage('');
+      await api(`/admin/review/users/${userId}/${action}`, {
+        method: 'POST',
+        body: JSON.stringify({ reviewNote: note })
+      });
+      setMessage('會員審核狀態已更新');
+      await loadAdmin();
+    } catch (err) {
+      setError(err.message || '更新會員審核狀態失敗');
     }
   }
 
@@ -6374,6 +6521,7 @@ function AdminConsole() {
       return expires >= now && expires <= soonLimit;
     }).length,
     testers: companies.filter((c) => Number(c.is_tester || 0) === 1).length,
+    pendingReview: reviewUsers.filter((u) => (u.status || u.review_status) === 'pending_review').length,
     newFeedbacks: feedbacks.filter((f) => f.status === 'new').length,
     mrr: companies.reduce((sum, c) => {
       if (!c.is_paid_customer || c.billing_status !== 'active') return sum;
@@ -6545,6 +6693,63 @@ function AdminConsole() {
         <div className="admin-control-panel">
           <div className="admin-panel-head">
             <div>
+              <h2>會員審核中心</h2>
+              <p>審核新申請的企業使用者，控管測試期准入品質與資料安全。</p>
+            </div>
+            <button type="button" onClick={loadAdmin}>重新整理</button>
+          </div>
+          <div className="table-scroll">
+            <table className="admin-customer-table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>公司 / 品牌</th>
+                  <th>聯絡人</th>
+                  <th>電話</th>
+                  <th>統編</th>
+                  <th>階段</th>
+                  <th>行業</th>
+                  <th>需求</th>
+                  <th>狀態</th>
+                  <th>條款</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reviewUsers.slice(0, 40).map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.email}</td>
+                    <td>{row.company_name || '-'}</td>
+                    <td>{row.contact_name || row.name || '-'}</td>
+                    <td>{row.company_phone || row.phone || '-'}</td>
+                    <td>{row.tax_id || '未提供'}</td>
+                    <td>{row.company_company_stage || row.company_stage || '-'}</td>
+                    <td>{getIndustryName(row.industry)}</td>
+                    <td>{row.company_use_case || row.use_case || '-'}</td>
+                    <td><span className="admin-pill">{row.status || row.review_status || 'pending_review'}</span></td>
+                    <td>{row.terms_version || '-'}</td>
+                    <td>
+                      <div className="inline-actions">
+                        <button type="button" onClick={() => reviewUser(row.id, 'approve')}>通過</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'reject', '未通過審核')}>拒絕</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'suspend', '暫停使用')}>停權</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'restore')}>恢復</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'demo')}>設為 demo</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!reviewUsers.length && (
+                  <tr><td colSpan="11">目前沒有會員申請資料。</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="admin-control-panel">
+          <div className="admin-panel-head">
+            <div>
               <h2>測試資料工具</h2>
               <p>在線上環境建立工程業測試資料，僅供系統管理員驗收與展示使用。</p>
             </div>
@@ -6572,6 +6777,7 @@ function AdminConsole() {
           <div className="admin-metric-card"><span>有官方網站客戶</span><strong>{metrics.website}</strong></div>
           <div className="admin-metric-card"><span>即將到期客戶</span><strong>{metrics.expiring}</strong></div>
           <div className="admin-metric-card"><span>早期體驗使用者</span><strong>{metrics.testers}</strong></div>
+          <div className="admin-metric-card"><span>待審會員</span><strong>{metrics.pendingReview}</strong></div>
           <div className="admin-metric-card"><span>新回饋</span><strong>{metrics.newFeedbacks}</strong></div>
           <div className="admin-metric-card gold"><span>本月預估月收</span><strong>{money(metrics.mrr)}</strong></div>
         </div>

@@ -673,10 +673,36 @@ export function initDb() {
   safeAddColumn('companies', 'tester_started_at', 'TEXT');
   safeAddColumn('companies', 'tester_note', 'TEXT');
   safeAddColumn('companies', 'tester_feedback_status', "TEXT DEFAULT '尚未回饋'");
+  safeAddColumn('companies', 'review_status', "TEXT DEFAULT 'pending_review'");
+  safeAddColumn('companies', 'is_active', 'INTEGER DEFAULT 0');
+  safeAddColumn('companies', 'approved_at', 'TEXT');
+  safeAddColumn('companies', 'approved_by', 'INTEGER');
+  safeAddColumn('companies', 'rejected_at', 'TEXT');
+  safeAddColumn('companies', 'rejected_by', 'INTEGER');
+  safeAddColumn('companies', 'review_note', 'TEXT');
+  safeAddColumn('companies', 'contact_name', 'TEXT');
+  safeAddColumn('companies', 'phone', 'TEXT');
+  safeAddColumn('companies', 'use_case', 'TEXT');
+  safeAddColumn('companies', 'company_stage', 'TEXT');
   safeAddColumn('users', 'last_login_at', 'TEXT');
   safeAddColumn('users', 'created_source', 'TEXT');
   safeAddColumn('users', 'created_utm_source', 'TEXT');
   safeAddColumn('users', 'login_count', 'INTEGER DEFAULT 0');
+  safeAddColumn('users', 'status', "TEXT DEFAULT 'pending_review'");
+  safeAddColumn('users', 'review_status', "TEXT DEFAULT 'pending_review'");
+  safeAddColumn('users', 'approved_at', 'TEXT');
+  safeAddColumn('users', 'approved_by', 'INTEGER');
+  safeAddColumn('users', 'rejected_at', 'TEXT');
+  safeAddColumn('users', 'rejected_by', 'INTEGER');
+  safeAddColumn('users', 'suspended_at', 'TEXT');
+  safeAddColumn('users', 'suspended_by', 'INTEGER');
+  safeAddColumn('users', 'review_note', 'TEXT');
+  safeAddColumn('users', 'terms_accepted_at', 'TEXT');
+  safeAddColumn('users', 'terms_version', 'TEXT');
+  safeAddColumn('users', 'line_contact', 'TEXT');
+  safeAddColumn('users', 'company_stage', 'TEXT');
+  safeAddColumn('users', 'phone', 'TEXT');
+  safeAddColumn('users', 'use_case', 'TEXT');
 
   const defaultSettings = {
     official_site_url: 'https://bookai-engineering-official.onrender.com',

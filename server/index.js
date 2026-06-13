@@ -519,6 +519,21 @@ function isFounderEmail(email) {
   return normalizeEmail(email) === FOUNDER_EMAIL;
 }
 
+function privilegedStatusForEmail(email) {
+  const normalized = normalizeEmail(email);
+  if (isFounderEmail(normalized)) return 'founder';
+  if (isAdminEmail(normalized)) return 'admin';
+  return null;
+}
+
+function isPrivilegedEmail(email) {
+  return Boolean(privilegedStatusForEmail(email));
+}
+
+function isApprovedStatus(value) {
+  return ['approved', 'founder', 'admin', 'demo'].includes(String(value || ''));
+}
+
 function bootstrapSecretFromRequest(req) {
   return String(
     req.headers['x-bootstrap-secret'] ||
@@ -592,6 +607,49 @@ async function requireFounder(req, res, next) {
   return res.status(403).json({ error: '沒有 Founder Dashboard 權限' });
 }
 
+async function requireApproved(req, res, next) {
+  const user = PG_ENABLED
+    ? await pgOne(`
+      SELECT
+        id,
+        email,
+        COALESCE(status, 'pending_review') AS status,
+        COALESCE(review_status, 'pending_review') AS review_status
+      FROM users
+      WHERE id = $1
+    `, [req.user?.id])
+    : db.prepare(`
+      SELECT
+        id,
+        email,
+        COALESCE(status, 'pending_review') AS status,
+        COALESCE(review_status, 'pending_review') AS review_status
+      FROM users
+      WHERE id = ?
+    `).get(req.user?.id);
+
+  if (!user) return res.status(401).json({ error: '未登入' });
+  if (isPrivilegedEmail(user.email)) return next();
+
+  const userStatus = user.status || user.review_status || 'pending_review';
+  const companyStatus = req.company?.review_status || '';
+
+  if (userStatus === 'rejected' || companyStatus === 'rejected') {
+    return res.status(403).json({ error: '帳號申請未通過，請聯繫 BookAI 官方客服', code: 'ACCOUNT_REJECTED' });
+  }
+
+  if (userStatus === 'suspended' || companyStatus === 'suspended') {
+    return res.status(403).json({ error: '帳號已暫停使用，請聯繫 BookAI 官方客服', code: 'ACCOUNT_SUSPENDED' });
+  }
+
+  if (isApprovedStatus(userStatus) || companyStatus === 'approved') return next();
+
+  return res.status(403).json({
+    error: '帳號審核中，請聯繫 BookAI 官方客服完成開通',
+    code: 'ACCOUNT_PENDING_REVIEW'
+  });
+}
+
 async function company(req, res, next) {
   const companyId = Number(req.params.companyId || req.query.companyId || req.body.companyId);
 
@@ -624,7 +682,7 @@ async function company(req, res, next) {
   }
 
   req.company = row;
-  next();
+  return requireApproved(req, res, next);
 }
 
 function requireRole(...allowedRoles) {
@@ -774,15 +832,20 @@ async function ensureAdminBootstrapAccount() {
       userId = existingUser.id;
       await pgQuery(`
         UPDATE users
-        SET name = $1, password_hash = $2
-        WHERE id = $3
-      `, [ADMIN_NAME, hash, userId]);
+        SET name = $1,
+            password_hash = $2,
+            status = $3,
+            review_status = $4,
+            approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP::text),
+            approved_by = COALESCE(approved_by, id)
+        WHERE id = $5
+      `, [ADMIN_NAME, hash, 'admin', 'approved', userId]);
     } else {
       const created = await pgOne(`
-        INSERT INTO users (name, email, password_hash, created_source, created_utm_source)
-        VALUES ($1,$2,$3,$4,$5)
+        INSERT INTO users (name, email, password_hash, created_source, created_utm_source, status, review_status, approved_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
         RETURNING id
-      `, [ADMIN_NAME, ADMIN_EMAIL, hash, 'bootstrap', 'bootstrap']);
+      `, [ADMIN_NAME, ADMIN_EMAIL, hash, 'bootstrap', 'bootstrap', 'admin', 'approved']);
       userId = created.id;
     }
 
@@ -962,15 +1025,20 @@ async function ensureFounderBootstrapAccount() {
       userId = existingUser.id;
       await pgQuery(`
         UPDATE users
-        SET name = $1, password_hash = $2
-        WHERE id = $3
-      `, ['BookAI Founder', hash, userId]);
+        SET name = $1,
+            password_hash = $2,
+            status = $3,
+            review_status = $4,
+            approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP::text),
+            approved_by = COALESCE(approved_by, id)
+        WHERE id = $5
+      `, ['BookAI Founder', hash, 'founder', 'approved', userId]);
     } else {
       const user = await pgOne(`
-        INSERT INTO users (name, email, password_hash, created_source, created_utm_source)
-        VALUES ($1,$2,$3,$4,$5)
+        INSERT INTO users (name, email, password_hash, created_source, created_utm_source, status, review_status, approved_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
         RETURNING id
-      `, ['BookAI Founder', founderEmail, hash, 'bootstrap', 'bootstrap']);
+      `, ['BookAI Founder', founderEmail, hash, 'bootstrap', 'bootstrap', 'founder', 'approved']);
       userId = user.id;
     }
 
@@ -1344,8 +1412,15 @@ app.post('/api/auth/register', async (req, res) => {
     email,
     password,
     companyName,
+    brandName,
+    contactName,
+    phone,
     taxId,
     industry,
+    useCase,
+    lineContact,
+    companyStage,
+    termsAccepted,
     companyAddress,
     address,
     plan = 'business'
@@ -1354,7 +1429,15 @@ app.post('/api/auth/register', async (req, res) => {
 
   const normalizedEmail = normalizeEmail(email);
 
-  if (!normalizedEmail || !password || !companyName) {
+  const finalCompanyName = String(companyName || brandName || '').trim();
+  const finalContactName = String(contactName || name || '').trim();
+  const finalPhone = String(phone || '').trim();
+  const finalUseCase = String(useCase || req.body.use_case || '').trim();
+  const finalTaxId = String(taxId || req.body.tax_id || '').trim();
+  const finalCompanyStage = String(companyStage || req.body.company_stage || '').trim();
+  const acceptedTerms = termsAccepted === true || termsAccepted === 'true' || termsAccepted === 1 || termsAccepted === '1';
+
+  if (!normalizedEmail || !password || !finalCompanyName) {
     return res.status(400).json({ error: '請填寫必要欄位' });
   }
 
@@ -1364,6 +1447,34 @@ app.post('/api/auth/register', async (req, res) => {
 
   if (String(password).length < 8) {
     return res.status(400).json({ error: '密碼至少需要 8 碼' });
+  }
+
+  if (finalCompanyName.length < 2) {
+    return res.status(400).json({ error: '公司 / 品牌名稱至少需要 2 個字' });
+  }
+
+  if (!finalContactName) {
+    return res.status(400).json({ error: '請填寫聯絡人姓名' });
+  }
+
+  if (!finalPhone) {
+    return res.status(400).json({ error: '請填寫聯絡電話' });
+  }
+
+  if (!industry) {
+    return res.status(400).json({ error: '請選擇行業別' });
+  }
+
+  if (finalUseCase.length < 10) {
+    return res.status(400).json({ error: '請至少用 10 個字說明想使用 BookAI 的情境' });
+  }
+
+  if (finalTaxId && !/^\d{8}$/.test(finalTaxId)) {
+    return res.status(400).json({ error: '統一編號若有填寫，必須為 8 碼數字' });
+  }
+
+  if (!acceptedTerms) {
+    return res.status(400).json({ error: '請先閱讀並同意 BookAI 測試會員服務條款' });
   }
 
   if (isAdminEmail(normalizedEmail)) {
@@ -1381,20 +1492,35 @@ app.post('/api/auth/register', async (req, res) => {
     if (PG_ENABLED) {
       const user = await pgOne(`
         INSERT INTO users (
-          name,
-          email,
-          password_hash,
-          created_source,
-          created_utm_source
-        )
-        VALUES ($1,$2,$3,$4,$5)
+        name,
+        email,
+        password_hash,
+        created_source,
+        created_utm_source,
+        status,
+        review_status,
+        terms_accepted_at,
+        terms_version,
+        line_contact,
+        company_stage,
+        phone,
+        use_case
+      )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP,$8,$9,$10,$11,$12)
         RETURNING id, name, email
       `, [
-        name || '使用者',
+        finalContactName,
         normalizedEmail,
         hash,
         tracking.source || '',
-        tracking.utm_source || ''
+        tracking.utm_source || '',
+        'pending_review',
+        'pending_review',
+        'v1.0',
+        lineContact || req.body.line_contact || '',
+        finalCompanyStage,
+        finalPhone,
+        finalUseCase
       ]);
 
       const companyRow = await pgOne(`
@@ -1405,18 +1531,30 @@ app.post('/api/auth/register', async (req, res) => {
           companyAddress,
           address,
           plan,
-          owner_id
+          owner_id,
+          review_status,
+          is_active,
+          contact_name,
+          phone,
+          use_case,
+          company_stage
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         RETURNING id
       `, [
-        companyName,
-        taxId || '',
+        finalCompanyName,
+        finalTaxId,
         industry || '',
         finalAddress,
         finalAddress,
         plan,
-        user.id
+        user.id,
+        'pending_review',
+        0,
+        finalContactName,
+        finalPhone,
+        finalUseCase,
+        finalCompanyStage
       ]);
 
       await pgQuery(`
@@ -1448,15 +1586,31 @@ app.post('/api/auth/register', async (req, res) => {
       email,
       password_hash,
       created_source,
-      created_utm_source
+      created_utm_source,
+      status,
+      review_status,
+      terms_accepted_at,
+      terms_version,
+      line_contact,
+      company_stage,
+      phone,
+      use_case
     )
-      VALUES (?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      name || '使用者',
+      finalContactName,
       normalizedEmail,
       hash,
       tracking.source || '',
-      tracking.utm_source || ''
+      tracking.utm_source || '',
+      'pending_review',
+      'pending_review',
+      new Date().toISOString(),
+      'v1.0',
+      lineContact || req.body.line_contact || '',
+      finalCompanyStage,
+      finalPhone,
+      finalUseCase
     );
 
     const companyRow = db.prepare(`
@@ -1467,17 +1621,29 @@ app.post('/api/auth/register', async (req, res) => {
         companyAddress,
         address,
         plan,
-        owner_id
-      )
-      VALUES (?,?,?,?,?,?,?)
+      owner_id,
+      review_status,
+      is_active,
+      contact_name,
+      phone,
+      use_case,
+      company_stage
+    )
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      companyName,
-      taxId || '',
+      finalCompanyName,
+      finalTaxId,
       industry || '',
       finalAddress,
       finalAddress,
       plan,
-      user.lastInsertRowid
+      user.lastInsertRowid,
+      'pending_review',
+      0,
+      finalContactName,
+      finalPhone,
+      finalUseCase,
+      finalCompanyStage
     );
 
     db.prepare(`
@@ -1644,15 +1810,25 @@ app.get('/api/me', auth, async (req, res) => {
       SELECT
         id,
         name,
-        email
+        email,
+        COALESCE(status, 'pending_review') AS status,
+        COALESCE(review_status, 'pending_review') AS review_status,
+        review_note,
+        terms_accepted_at,
+        terms_version
       FROM users
       WHERE id = $1
     `, [req.user.id])
     : db.prepare(`
-    SELECT
-      id,
-      name,
-      email
+      SELECT
+        id,
+        name,
+        email,
+        COALESCE(status, 'pending_review') AS status,
+        COALESCE(review_status, 'pending_review') AS review_status,
+        review_note,
+        terms_accepted_at,
+        terms_version
     FROM users
     WHERE id = ?
   `).get(req.user.id);
@@ -1660,6 +1836,13 @@ app.get('/api/me', auth, async (req, res) => {
   if (user) {
     user.isAdmin = isAdminEmail(user.email);
     user.isFounder = isFounderEmail(user.email);
+    if (user.isFounder) {
+      user.status = 'founder';
+      user.review_status = 'approved';
+    } else if (user.isAdmin) {
+      user.status = 'admin';
+      user.review_status = 'approved';
+    }
   }
 
   const rawCompanies = PG_ENABLED
@@ -2060,6 +2243,7 @@ const adminWebsiteStatuses = new Set(['none', 'planning', 'building', 'live', 'p
 const testerFeedbackStatuses = new Set(['尚未回饋', '已回饋', '需追蹤', '已完成測試']);
 const feedbackCategories = new Set(['操作問題', '介面建議', '功能需求', '錯誤回報', '其他']);
 const feedbackStatuses = new Set(['new', 'reviewing', 'resolved', 'ignored']);
+const reviewStatuses = new Set(['pending_review', 'approved', 'rejected', 'suspended', 'founder', 'admin', 'demo']);
 const adminSettingKeys = new Set([
   'official_site_url',
   'official_line_url',
@@ -2068,6 +2252,200 @@ const adminSettingKeys = new Set([
   'enable_website_backend',
   'system_announcement'
 ]);
+
+app.get('/api/admin/review/users', auth, requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const where = status && reviewStatuses.has(status)
+      ? PG_ENABLED
+        ? 'WHERE COALESCE(u.status, u.review_status, $1) = $1'
+        : 'WHERE COALESCE(u.status, u.review_status, ?) = ?'
+      : '';
+    const params = status && reviewStatuses.has(status)
+      ? PG_ENABLED ? [status] : [status, status]
+      : [];
+    const sql = `
+      SELECT
+        u.id,
+        u.email,
+        u.name,
+        u.phone,
+        u.use_case,
+        u.line_contact,
+        u.company_stage,
+        u.status,
+        u.review_status,
+        u.review_note,
+        u.terms_accepted_at,
+        u.terms_version,
+        u.last_login_at,
+        COALESCE(u.login_count, 0) AS login_count,
+        u.created_at,
+        c.id AS company_id,
+        c.name AS company_name,
+        c.tax_id,
+        c.industry,
+        c.contact_name,
+        c.phone AS company_phone,
+        c.use_case AS company_use_case,
+        c.company_stage AS company_company_stage,
+        c.review_status AS company_review_status
+      FROM users u
+      LEFT JOIN companies c ON c.owner_id = u.id
+      ${where}
+      ORDER BY u.created_at DESC, u.id DESC
+    `;
+    const rows = PG_ENABLED ? await pgAll(sql, params) : db.prepare(sql).all(...params);
+    res.json(rows);
+  } catch (err) {
+    console.error('admin review users failed', { userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '資料讀取失敗', code: 'DATABASE_ERROR' });
+  }
+});
+
+async function updateMemberReview(userId, adminId, status, note = '') {
+  const now = new Date().toISOString();
+  const existing = PG_ENABLED
+    ? await pgOne('SELECT id, email FROM users WHERE id = $1', [userId])
+    : db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId);
+
+  if (!existing) return null;
+  if (isPrivilegedEmail(existing.email)) {
+    return { protected: true };
+  }
+
+  const userPatch = {
+    status,
+    review_status: status === 'demo' ? 'approved' : status,
+    review_note: note
+  };
+
+  const actionMap = {
+    approved: 'member_approved',
+    rejected: 'member_rejected',
+    suspended: 'member_suspended',
+    demo: 'member_set_demo'
+  };
+
+  if (PG_ENABLED) {
+    if (status === 'approved' || status === 'demo') {
+      await pgQuery(`
+        UPDATE users
+        SET status = $1,
+            review_status = $2,
+            approved_at = $3,
+            approved_by = $4,
+            review_note = $5
+        WHERE id = $6
+      `, [userPatch.status, userPatch.review_status, now, adminId, note, userId]);
+      await pgQuery(`
+        UPDATE companies
+        SET review_status = 'approved',
+            is_active = 1,
+            approved_at = $1,
+            approved_by = $2,
+            review_note = $3
+        WHERE owner_id = $4
+      `, [now, adminId, note, userId]);
+    } else if (status === 'rejected') {
+      await pgQuery(`
+        UPDATE users
+        SET status = 'rejected',
+            review_status = 'rejected',
+            rejected_at = $1,
+            rejected_by = $2,
+            review_note = $3
+        WHERE id = $4
+      `, [now, adminId, note, userId]);
+      await pgQuery(`
+        UPDATE companies
+        SET review_status = 'rejected',
+            is_active = 0,
+            rejected_at = $1,
+            rejected_by = $2,
+            review_note = $3
+        WHERE owner_id = $4
+      `, [now, adminId, note, userId]);
+    } else if (status === 'suspended') {
+      await pgQuery(`
+        UPDATE users
+        SET status = 'suspended',
+            review_status = 'suspended',
+            suspended_at = $1,
+            suspended_by = $2,
+            review_note = $3
+        WHERE id = $4
+      `, [now, adminId, note, userId]);
+      await pgQuery(`
+        UPDATE companies
+        SET review_status = 'suspended',
+            is_active = 0,
+            review_note = $1
+        WHERE owner_id = $2
+      `, [note, userId]);
+    }
+  } else {
+    if (status === 'approved' || status === 'demo') {
+      db.prepare(`
+        UPDATE users SET status = ?, review_status = ?, approved_at = ?, approved_by = ?, review_note = ? WHERE id = ?
+      `).run(userPatch.status, userPatch.review_status, now, adminId, note, userId);
+      db.prepare(`
+        UPDATE companies SET review_status = 'approved', is_active = 1, approved_at = ?, approved_by = ?, review_note = ? WHERE owner_id = ?
+      `).run(now, adminId, note, userId);
+    } else if (status === 'rejected') {
+      db.prepare(`
+        UPDATE users SET status = 'rejected', review_status = 'rejected', rejected_at = ?, rejected_by = ?, review_note = ? WHERE id = ?
+      `).run(now, adminId, note, userId);
+      db.prepare(`
+        UPDATE companies SET review_status = 'rejected', is_active = 0, rejected_at = ?, rejected_by = ?, review_note = ? WHERE owner_id = ?
+      `).run(now, adminId, note, userId);
+    } else if (status === 'suspended') {
+      db.prepare(`
+        UPDATE users SET status = 'suspended', review_status = 'suspended', suspended_at = ?, suspended_by = ?, review_note = ? WHERE id = ?
+      `).run(now, adminId, note, userId);
+      db.prepare(`UPDATE companies SET review_status = 'suspended', is_active = 0, review_note = ? WHERE owner_id = ?`).run(note, userId);
+    }
+  }
+
+  audit(null, adminId, actionMap[status] || 'member_review_updated', JSON.stringify({ userId, status }));
+  return { ok: true };
+}
+
+function reviewAction(status) {
+  return async (req, res) => {
+    try {
+      const result = await updateMemberReview(Number(req.params.id), req.user.id, status, req.body?.reviewNote || req.body?.note || '');
+      if (!result) return res.status(404).json({ error: '找不到使用者' });
+      if (result.protected) return res.status(400).json({ error: 'Founder / Admin 帳號不可由審核中心變更狀態' });
+      res.json({ ok: true });
+    } catch (err) {
+      console.error('admin review action failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+      res.status(500).json({ error: '資料更新失敗', code: 'DATABASE_ERROR' });
+    }
+  };
+}
+
+app.post('/api/admin/review/users/:id/approve', auth, requireAdmin, reviewAction('approved'));
+app.post('/api/admin/review/users/:id/reject', auth, requireAdmin, reviewAction('rejected'));
+app.post('/api/admin/review/users/:id/suspend', auth, requireAdmin, reviewAction('suspended'));
+app.post('/api/admin/review/users/:id/restore', auth, requireAdmin, reviewAction('approved'));
+app.post('/api/admin/review/users/:id/demo', auth, requireAdmin, reviewAction('demo'));
+app.put('/api/admin/review/users/:id/note', auth, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const note = String(req.body?.reviewNote || req.body?.note || '');
+    const result = PG_ENABLED
+      ? await pgQuery('UPDATE users SET review_note = $1 WHERE id = $2', [note, userId])
+      : db.prepare('UPDATE users SET review_note = ? WHERE id = ?').run(note, userId);
+    const changed = PG_ENABLED ? result.rowCount : result.changes;
+    if (!changed) return res.status(404).json({ error: '找不到使用者' });
+    audit(null, req.user.id, 'member_review_note_updated', JSON.stringify({ userId }));
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('admin review note failed', { userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '資料更新失敗', code: 'DATABASE_ERROR' });
+  }
+});
 
 function toAdminBoolean(value) {
   if (value === true || value === 1) return 1;
@@ -3212,6 +3590,17 @@ function contactRow(row) {
   };
 }
 
+function databaseError(res, route, req, err) {
+  console.error('DATABASE_ERROR', {
+    route,
+    userId: req.user?.id,
+    companyId: req.company?.id,
+    code: err?.code,
+    message: err?.message
+  });
+  return res.status(500).json({ error: '資料讀取失敗', code: 'DATABASE_ERROR' });
+}
+
 function purchaseRow(row) {
   const total = erpNumber(row.total, 0);
   const paidAmount = erpNumber(row.paid_amount, 0);
@@ -3344,9 +3733,14 @@ function purchasePaymentRow(row) {
   };
 }
 
-app.get('/api/suppliers/list', auth, company, (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
-    return res.json([]);
+app.get('/api/suppliers/list', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll('SELECT * FROM suppliers WHERE company_id = $1 ORDER BY id DESC', [req.company.id]);
+      return res.json(rows.map(contactRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const rows = db.prepare(`
@@ -3359,9 +3753,23 @@ app.get('/api/suppliers/list', auth, company, (req, res) => {
   res.json(rows.map(contactRow));
 });
 
-app.post('/api/suppliers/create', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.post('/api/suppliers/create', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const b = contactBody(req.body);
   if (!b.name) return res.status(400).json({ error: '請填寫供應商名稱' });
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO suppliers (company_id, name, phone, email, tax_id, address, contact_person, note, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [req.company.id, b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note]);
+      audit(req.company.id, req.user.id, 'supplier_created', String(row.id));
+      return res.json(contactRow(row));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const row = db.prepare(`
     INSERT INTO suppliers (
@@ -3374,9 +3782,25 @@ app.post('/api/suppliers/create', auth, company, requireRole('owner', 'admin', '
   res.json(contactRow(db.prepare('SELECT * FROM suppliers WHERE id = ? AND company_id = ?').get(row.lastInsertRowid, req.company.id)));
 });
 
-app.put('/api/suppliers/:id', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.put('/api/suppliers/:id', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const b = contactBody(req.body);
   if (!b.name) return res.status(400).json({ error: '請填寫供應商名稱' });
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        UPDATE suppliers
+        SET name = $1, phone = $2, email = $3, tax_id = $4, address = $5, contact_person = $6, note = $7, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $8 AND company_id = $9
+        RETURNING *
+      `, [b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note, req.params.id, req.company.id]);
+      if (!row) return res.status(404).json({ error: '找不到供應商' });
+      audit(req.company.id, req.user.id, 'supplier_updated', String(req.params.id));
+      return res.json(contactRow(row));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const result = db.prepare(`
     UPDATE suppliers
@@ -3390,14 +3814,32 @@ app.put('/api/suppliers/:id', auth, company, requireRole('owner', 'admin', 'staf
   res.json(contactRow(db.prepare('SELECT * FROM suppliers WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id)));
 });
 
-app.delete('/api/suppliers/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.delete('/api/suppliers/:id', auth, company, requireRole('owner', 'admin'), async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const result = await pgQuery('DELETE FROM suppliers WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!result.rowCount) return res.status(404).json({ error: '找不到供應商' });
+      audit(req.company.id, req.user.id, 'supplier_deleted', String(req.params.id));
+      return res.json({ ok: true });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
   const result = db.prepare('DELETE FROM suppliers WHERE id = ? AND company_id = ?').run(req.params.id, req.company.id);
   if (!result.changes) return res.status(404).json({ error: '找不到供應商' });
   audit(req.company.id, req.user.id, 'supplier_deleted', String(req.params.id));
   res.json({ ok: true });
 });
 
-app.get('/api/customers/list', auth, company, (req, res) => {
+app.get('/api/customers/list', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll('SELECT * FROM customers WHERE company_id = $1 ORDER BY id DESC', [req.company.id]);
+      return res.json(rows.map(contactRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
   const rows = db.prepare(`
     SELECT *
     FROM customers
@@ -3408,9 +3850,23 @@ app.get('/api/customers/list', auth, company, (req, res) => {
   res.json(rows.map(contactRow));
 });
 
-app.post('/api/customers/create', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.post('/api/customers/create', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const b = contactBody(req.body);
   if (!b.name) return res.status(400).json({ error: '請填寫客戶名稱' });
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO customers (company_id, name, phone, email, tax_id, address, contact_person, note, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [req.company.id, b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note]);
+      audit(req.company.id, req.user.id, 'customer_created', String(row.id));
+      return res.json(contactRow(row));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const row = db.prepare(`
     INSERT INTO customers (
@@ -3423,9 +3879,25 @@ app.post('/api/customers/create', auth, company, requireRole('owner', 'admin', '
   res.json(contactRow(db.prepare('SELECT * FROM customers WHERE id = ? AND company_id = ?').get(row.lastInsertRowid, req.company.id)));
 });
 
-app.put('/api/customers/:id', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.put('/api/customers/:id', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const b = contactBody(req.body);
   if (!b.name) return res.status(400).json({ error: '請填寫客戶名稱' });
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        UPDATE customers
+        SET name = $1, phone = $2, email = $3, tax_id = $4, address = $5, contact_person = $6, note = $7, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $8 AND company_id = $9
+        RETURNING *
+      `, [b.name, b.phone, b.email, b.taxId, b.address, b.contactPerson, b.note, req.params.id, req.company.id]);
+      if (!row) return res.status(404).json({ error: '找不到客戶' });
+      audit(req.company.id, req.user.id, 'customer_updated', String(req.params.id));
+      return res.json(contactRow(row));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const result = db.prepare(`
     UPDATE customers
@@ -3439,16 +3911,36 @@ app.put('/api/customers/:id', auth, company, requireRole('owner', 'admin', 'staf
   res.json(contactRow(db.prepare('SELECT * FROM customers WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id)));
 });
 
-app.delete('/api/customers/:id', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.delete('/api/customers/:id', auth, company, requireRole('owner', 'admin'), async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const result = await pgQuery('DELETE FROM customers WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!result.rowCount) return res.status(404).json({ error: '找不到客戶' });
+      audit(req.company.id, req.user.id, 'customer_deleted', String(req.params.id));
+      return res.json({ ok: true });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
   const result = db.prepare('DELETE FROM customers WHERE id = ? AND company_id = ?').run(req.params.id, req.company.id);
   if (!result.changes) return res.status(404).json({ error: '找不到客戶' });
   audit(req.company.id, req.user.id, 'customer_deleted', String(req.params.id));
   res.json({ ok: true });
 });
 
-app.get('/api/purchases/list', auth, company, (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
-    return res.json([]);
+app.get('/api/purchases/list', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM purchases
+        WHERE company_id = $1
+        ORDER BY purchase_date DESC, id DESC
+      `, [req.company.id]);
+      return res.json(rows.map(purchaseRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const rows = db.prepare(`
@@ -3461,17 +3953,87 @@ app.get('/api/purchases/list', auth, company, (req, res) => {
   res.json(rows.map(purchaseRow));
 });
 
-app.get('/api/purchases/:id', auth, company, (req, res) => {
+app.get('/api/purchases/:id', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const purchase = await pgOne('SELECT * FROM purchases WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
+      const items = await pgAll('SELECT * FROM purchase_items WHERE purchase_id = $1 AND company_id = $2 ORDER BY id', [req.params.id, req.company.id]);
+      return res.json({ ...purchaseRow(purchase), items: items.map((row) => erpItemRow(row, 'purchase')) });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
   const items = db.prepare('SELECT * FROM purchase_items WHERE purchase_id = ? AND company_id = ? ORDER BY id').all(req.params.id, req.company.id);
   res.json({ ...purchaseRow(purchase), items: items.map((row) => erpItemRow(row, 'purchase')) });
 });
 
-app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), async (req, res) => {
   const body = req.body || {};
   const items = normalizeErpItems(body.items, 'purchase');
   if (!items.length) return res.status(400).json({ error: '請至少新增一筆進貨明細' });
+
+  if (PG_ENABLED) {
+    try {
+      const subtotal = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const tax = erpTax(subtotal, body.tax);
+      const total = Math.round((subtotal + tax) * 100) / 100;
+      const status = purchasePaymentStatuses.has(body.paymentStatus) ? body.paymentStatus : '未付款';
+      const supplierId = Number(body.supplierId || 0) || null;
+      let supplierName = body.supplierName || '';
+      if (supplierId) {
+        const supplier = await pgOne('SELECT name FROM suppliers WHERE id = $1 AND company_id = $2', [supplierId, req.company.id]);
+        if (!supplier) return res.status(400).json({ error: '找不到供應商' });
+        supplierName = supplier.name;
+      }
+
+      const purchase = await pgOne(`
+        INSERT INTO purchases (
+          company_id, supplier_id, supplier_name, purchase_no, purchase_date, category,
+          subtotal, tax, total, payment_status, paid_amount, status, note, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'confirmed',$12,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [
+        req.company.id,
+        supplierId,
+        supplierName,
+        body.purchaseNo || `PO-${Date.now()}`,
+        body.purchaseDate || new Date().toISOString().slice(0, 10),
+        body.category || '',
+        subtotal,
+        tax,
+        total,
+        status,
+        erpNumber(body.paidAmount, 0),
+        body.note || ''
+      ]);
+
+      for (const item of items) {
+        await pgQuery(`
+          INSERT INTO purchase_items (
+            company_id, purchase_id, product_id, item_name, quantity, unit, unit_cost, unit_price, subtotal, note
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9)
+        `, [req.company.id, purchase.id, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note]);
+        if (item.productId) {
+          const product = await pgOne('SELECT * FROM products WHERE id = $1 AND company_id = $2', [item.productId, req.company.id]);
+          if (product) {
+            const nextStock = Math.round((erpNumber(product.stock, 0) + item.quantity) * 100) / 100;
+            await pgQuery('UPDATE products SET stock = $1, cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND company_id = $4', [nextStock, item.price, item.productId, req.company.id]);
+          }
+        }
+      }
+
+      audit(req.company.id, req.user.id, 'purchase_created', String(purchase.id));
+      return res.json(purchaseRow(purchase));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   try {
     const result = db.transaction(() => {
@@ -3655,7 +4217,21 @@ app.post('/api/purchases/:id/void', auth, company, requireRole('owner', 'admin')
   }
 });
 
-app.get('/api/sales/list', auth, company, (req, res) => {
+app.get('/api/sales/list', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM sales
+        WHERE company_id = $1
+        ORDER BY sale_date DESC, id DESC
+      `, [req.company.id]);
+      return res.json(rows.map(saleRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM sales
@@ -3666,17 +4242,95 @@ app.get('/api/sales/list', auth, company, (req, res) => {
   res.json(rows.map(saleRow));
 });
 
-app.get('/api/sales/:id', auth, company, (req, res) => {
+app.get('/api/sales/:id', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const sale = await pgOne('SELECT * FROM sales WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
+      const items = await pgAll('SELECT * FROM sale_items WHERE sale_id = $1 AND company_id = $2 ORDER BY id', [req.params.id, req.company.id]);
+      return res.json({ ...saleRow(sale), items: items.map((row) => erpItemRow(row, 'sale')) });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
   const items = db.prepare('SELECT * FROM sale_items WHERE sale_id = ? AND company_id = ? ORDER BY id').all(req.params.id, req.company.id);
   res.json({ ...saleRow(sale), items: items.map((row) => erpItemRow(row, 'sale')) });
 });
 
-app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), async (req, res) => {
   const body = req.body || {};
   const items = normalizeErpItems(body.items, 'sale');
   if (!items.length) return res.status(400).json({ error: '請至少新增一筆銷貨明細' });
+
+  if (PG_ENABLED) {
+    try {
+      for (const item of items) {
+        if (item.productId) {
+          const product = await pgOne('SELECT * FROM products WHERE id = $1 AND company_id = $2', [item.productId, req.company.id]);
+          if (!product) return res.status(400).json({ error: `找不到商品 / 材料：${item.itemName}` });
+          if (erpNumber(product.stock, 0) < item.quantity) {
+            return res.status(400).json({ error: `${product.name} 庫存不足，目前 ${product.stock || 0}，需要 ${item.quantity}` });
+          }
+        }
+      }
+
+      const subtotal = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
+      const tax = erpTax(subtotal, body.tax);
+      const total = Math.round((subtotal + tax) * 100) / 100;
+      const status = saleCollectionStatuses.has(body.collectionStatus) ? body.collectionStatus : '未收款';
+      const customerId = Number(body.customerId || 0) || null;
+      let customerName = body.customerName || '';
+      if (customerId) {
+        const customer = await pgOne('SELECT name FROM customers WHERE id = $1 AND company_id = $2', [customerId, req.company.id]);
+        if (!customer) return res.status(400).json({ error: '找不到客戶' });
+        customerName = customer.name;
+      }
+
+      const sale = await pgOne(`
+        INSERT INTO sales (
+          company_id, customer_id, customer_name, sale_no, sale_date, category,
+          subtotal, tax, total, collection_status, received_amount, status, note, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'confirmed',$12,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [
+        req.company.id,
+        customerId,
+        customerName,
+        body.saleNo || `SO-${Date.now()}`,
+        body.saleDate || new Date().toISOString().slice(0, 10),
+        body.category || '',
+        subtotal,
+        tax,
+        total,
+        status,
+        erpNumber(body.receivedAmount, 0),
+        body.note || ''
+      ]);
+
+      for (const item of items) {
+        await pgQuery(`
+          INSERT INTO sale_items (
+            company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, note
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        `, [req.company.id, sale.id, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note]);
+        if (item.productId) {
+          const product = await pgOne('SELECT * FROM products WHERE id = $1 AND company_id = $2', [item.productId, req.company.id]);
+          const nextStock = Math.round((erpNumber(product.stock, 0) - item.quantity) * 100) / 100;
+          await pgQuery('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [nextStock, item.productId, req.company.id]);
+        }
+      }
+
+      audit(req.company.id, req.user.id, 'sale_created', String(sale.id));
+      return res.json(saleRow(sale));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   try {
     const result = db.transaction(() => {
@@ -3931,25 +4585,71 @@ app.get('/api/payables/list', auth, company, (req, res) => {
   })));
 });
 
-app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
-    return res.json({
-      income: 0,
-      fees: 0,
-      cogs: 0,
-      vouchers: 0,
-      monthIncome: 0,
-      monthFees: 0,
-      monthCogs: 0,
-      monthVouchers: 0,
-      grossMargin: 0,
-      netProfit: 0
-    });
-  }
-
+app.get('/api/companies/:companyId/summary', auth, company, async (req, res) => {
   const monthStart = new Date();
   monthStart.setDate(1);
   const monthStartText = monthStart.toISOString().slice(0, 10);
+
+  if (PG_ENABLED) {
+    try {
+      const [
+        income,
+        fees,
+        cogs,
+        vouchers,
+        txCount,
+        revenueByPlatform,
+        lowStock,
+        monthlySales,
+        monthlyPurchases,
+        unpaidSales,
+        unpaidPurchases,
+        collectedSales,
+        paidPurchases
+      ] = await Promise.all([
+        pgOne('SELECT COALESCE(SUM(gross_amount),0) AS total FROM transactions WHERE company_id = $1', [req.company.id]),
+        pgOne('SELECT COALESCE(SUM(platform_fee),0) AS total FROM transactions WHERE company_id = $1', [req.company.id]),
+        pgOne('SELECT COALESCE(SUM(cost_of_goods_sold),0) AS total FROM transactions WHERE company_id = $1', [req.company.id]),
+        pgOne('SELECT COALESCE(SUM(amount),0) AS total FROM vouchers WHERE company_id = $1', [req.company.id]),
+        pgOne('SELECT COUNT(*)::int AS count FROM transactions WHERE company_id = $1', [req.company.id]),
+        pgAll('SELECT platform_key AS name, SUM(gross_amount) AS value FROM transactions WHERE company_id = $1 GROUP BY platform_key', [req.company.id]),
+        pgOne('SELECT COUNT(*)::int AS count FROM products WHERE company_id = $1 AND COALESCE(stock,0) <= COALESCE(safety_stock,0)', [req.company.id]),
+        pgOne("SELECT COALESCE(SUM(total),0) AS total FROM sales WHERE company_id = $1 AND sale_date >= $2 AND COALESCE(status, 'confirmed') != 'void'", [req.company.id, monthStartText]),
+        pgOne("SELECT COALESCE(SUM(total),0) AS total FROM purchases WHERE company_id = $1 AND purchase_date >= $2 AND COALESCE(status, 'confirmed') != 'void'", [req.company.id, monthStartText]),
+        pgOne("SELECT COALESCE(SUM(GREATEST(COALESCE(total,0) - COALESCE(received_amount,0), 0)),0) AS total FROM sales WHERE company_id = $1 AND COALESCE(collection_status,'未收款') != '已收款' AND COALESCE(status, 'confirmed') != 'void'", [req.company.id]),
+        pgOne("SELECT COALESCE(SUM(GREATEST(COALESCE(total,0) - COALESCE(paid_amount,0), 0)),0) AS total FROM purchases WHERE company_id = $1 AND COALESCE(payment_status,'未付款') != '已付款' AND COALESCE(status, 'confirmed') != 'void'", [req.company.id]),
+        pgOne("SELECT COALESCE(SUM(received_amount),0) AS total FROM sales WHERE company_id = $1 AND COALESCE(status, 'confirmed') != 'void'", [req.company.id]),
+        pgOne("SELECT COALESCE(SUM(paid_amount),0) AS total FROM purchases WHERE company_id = $1 AND COALESCE(status, 'confirmed') != 'void'", [req.company.id])
+      ]);
+
+      const incomeTotal = erpNumber(income?.total, 0);
+      const feesTotal = erpNumber(fees?.total, 0);
+      const cogsTotal = erpNumber(cogs?.total, 0);
+      const vouchersTotal = erpNumber(vouchers?.total, 0);
+      const monthlySalesTotal = erpNumber(monthlySales?.total, 0);
+      const monthlyPurchasesTotal = erpNumber(monthlyPurchases?.total, 0);
+
+      return res.json({
+        revenue: incomeTotal + monthlySalesTotal,
+        expenses: feesTotal + cogsTotal + vouchersTotal,
+        netProfit: incomeTotal + monthlySalesTotal - feesTotal - cogsTotal - vouchersTotal - monthlyPurchasesTotal,
+        cogs: cogsTotal,
+        fees: feesTotal,
+        txCount: txCount?.count || 0,
+        invoicesPending: 0,
+        revenueByPlatform,
+        lowStock: lowStock?.count || 0,
+        monthlySales: monthlySalesTotal,
+        monthlyPurchases: monthlyPurchasesTotal,
+        unpaidSales: erpNumber(unpaidSales?.total, 0),
+        unpaidPurchases: erpNumber(unpaidPurchases?.total, 0),
+        collectedSales: erpNumber(collectedSales?.total, 0),
+        paidPurchases: erpNumber(paidPurchases?.total, 0)
+      });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const income = db.prepare(`
     SELECT COALESCE(SUM(gross_amount),0) total
@@ -5816,7 +6516,21 @@ app.get('/api/platforms', (_, res) => {
   res.json(platforms);
 });
 
-app.get('/api/companies/:companyId/integrations', auth, company, (req, res) => {
+app.get('/api/companies/:companyId/integrations', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const connected = await pgAll('SELECT * FROM platform_accounts WHERE company_id = $1', [req.company.id]);
+      return res.json(
+        platforms.map((p) => ({
+          ...p,
+          account: connected.find((c) => c.platform_key === p.platformKey) || null
+        }))
+      );
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const connected = db.prepare(`
     SELECT *
     FROM platform_accounts
@@ -5831,11 +6545,27 @@ app.get('/api/companies/:companyId/integrations', auth, company, (req, res) => {
   );
 });
 
-app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const p = platforms.find((x) => x.platformKey === req.params.platformKey);
 
   if (!p) {
     return res.status(404).json({ error: '未知平台' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      await pgQuery(`
+        INSERT INTO platform_accounts (company_id, platform_key, status, updated_at)
+        VALUES ($1,$2,$3,CURRENT_TIMESTAMP)
+        ON CONFLICT (company_id, platform_key) DO UPDATE SET
+          status = EXCLUDED.status,
+          updated_at = CURRENT_TIMESTAMP
+      `, [req.company.id, p.platformKey, p.status === 'planned' ? 'planned' : 'mock']);
+      audit(req.company.id, req.user.id, 'integration_connected', p.platformKey);
+      return res.json({ ok: true });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   db.prepare(`
@@ -5963,9 +6693,19 @@ app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, compa
   });
 });
 
-app.get('/api/companies/:companyId/transactions', auth, company, (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
-    return res.json([]);
+app.get('/api/companies/:companyId/transactions', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM transactions
+        WHERE company_id = $1
+        ORDER BY occurred_at DESC, id DESC
+      `, [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const rows = db.prepare(`
@@ -5978,9 +6718,47 @@ app.get('/api/companies/:companyId/transactions', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/transactions', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+app.post('/api/companies/:companyId/transactions', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), async (req, res) => {
   const t = req.body;
   const { net, profit, tax } = calcTransaction(t);
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO transactions (
+          company_id, platform_key, channel_type, external_order_id, gross_amount,
+          platform_fee, discount_amount, shipping_fee, refund_amount, net_amount,
+          tax_amount, cost_of_goods_sold, platform_profit, profit, payment_status,
+          order_status, items_json, occurred_at, note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$14,$15,$16,$17,$18)
+        RETURNING *
+      `, [
+        req.company.id,
+        t.platformKey || 'manual',
+        t.channelType || 'manual',
+        t.externalOrderId || nanoid(8),
+        t.grossAmount || 0,
+        t.platformFee || 0,
+        t.discountAmount || 0,
+        t.shippingFee || 0,
+        t.refundAmount || 0,
+        net,
+        tax,
+        t.costOfGoodsSold || 0,
+        profit,
+        t.paymentStatus || 'paid',
+        t.orderStatus || 'completed',
+        JSON.stringify(t.items || []),
+        t.occurredAt || t.occurred_at || new Date().toISOString(),
+        t.note || ''
+      ]);
+      audit(req.company.id, req.user.id, 'transaction_created', String(row.id));
+      return res.json({ id: row.id, ...t, netAmount: net, taxAmount: tax, platformProfit: profit });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const row = db.prepare(`
     INSERT INTO transactions (
@@ -6087,9 +6865,19 @@ app.post('/api/companies/:companyId/invoices', auth, company, requireRole('owner
   });
 });
 
-app.get('/api/companies/:companyId/products', auth, company, (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
-    return res.json([]);
+app.get('/api/companies/:companyId/products', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM products
+        WHERE company_id = $1
+        ORDER BY id DESC
+      `, [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const rows = db.prepare(`
@@ -6102,8 +6890,38 @@ app.get('/api/companies/:companyId/products', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/products', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/companies/:companyId/products', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const p = req.body;
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO products (
+          company_id, sku, name, category, unit, price, cost, stock,
+          safety_stock, supplier, storage_location, note, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [
+        req.company.id,
+        p.sku || '',
+        p.name || '',
+        p.category || '',
+        p.unit || '',
+        Number(p.price || 0),
+        Number(p.cost || 0),
+        Number(p.stock || 0),
+        Number(p.safetyStock ?? p.safety_stock ?? 5),
+        p.supplier || '',
+        p.storageLocation || p.storage_location || '',
+        p.note || ''
+      ]);
+      audit(req.company.id, req.user.id, 'product_created', String(row.id));
+      return res.json(row);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const row = db.prepare(`
     INSERT INTO products (
@@ -6346,7 +7164,16 @@ app.post('/api/companies/:companyId/inventory-movements', auth, company, require
 });
 
 
-app.get('/api/companies/:companyId/vouchers', auth, company, (req, res) => {
+app.get('/api/companies/:companyId/vouchers', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll('SELECT * FROM vouchers WHERE company_id = $1 ORDER BY id DESC', [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM vouchers
@@ -6357,7 +7184,7 @@ app.get('/api/companies/:companyId/vouchers', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/vouchers', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
+app.post('/api/companies/:companyId/vouchers', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), async (req, res) => {
   const v = req.body;
 
   const blocked = ['交際', '應酬', '娛樂', '個人', '私用', '禮品', '贈品']
@@ -6365,6 +7192,29 @@ app.post('/api/companies/:companyId/vouchers', auth, company, requireRole('owner
 
   const amount = Number(v.amount || 0);
   const tax = Math.round(amount / 1.05 * 0.05 * 100) / 100;
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO vouchers (company_id, type, vendor, amount, tax, deductible, voucher_date, note)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING *
+      `, [
+        req.company.id,
+        v.type || v.purpose || '',
+        v.vendor || '',
+        amount,
+        tax,
+        blocked ? 0 : 1,
+        v.voucherDate || v.voucher_date || new Date().toISOString().slice(0, 10),
+        v.note || v.purpose || ''
+      ]);
+      audit(req.company.id, req.user.id, 'voucher_created', String(row.id));
+      return res.json(row);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const row = db.prepare(`
     INSERT INTO vouchers (
@@ -6442,15 +7292,26 @@ app.get('/api/companies/:companyId/accounting/reports', auth, company, requireFe
   });
 });
 
-app.get('/api/companies/:companyId/tax/vat', auth, company, requireFeature('tax_center'), (req, res) => {
-  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
-    return res.json({
-      taxableSales: 0,
-      deductiblePurchases: 0,
-      outputTax: 0,
-      inputTax: 0,
-      vatPayable: 0
-    });
+app.get('/api/companies/:companyId/tax/vat', auth, company, requireFeature('tax_center'), async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const taxable = await pgOne('SELECT COALESCE(SUM(gross_amount / 1.05),0) AS total FROM transactions WHERE company_id = $1', [req.company.id]);
+      const deductible = await pgOne('SELECT COALESCE(SUM(amount / 1.05),0) AS total FROM vouchers WHERE company_id = $1 AND COALESCE(deductible,0) = 1', [req.company.id]);
+      const taxableSales = erpNumber(taxable?.total, 0);
+      const deductiblePurchases = erpNumber(deductible?.total, 0);
+      const outputTax = Math.round(taxableSales * 0.05 * 100) / 100;
+      const inputTax = Math.round(deductiblePurchases * 0.05 * 100) / 100;
+      return res.json({
+        taxableSales,
+        deductiblePurchases,
+        outputTax,
+        inputTax,
+        payableVAT: Math.max(0, outputTax - inputTax),
+        disclaimer: '本系統稅務試算僅供管理參考，正式申報仍應以會計師、記帳士或主管機關規定為準。'
+      });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const taxableSales = db.prepare(`

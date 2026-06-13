@@ -90,19 +90,45 @@ const pgCoreTables = [
   'visitor_logs',
   'traffic_events',
   'audit_logs',
-  'user_login_logs'
+  'user_login_logs',
+  'products',
+  'suppliers',
+  'customers',
+  'purchases',
+  'purchase_items',
+  'purchase_payments',
+  'sales',
+  'sale_items',
+  'sale_receipts',
+  'transactions',
+  'vouchers',
+  'platform_accounts',
+  'inventory_movements'
 ];
 
 const pgCoreColumns = {
-  users: ['id', 'name', 'email', 'password_hash', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'created_at'],
-  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'billing_status', 'subscription_plan', 'is_paid_customer', 'is_tester', 'tester_feedback_status', 'created_at'],
+  users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'created_at'],
+  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'is_tester', 'tester_feedback_status', 'created_at'],
   company_users: ['id', 'company_id', 'user_id', 'role', 'created_at'],
   job_sites: ['id', 'company_id', 'name', 'site_name', 'client_name', 'quote_amount', 'received_amount', 'status', 'created_at', 'updated_at'],
   job_site_payments: ['id', 'company_id', 'job_site_id', 'amount', 'payment_date', 'method', 'note', 'created_at'],
   visitor_logs: ['id', 'visitor_id', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'source', 'ip', 'user_agent', 'created_at'],
   traffic_events: ['id', 'visitor_id', 'user_id', 'event_type', 'source', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'ip', 'user_agent', 'created_at'],
   audit_logs: ['id', 'company_id', 'user_id', 'action', 'detail', 'created_at'],
-  user_login_logs: ['id', 'user_id', 'email', 'ip', 'user_agent', 'status', 'fail_reason', 'created_at']
+  user_login_logs: ['id', 'user_id', 'email', 'ip', 'user_agent', 'status', 'fail_reason', 'created_at'],
+  products: ['id', 'company_id', 'sku', 'name', 'category', 'unit', 'price', 'cost', 'stock', 'supplier', 'storage_location', 'note', 'created_at', 'updated_at'],
+  suppliers: ['id', 'company_id', 'name', 'phone', 'email', 'tax_id', 'address', 'contact_person', 'note', 'created_at', 'updated_at'],
+  customers: ['id', 'company_id', 'name', 'phone', 'email', 'tax_id', 'address', 'contact_person', 'note', 'created_at', 'updated_at'],
+  purchases: ['id', 'company_id', 'purchase_no', 'supplier_id', 'supplier_name', 'purchase_date', 'subtotal', 'tax', 'total', 'paid_amount', 'payment_status', 'status', 'note', 'created_at', 'updated_at'],
+  purchase_items: ['id', 'company_id', 'purchase_id', 'product_id', 'item_name', 'quantity', 'unit', 'unit_cost', 'subtotal', 'note', 'created_at'],
+  purchase_payments: ['id', 'company_id', 'purchase_id', 'amount', 'payment_date', 'method', 'note', 'created_at'],
+  sales: ['id', 'company_id', 'customer_id', 'customer_name', 'sale_no', 'sale_date', 'subtotal', 'tax', 'total', 'collection_status', 'received_amount', 'status', 'note', 'created_at', 'updated_at'],
+  sale_items: ['id', 'company_id', 'sale_id', 'product_id', 'item_name', 'quantity', 'unit', 'unit_price', 'subtotal', 'note', 'created_at'],
+  sale_receipts: ['id', 'company_id', 'sale_id', 'amount', 'receipt_date', 'method', 'note', 'created_at'],
+  transactions: ['id', 'company_id', 'platform_key', 'channel_type', 'external_order_id', 'gross_amount', 'platform_fee', 'cost_of_goods_sold', 'tax_amount', 'net_amount', 'profit', 'occurred_at', 'note', 'created_at'],
+  vouchers: ['id', 'company_id', 'type', 'vendor', 'amount', 'tax', 'deductible', 'voucher_date', 'note', 'created_at'],
+  platform_accounts: ['id', 'company_id', 'platform_key', 'status', 'last_sync_at', 'created_at', 'updated_at'],
+  inventory_movements: ['id', 'company_id', 'product_id', 'job_site_id', 'movement_type', 'quantity', 'before_stock', 'after_stock', 'unit_cost', 'note', 'created_at']
 };
 
 if (databaseUrl) {

@@ -45,7 +45,10 @@ export async function api(path, options = {}) {
       data?.message ||
       `API 錯誤：${res.status}`;
 
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = res.status;
+    error.code = data?.code || '';
+    throw error;
   }
 
   return data;
