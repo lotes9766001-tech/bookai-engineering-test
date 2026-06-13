@@ -102,16 +102,24 @@ const pgCoreTables = [
   'sale_receipts',
   'transactions',
   'vouchers',
+  'invoices',
   'platform_accounts',
-  'inventory_movements'
+  'inventory_movements',
+  'leads',
+  'job_site_estimate_items',
+  'tenders',
+  'tender_sync_runs',
+  'tender_keywords',
+  'tender_matches'
 ];
 
 const pgCoreColumns = {
   users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'approval_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'phone', 'line_contact', 'contact_name', 'company_stage', 'tax_id', 'created_at'],
-  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'approval_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'contact_name', 'phone', 'line_contact', 'company_stage', 'is_tester', 'tester_feedback_status', 'created_at'],
+  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'approval_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'contact_name', 'phone', 'line_contact', 'company_stage', 'is_tester', 'tester_feedback_status', 'beta_status', 'is_free_beta', 'beta_group', 'beta_limit_group', 'product_line', 'industry_type', 'beta_approved_at', 'created_at'],
   company_users: ['id', 'company_id', 'user_id', 'role', 'created_at'],
   job_sites: ['id', 'company_id', 'name', 'site_name', 'client_name', 'quote_amount', 'received_amount', 'status', 'created_at', 'updated_at'],
   job_site_payments: ['id', 'company_id', 'job_site_id', 'amount', 'payment_date', 'method', 'note', 'created_at'],
+  job_site_estimate_items: ['id', 'company_id', 'job_site_id', 'work_type', 'item_category', 'item_name', 'quantity', 'unit', 'unit_price', 'amount', 'cost_amount', 'sort_order', 'created_at', 'updated_at'],
   visitor_logs: ['id', 'visitor_id', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'source', 'ip', 'user_agent', 'created_at'],
   traffic_events: ['id', 'visitor_id', 'user_id', 'event_type', 'source', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign', 'ip', 'user_agent', 'created_at'],
   audit_logs: ['id', 'company_id', 'user_id', 'action', 'detail', 'created_at'],
@@ -127,8 +135,14 @@ const pgCoreColumns = {
   sale_receipts: ['id', 'company_id', 'sale_id', 'amount', 'receipt_date', 'method', 'note', 'created_at'],
   transactions: ['id', 'company_id', 'platform_key', 'channel_type', 'external_order_id', 'gross_amount', 'platform_fee', 'cost_of_goods_sold', 'tax_amount', 'net_amount', 'profit', 'occurred_at', 'note', 'created_at'],
   vouchers: ['id', 'company_id', 'type', 'vendor', 'amount', 'tax', 'deductible', 'voucher_date', 'note', 'created_at'],
+  invoices: ['id', 'company_id', 'invoice_no', 'invoice_type', 'buyer_name', 'buyer_tax_id', 'amount_excl_tax', 'tax_amount', 'amount_incl_tax', 'status', 'issued_at', 'created_at'],
   platform_accounts: ['id', 'company_id', 'platform_key', 'status', 'last_sync_at', 'created_at', 'updated_at'],
-  inventory_movements: ['id', 'company_id', 'product_id', 'job_site_id', 'movement_type', 'quantity', 'before_stock', 'after_stock', 'unit_cost', 'note', 'created_at']
+  inventory_movements: ['id', 'company_id', 'product_id', 'job_site_id', 'movement_type', 'quantity', 'before_stock', 'after_stock', 'unit_cost', 'note', 'created_at'],
+  leads: ['id', 'company_id', 'title', 'client_name', 'client_phone', 'source', 'region', 'agency_type', 'project_type', 'estimated_amount', 'estimated_cost', 'expected_margin', 'risk_level', 'fit_score', 'status', 'next_action', 'note', 'tender_source', 'tender_ref', 'converted_job_site_id', 'created_at', 'updated_at'],
+  tenders: ['id', 'source', 'source_tender_id', 'tender_no', 'tender_name', 'agency_name', 'agency_level', 'region', 'category', 'budget_amount', 'publish_date', 'deadline_date', 'status', 'url', 'created_at', 'updated_at', 'last_seen_at'],
+  tender_sync_runs: ['id', 'source', 'started_at', 'finished_at', 'status', 'fetched_count', 'inserted_count', 'updated_count', 'error_count', 'error_message', 'created_at'],
+  tender_keywords: ['id', 'keyword', 'category', 'product_line', 'enabled', 'created_at'],
+  tender_matches: ['id', 'tender_id', 'company_id', 'keyword', 'score', 'matched_reason', 'created_at']
 };
 
 if (databaseUrl) {
@@ -270,9 +284,19 @@ const requiredTables = [
   'sale_receipts',
   'purchase_payments',
   'job_sites',
+  'job_site_estimate_items',
   'job_site_payments',
   'inventory_movements',
   'feedbacks',
+  'transactions',
+  'vouchers',
+  'invoices',
+  'platform_accounts',
+  'leads',
+  'tenders',
+  'tender_sync_runs',
+  'tender_keywords',
+  'tender_matches',
   'audit_logs'
 ];
 
@@ -325,6 +349,13 @@ const requiredColumns = {
     'tester_started_at',
     'tester_note',
     'tester_feedback_status',
+    'beta_status',
+    'is_free_beta',
+    'beta_group',
+    'beta_limit_group',
+    'product_line',
+    'industry_type',
+    'beta_approved_at',
     'created_at'
   ],
   company_users: [
@@ -499,6 +530,119 @@ const requiredColumns = {
     'note',
     'created_at'
   ],
+  transactions: [
+    'id',
+    'company_id',
+    'platform_key',
+    'channel_type',
+    'external_order_id',
+    'gross_amount',
+    'platform_fee',
+    'cost_of_goods_sold',
+    'tax_amount',
+    'net_amount',
+    'created_at'
+  ],
+  vouchers: [
+    'id',
+    'company_id',
+    'vendor',
+    'amount',
+    'deductible'
+  ],
+  invoices: [
+    'id',
+    'company_id',
+    'invoice_no',
+    'invoice_type',
+    'buyer_name',
+    'buyer_tax_id',
+    'amount_excl_tax',
+    'tax_amount',
+    'amount_incl_tax',
+    'status',
+    'created_at'
+  ],
+  platform_accounts: [
+    'id',
+    'company_id',
+    'platform_key',
+    'status',
+    'last_sync_at'
+  ],
+  leads: [
+    'id',
+    'company_id',
+    'title',
+    'client_name',
+    'client_phone',
+    'source',
+    'region',
+    'agency_type',
+    'project_type',
+    'estimated_amount',
+    'estimated_cost',
+    'expected_margin',
+    'risk_level',
+    'fit_score',
+    'status',
+    'next_action',
+    'note',
+    'tender_source',
+    'tender_ref',
+    'converted_job_site_id',
+    'created_at',
+    'updated_at'
+  ],
+  tenders: [
+    'id',
+    'source',
+    'source_tender_id',
+    'tender_no',
+    'tender_name',
+    'agency_name',
+    'agency_level',
+    'region',
+    'category',
+    'budget_amount',
+    'publish_date',
+    'deadline_date',
+    'status',
+    'url',
+    'created_at',
+    'updated_at',
+    'last_seen_at'
+  ],
+  tender_sync_runs: [
+    'id',
+    'source',
+    'started_at',
+    'finished_at',
+    'status',
+    'fetched_count',
+    'inserted_count',
+    'updated_count',
+    'error_count',
+    'error_message',
+    'created_at'
+  ],
+  tender_keywords: [
+    'id',
+    'keyword',
+    'category',
+    'product_line',
+    'enabled',
+    'created_at'
+  ],
+  tender_matches: [
+    'id',
+    'tender_id',
+    'company_id',
+    'keyword',
+    'score',
+    'matched_reason',
+    'created_at'
+  ],
   feedbacks: [
     'id',
     'company_id',
@@ -532,6 +676,23 @@ const requiredColumns = {
     'misc_cost',
     'status',
     'note'
+  ],
+  job_site_estimate_items: [
+    'id',
+    'company_id',
+    'job_site_id',
+    'work_type',
+    'item_category',
+    'item_name',
+    'quantity',
+    'unit',
+    'unit_price',
+    'amount',
+    'cost_amount',
+    'note',
+    'sort_order',
+    'created_at',
+    'updated_at'
   ],
   inventory_movements: [
     'id',

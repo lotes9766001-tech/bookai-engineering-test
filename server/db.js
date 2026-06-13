@@ -304,6 +304,99 @@ export function initDb() {
   CREATE INDEX IF NOT EXISTS leads_company_created_idx
   ON leads(company_id, created_at);
 
+  CREATE TABLE IF NOT EXISTS tenders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    source_tender_id TEXT NOT NULL,
+    tender_no TEXT,
+    tender_name TEXT NOT NULL,
+    agency_name TEXT,
+    agency_code TEXT,
+    agency_level TEXT,
+    region TEXT,
+    category TEXT,
+    procurement_type TEXT,
+    tender_type TEXT,
+    announcement_type TEXT,
+    budget_amount REAL DEFAULT 0,
+    award_amount REAL DEFAULT 0,
+    publish_date TEXT,
+    deadline_date TEXT,
+    opening_date TEXT,
+    status TEXT,
+    url TEXT,
+    raw_payload TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source, source_tender_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS tender_sync_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT,
+    started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT,
+    status TEXT DEFAULT 'running',
+    fetched_count INTEGER DEFAULT 0,
+    inserted_count INTEGER DEFAULT 0,
+    updated_count INTEGER DEFAULT 0,
+    skipped_count INTEGER DEFAULT 0,
+    error_count INTEGER DEFAULT 0,
+    error_message TEXT,
+    cursor TEXT,
+    date_from TEXT,
+    date_to TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS tender_keywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT NOT NULL UNIQUE,
+    category TEXT,
+    product_line TEXT,
+    enabled INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS tender_matches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tender_id INTEGER NOT NULL,
+    company_id INTEGER,
+    keyword TEXT,
+    score INTEGER DEFAULT 0,
+    matched_reason TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(tender_id) REFERENCES tenders(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_tenders_source
+  ON tenders(source);
+
+  CREATE INDEX IF NOT EXISTS idx_tenders_status
+  ON tenders(status);
+
+  CREATE INDEX IF NOT EXISTS idx_tenders_publish_date
+  ON tenders(publish_date);
+
+  CREATE INDEX IF NOT EXISTS idx_tenders_deadline_date
+  ON tenders(deadline_date);
+
+  CREATE INDEX IF NOT EXISTS idx_tenders_region
+  ON tenders(region);
+
+  CREATE INDEX IF NOT EXISTS idx_tenders_agency_level
+  ON tenders(agency_level);
+
+  CREATE INDEX IF NOT EXISTS idx_tender_sync_runs_created
+  ON tender_sync_runs(created_at);
+
+  CREATE INDEX IF NOT EXISTS idx_tender_matches_tender_id
+  ON tender_matches(tender_id);
+
+  CREATE INDEX IF NOT EXISTS idx_tender_matches_company_id
+  ON tender_matches(company_id);
+
   CREATE TABLE IF NOT EXISTS platform_settings (
     key TEXT PRIMARY KEY,
     value TEXT,
@@ -680,12 +773,21 @@ export function initDb() {
   safeAddColumn('companies', 'approved_by', 'INTEGER');
   safeAddColumn('companies', 'rejected_at', 'TEXT');
   safeAddColumn('companies', 'rejected_by', 'INTEGER');
+  safeAddColumn('companies', 'suspended_at', 'TEXT');
+  safeAddColumn('companies', 'suspended_by', 'INTEGER');
   safeAddColumn('companies', 'review_note', 'TEXT');
   safeAddColumn('companies', 'contact_name', 'TEXT');
   safeAddColumn('companies', 'phone', 'TEXT');
   safeAddColumn('companies', 'line_contact', 'TEXT');
   safeAddColumn('companies', 'use_case', 'TEXT');
   safeAddColumn('companies', 'company_stage', 'TEXT');
+  safeAddColumn('companies', 'beta_status', "TEXT DEFAULT 'not_started'");
+  safeAddColumn('companies', 'is_free_beta', 'INTEGER DEFAULT 0');
+  safeAddColumn('companies', 'beta_group', 'TEXT');
+  safeAddColumn('companies', 'beta_limit_group', 'TEXT');
+  safeAddColumn('companies', 'product_line', "TEXT DEFAULT 'general'");
+  safeAddColumn('companies', 'industry_type', 'TEXT');
+  safeAddColumn('companies', 'beta_approved_at', 'TEXT');
   safeAddColumn('users', 'last_login_at', 'TEXT');
   safeAddColumn('users', 'created_source', 'TEXT');
   safeAddColumn('users', 'created_utm_source', 'TEXT');

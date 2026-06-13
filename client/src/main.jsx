@@ -18,18 +18,6 @@ import {
   WalletCards,
   X
 } from 'lucide-react';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  Tooltip,
-  LineChart,
-  Line,
-  CartesianGrid,
-  XAxis,
-  YAxis
-} from 'recharts';
 import { api, setToken, clearToken, getToken } from './lib/api';
 import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
@@ -148,6 +136,17 @@ const industryLabel = {
   studio: '工作室 / 接案',
   accounting_firm: '記帳士 / 會計事務所',
   other: '其他行業'
+};
+
+const productLineLabels = {
+  engineering: '工程版',
+  commerce: '電商版',
+  restaurant: '餐飲版',
+  beverage: '手搖飲版',
+  retail: '零售版',
+  studio: '工作室 / 個人品牌版',
+  accountant: '記帳士 / 事務所版',
+  general: '一般中小企業版'
 };
 
 const navs = {
@@ -323,7 +322,12 @@ function getBillingStatusLabel(status) {
     trial: '試用中',
     active: '正式使用中',
     expired: '已到期',
-    paused: '暫停使用'
+    paused: '暫停使用',
+    free_beta: '免費封閉測試',
+    internal: '內部管理',
+    unpaid: '未付款',
+    paid: '已付款',
+    cancelled: '已取消'
   };
 
   return map[status] || '未設定';
@@ -369,6 +373,73 @@ function getFeedbackStatusLabel(status) {
   };
 
   return map[status] || '未設定';
+}
+
+function getReviewStatusLabel(status) {
+  const map = {
+    pending_review: '等待審核',
+    approved: '已通過',
+    rejected: '已拒絕',
+    suspended: '已停權',
+    demo: 'Demo 測試',
+    waitlist: '候補名單',
+    active: '使用中',
+    inactive: '未啟用',
+    closed_beta: '封閉測試',
+    free_beta: '免費測試',
+    pending: '待處理',
+    failed: '失敗',
+    success: '成功',
+    error: '錯誤'
+  };
+
+  return map[status] || status || '未設定';
+}
+
+function getBetaStatusLabel(status) {
+  const map = {
+    pending_review: '等待審核',
+    active: '測試中',
+    approved: '測試中',
+    demo: 'Demo 測試',
+    waitlist: '候補',
+    suspended: '已停權',
+    rejected: '已拒絕',
+    ended: '已結束',
+    not_started: '尚未開始'
+  };
+
+  return map[status] || status || '未設定';
+}
+
+function getAdminBillingStatusLabel(status) {
+  const map = {
+    free_beta: '免費封閉測試',
+    internal: '內部管理',
+    unpaid: '未付款',
+    paid: '已付款',
+    trial: '試用中',
+    active: '使用中',
+    expired: '已到期',
+    paused: '暫停使用',
+    cancelled: '已取消'
+  };
+
+  return map[status] || status || '未設定';
+}
+
+function getPlanDisplayLabel(plan) {
+  const map = {
+    closed_beta: '封閉測試',
+    trial: '封閉測試',
+    starter: '入門版',
+    pro: '專業版',
+    business: '商務版',
+    enterprise: '企業版',
+    custom: '客製方案'
+  };
+
+  return map[plan] || plan || '未設定';
 }
 
 function isAdminUser(user) {
@@ -635,7 +706,7 @@ function Auth({ onAuth }) {
           <label>
             <span>電子信箱</span>
             <input
-              placeholder="例：demo@bookai.com.tw"
+              placeholder="例：user@bookai.com.tw"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
@@ -677,6 +748,7 @@ function TermsBeta() {
         <p>歡迎申請使用 BookAI 測試服務。BookAI 目前處於產品測試與功能驗證階段，為確保服務品質、資料安全、測試環境穩定與使用者權益，本服務採人工審核制。使用者完成註冊或申請，並不代表帳號已正式開通；BookAI 保留依內部審核標準准許、拒絕、限制、暫停或終止帳號使用權限之權利。</p>
         <p>使用者理解並同意，測試期間之功能、介面、資料結構、服務範圍與系統穩定性可能因產品開發、維護、安全或營運需求而調整、中斷、暫停或變更。BookAI 將盡合理努力維持服務可用性，但不保證測試期間服務完全不中斷、無錯誤或符合所有特定商業目的。</p>
         <p>使用者應確保其提交之申請資料、聯絡資訊、公司或品牌資料、營運資料及其他輸入內容為真實、合法且已取得必要授權。若使用者尚未成立公司或行號，得以品牌名稱、團隊名稱、工作室名稱或創業狀態進行申請，BookAI 將透過官方客服與人工審核程序確認使用需求。</p>
+        <p>BookAI 封閉測試期間不收取測試費用。免費測試資格僅限 BookAI 核准之測試期間與測試範圍內使用，不代表永久免費使用權、正式商用授權或未來付費方案承諾。BookAI 保留未來調整服務內容、功能範圍、測試資格、測試期限、正式方案與收費方式之權利。</p>
         <p>使用者不得進行未授權測試、壓力測試、爬蟲、掃描、逆向工程、繞過權限、濫用 API、建立大量帳號、干擾服務運作或其他可能影響系統安全與服務穩定之行為。</p>
         <p>BookAI 所提供之 AI 分析、營運建議、報表摘要、稅務提示、會計分類、工程評估、標案判斷或其他輔助資訊，均僅作為一般參考，不構成法律、稅務、會計、財務、工程、投資或其他專業意見。</p>
         <p>測試期間，使用者應避免將不可替代、高度敏感或唯一正式營運資料作為測試資料輸入系統，並應自行保留重要資料備份。BookAI 將採取合理安全措施維護服務與資料安全，但不承諾任何資料永久不遺失、不中斷或完全無風險。</p>
@@ -695,7 +767,7 @@ function PendingReviewPage({ user, company, onLogout, onNavigate }) {
           感謝您申請 BookAI。請透過官方 LINE 聯繫客服，完成身份與使用需求確認。審核通過後，系統將為您開通對應功能權限。
         </p>
         <div className="metric-grid">
-          <div className="metric-card"><span>申請 Email</span><strong>{user?.email}</strong></div>
+          <div className="metric-card"><span>申請電子信箱</span><strong>{user?.email}</strong></div>
           <div className="metric-card"><span>公司 / 品牌名稱</span><strong>{company?.name}</strong></div>
           <div className="metric-card"><span>目前狀態</span><strong>等待官方審核</strong></div>
         </div>
@@ -722,6 +794,7 @@ function Shell({ onLogout }) {
   const [refresh, setRefresh] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('bookai_sidebar_collapsed') === '1');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [pendingMemberCount, setPendingMemberCount] = useState(0);
 
   useEffect(() => {
     api('/me')
@@ -783,6 +856,16 @@ function Shell({ onLogout }) {
     ['terms_beta', '測試會員條款', FileText]
   ];
   const activeNav = needsReview ? reviewNav : founderNav;
+
+  useEffect(() => {
+    if (!me || !userIsAdmin || needsReview) {
+      setPendingMemberCount(0);
+      return;
+    }
+    api('/admin/members?status=pending_review')
+      .then((rows) => setPendingMemberCount(Array.isArray(rows) ? rows.length : 0))
+      .catch(() => setPendingMemberCount(0));
+  }, [me, userIsAdmin, needsReview]);
 
   useEffect(() => {
     if (me && needsReview && !['review_waiting', 'support', 'terms_beta'].includes(page)) {
@@ -873,6 +956,9 @@ if (!me || !company) {
             >
               <Icon size={18} />
               <span>{label}</span>
+              {id === 'admin' && pendingMemberCount > 0 && (
+                <b className="nav-badge">{pendingMemberCount}</b>
+              )}
             </button>
           ))}
         </nav>
@@ -900,7 +986,7 @@ if (!me || !company) {
         {needsReview && page === 'support' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
         {needsReview && page === 'terms_beta' && <TermsBeta />}
         {!needsReview && page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
-        {!needsReview && page === 'leads' && <LeadCenterMock companyId={companyId} />}
+        {!needsReview && page === 'leads' && <LeadCenterMock companyId={companyId} isAdmin={userIsAdmin} />}
         {!needsReview && page === 'transactions' && <Transactions companyId={companyId} />}
         {!needsReview && page === 'purchases' && <PurchasesManager companyId={companyId} onNavigate={setPage} />}
         {!needsReview && page === 'sales' && <SalesManager companyId={companyId} onNavigate={setPage} />}
@@ -934,8 +1020,6 @@ if (!me || !company) {
 }
 
 function Header({ company, onPlanChange }) {
-  const canManagePlan = ['owner', 'admin'].includes(company.role);
-
   return (
     <div className="header">
       <div>
@@ -947,15 +1031,7 @@ function Header({ company, onPlanChange }) {
         </p>
       </div>
 
-      {canManagePlan ? (
-        <select value={company.plan} onChange={(e) => onPlanChange(e.target.value)}>
-          <option value="business">Business</option>
-          <option value="pro">Pro</option>
-          <option value="accountant">Accountant</option>
-        </select>
-      ) : (
-        <div className="plan-badge">{planNames[company.plan] || company.plan}</div>
-      )}
+      <div className="plan-badge">{productLineLabels[company.product_line] || '早期體驗'}</div>
     </div>
   );
 }
@@ -966,6 +1042,72 @@ function Card({ title, value, sub }) {
       <span>{title}</span>
       <strong>{value}</strong>
       {sub && <small>{sub}</small>}
+    </div>
+  );
+}
+
+const platformChartColors = ['#2563eb', '#0891b2', '#16a34a', '#b88a2e', '#7c3aed', '#dc2626', '#0f766e', '#475569'];
+
+function PlatformRevenueChart({ rows = [] }) {
+  const platformRows = (Array.isArray(rows) ? rows : [])
+    .map((row) => ({
+      name: getPlatformName(row.name),
+      rawName: row.name || 'unknown',
+      value: Number(row.value || 0)
+    }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+  const total = platformRows.reduce((sum, row) => sum + row.value, 0);
+  const top = platformRows[0] || null;
+  const average = platformRows.length ? total / platformRows.length : 0;
+
+  if (!platformRows.length || total <= 0) {
+    return (
+      <div className="bi-empty-state">
+        <strong>目前尚無平台營收資料</strong>
+        <p>完成平台串接或新增交易資料後，系統將自動整理各平台營收占比。</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bi-platform-chart">
+      <div className="bi-kpi-row">
+        <div><span>總營收</span><strong>{money(total)}</strong></div>
+        <div><span>平台數</span><strong>{platformRows.length}</strong></div>
+        <div><span>最高營收平台</span><strong>{top.name}</strong></div>
+        <div><span>平均平台營收</span><strong>{money(average)}</strong></div>
+      </div>
+
+      <div className="bi-bars" role="list" aria-label="平台營收分布">
+        {platformRows.map((row, index) => {
+          const percent = total ? Math.round((row.value / total) * 1000) / 10 : 0;
+          const color = platformChartColors[index % platformChartColors.length];
+          return (
+            <div className={`bi-bar-item ${index === 0 ? 'top' : ''}`} key={`${row.rawName}-${index}`} role="listitem" title={`${row.name}：${money(row.value)}，占比 ${percent}%`}>
+              <div className="bi-bar-head">
+                <span><i style={{ background: color }} />{row.name}</span>
+                <strong>{money(row.value)}｜{percent}%</strong>
+              </div>
+              <div className="bi-bar-track">
+                <b style={{ width: `${Math.max(percent, 2)}%`, background: color }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="bi-legend">
+        {platformRows.map((row, index) => {
+          const percent = total ? Math.round((row.value / total) * 1000) / 10 : 0;
+          return (
+            <span key={`${row.rawName}-legend-${index}`}>
+              <i style={{ background: platformChartColors[index % platformChartColors.length] }} />
+              {row.name} {percent}%
+            </span>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -1180,10 +1322,6 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
     );
   }
 
-  const chart = s.revenueByPlatform?.length
-    ? s.revenueByPlatform
-    : [{ name: '尚無資料', value: 1 }];
-
   return (
     <section className="command-center">
       <div className="command-hero">
@@ -1222,18 +1360,10 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
       </div>
 
       <div className="panel-grid">
-        <div className="panel">
+        <div className="panel bi-panel">
           <h2>平台營收分布</h2>
-          <ResponsiveContainer width="100%" height={260}>
-            <PieChart>
-              <Pie data={chart} dataKey="value" nameKey="name" outerRadius={90}>
-                {chart.map((_, i) => (
-                  <Cell key={i} />
-                ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+          <p className="panel-subtitle">依平台營收高低排序，協助判斷主要收入來源與平台集中度。</p>
+          <PlatformRevenueChart rows={s.revenueByPlatform || []} />
         </div>
 
         <div className="panel">
@@ -1241,6 +1371,9 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
           <ul className="summary">
           <li>本月銷貨總額：{money(s.monthlySales || 0)}</li>
           <li>本月進貨總額：{money(s.monthlyPurchases || 0)}</li>
+          <li>本月毛利：{money(s.grossProfit || 0)}</li>
+          <li>毛利率：{Number(s.grossMarginRate || 0)}%</li>
+          <li>庫存成本：{money(s.inventoryValue || 0)}</li>
           <li>應收未收總額：{money(s.unpaidSales || 0)}</li>
           <li>應付未付總額：{money(s.unpaidPurchases || 0)}</li>
           <li>已收款金額：{money(s.collectedSales || 0)}</li>
@@ -1252,6 +1385,81 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
             <li>商品成本：{money(s.cogs)}</li>
             <li>待處理發票：{s.invoicesPending}</li>
           </ul>
+        </div>
+      </div>
+
+      <div className="panel-grid">
+        <div className="panel bi-panel">
+          <h2>現金流提醒</h2>
+          <p className="panel-subtitle">依應收、應付與毛利率整理今日需關注事項。</p>
+          <ul className="bi-alert-list">
+            {(s.cashflowAlerts || []).map((item) => <li key={item}>{item}</li>)}
+            {!(s.cashflowAlerts || []).length && <li>目前沒有重大現金流提醒，請持續維持進貨、銷貨與收付款紀錄完整。</li>}
+          </ul>
+          <div className="bi-cashflow-grid">
+            <div><span>本週預估流入</span><strong>{money(s.unpaidSales || 0)}</strong></div>
+            <div><span>本週預估流出</span><strong>{money(s.unpaidPurchases || 0)}</strong></div>
+            <div><span>淨現金流提醒</span><strong>{money((s.unpaidSales || 0) - (s.unpaidPurchases || 0))}</strong></div>
+          </div>
+        </div>
+
+        <div className="panel bi-panel">
+          <h2>應收 / 應付趨勢</h2>
+          <p className="panel-subtitle">近 30 天未收與未付變化，資料不足時以最新紀錄呈現。</p>
+          <div className="bi-trend-list">
+            {(s.receivableTrend || []).slice(-6).map((row) => (
+              <div key={`r-${row.date}`}>
+                <span>{row.date}</span>
+                <strong>{money(row.value || 0)}</strong>
+                <i style={{ width: `${Math.min(100, Math.max(6, Number(row.value || 0) / Math.max(Number(s.unpaidSales || 1), 1) * 100))}%` }} />
+              </div>
+            ))}
+            {(s.receivableTrend || []).length === 0 && <p className="bi-empty">目前尚無應收趨勢資料。</p>}
+          </div>
+          <div className="bi-trend-list payable">
+            {(s.payableTrend || []).slice(-6).map((row) => (
+              <div key={`p-${row.date}`}>
+                <span>{row.date}</span>
+                <strong>{money(row.value || 0)}</strong>
+                <i style={{ width: `${Math.min(100, Math.max(6, Number(row.value || 0) / Math.max(Number(s.unpaidPurchases || 1), 1) * 100))}%` }} />
+              </div>
+            ))}
+            {(s.payableTrend || []).length === 0 && <p className="bi-empty">目前尚無應付趨勢資料。</p>}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel-grid">
+        <div className="panel bi-panel">
+          <h2>低庫存排行</h2>
+          <p className="panel-subtitle">依目前庫存與安全庫存差距排序。</p>
+          <Table
+            cols={['商品 / 材料', '目前庫存', '安全庫存', '最近更新']}
+            rows={(s.lowStockItems || []).length
+              ? (s.lowStockItems || []).map((item) => [
+                  item.name || '未命名',
+                  `${item.stock || 0} ${item.unit || ''}`,
+                  `${item.safety_stock ?? item.safetyStock ?? 0} ${item.unit || ''}`,
+                  item.updated_at || item.updatedAt || '-'
+                ])
+              : [['目前尚無低庫存資料', '-', '-', '-']]}
+          />
+        </div>
+
+        <div className="panel bi-panel">
+          <h2>平台費率比較</h2>
+          <p className="panel-subtitle">比較各平台營收、手續費與費率，協助判斷平台成本。</p>
+          <Table
+            cols={['平台', '平台營收', '平台費用', '費率']}
+            rows={(s.platformFeeComparison || []).length
+              ? (s.platformFeeComparison || []).map((row) => [
+                  getPlatformName(row.name),
+                  money(row.revenue || 0),
+                  money(row.fee || 0),
+                  `${Number(row.fee_rate ?? row.feeRate ?? 0)}%`
+                ])
+              : [['目前尚無平台費率資料', money(0), money(0), '0%']]}
+          />
         </div>
       </div>
     </section>
@@ -1606,7 +1814,7 @@ function ContactsManager({ companyId, type }) {
         <label><span>名稱</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
         <label><span>聯絡人</span><input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} /></label>
         <label><span>電話</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-        <label><span>Email</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
+        <label><span>電子信箱</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
         <label><span>統編</span><input value={form.taxId} onChange={(e) => setForm({ ...form, taxId: e.target.value })} /></label>
         <label><span>地址</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
         <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
@@ -1615,7 +1823,7 @@ function ContactsManager({ companyId, type }) {
       </form>
 
       <Table
-        cols={['名稱', '聯絡人', '電話', 'Email', '統編', '地址', '備註', '操作']}
+        cols={['名稱', '聯絡人', '電話', '電子信箱', '統編', '地址', '備註', '操作']}
         rows={rows.map((row) => [
           row.name,
           row.contactPerson || '-',
@@ -6084,7 +6292,7 @@ function CommerceSiteManager({ companyId, company }) {
           <div className="form commerce-cms-form">
             <label><span>官方 LINE 連結</span><input value={settings.officialLineUrl || ''} onChange={(e) => setSettings({ ...settings, officialLineUrl: e.target.value })} /></label>
             <label><span>聯絡電話</span><input value={settings.contactPhone || ''} onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })} /></label>
-            <label><span>聯絡 Email</span><input value={settings.contactEmail || ''} onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })} /></label>
+            <label><span>聯絡電子信箱</span><input value={settings.contactEmail || ''} onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })} /></label>
             <label><span>網站狀態</span><select value={settings.siteStatus || 'draft'} onChange={(e) => setSettings({ ...settings, siteStatus: e.target.value })}><option value="draft">草稿</option><option value="live">已上線</option><option value="paused">暫停</option></select></label>
             <label><span>版型名稱</span><input value={settings.themeName || 'default'} onChange={(e) => setSettings({ ...settings, themeName: e.target.value })} /></label>
           </div>
@@ -6318,7 +6526,7 @@ function FounderDashboard() {
             <thead>
               <tr>
                 <th>公司名稱</th>
-                <th>Email</th>
+                <th>電子信箱</th>
                 <th>產業別</th>
                 <th>註冊時間</th>
                 <th>最後登入</th>
@@ -6428,6 +6636,7 @@ function AdminConsole() {
   const [feedbackCategoryFilter, setFeedbackCategoryFilter] = useState('all');
   const [memberStatusFilter, setMemberStatusFilter] = useState('pending_review');
   const [memberPlanForm, setMemberPlanForm] = useState({});
+  const [memberProductLineForm, setMemberProductLineForm] = useState({});
   const [demoResult, setDemoResult] = useState(null);
   const [demoLoading, setDemoLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -6456,6 +6665,13 @@ function AdminConsole() {
         });
         return next;
       });
+      setMemberProductLineForm((old) => {
+        const next = { ...old };
+        (reviewRows || []).forEach((row) => {
+          next[row.id] = next[row.id] || row.product_line || 'general';
+        });
+        return next;
+      });
       setSelectedId((old) => old || companyRows?.[0]?.id || null);
     } catch (err) {
       setError(err.message || '會員審核資料讀取失敗，請稍後再試或聯繫系統管理員。');
@@ -6478,6 +6694,7 @@ function AdminConsole() {
         body: JSON.stringify({
           approval_status: statusMap[action] || action,
           plan: memberPlanForm[userId] || 'trial',
+          product_line: memberProductLineForm[userId] || 'general',
           reviewNote: note
         })
       });
@@ -6557,6 +6774,7 @@ function AdminConsole() {
     }).length,
     testers: companies.filter((c) => Number(c.is_tester || 0) === 1).length,
     pendingReview: reviewUsers.filter((u) => (u.approval_status || u.status || u.review_status) === 'pending_review').length,
+    freeBetaApproved: companies.filter((c) => Number(c.is_free_beta || 0) === 1 && ['approved', 'demo'].includes(c.beta_status || '')).length,
     newFeedbacks: feedbacks.filter((f) => f.status === 'new').length,
     mrr: companies.reduce((sum, c) => {
       if (!c.is_paid_customer || c.billing_status !== 'active') return sum;
@@ -6568,6 +6786,12 @@ function AdminConsole() {
       return sum + Number(map[c.subscription_plan] || 0);
     }, 0)
   };
+
+  const productLineCounts = companies.reduce((acc, company) => {
+    const key = company.product_line || 'general';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
 
   async function saveBilling(e) {
     e.preventDefault();
@@ -6737,10 +6961,31 @@ function AdminConsole() {
                 <option value="approved">已通過</option>
                 <option value="rejected">已拒絕</option>
                 <option value="suspended">已暫停</option>
-                <option value="demo">Demo</option>
+                <option value="demo">Demo 測試</option>
                 <option value="all">全部</option>
               </select>
               <button type="button" onClick={loadAdmin}>重新整理</button>
+            </div>
+          </div>
+          <div className="admin-beta-summary">
+            <div>
+              <span>BookAI 封閉測試</span>
+              <strong>{metrics.freeBetaApproved} 人</strong>
+              <small>目前已通過測試者</small>
+            </div>
+            <div>
+              <span>第一階段觀察目標</span>
+              <strong>20 人</strong>
+              <small>營運觀察目標，不作為審核限制</small>
+            </div>
+            <div>
+              <span>待審核</span>
+              <strong>{metrics.pendingReview}</strong>
+              <small>等待官方審核</small>
+            </div>
+            <div>
+              <span>各行業測試者分布</span>
+              <small>{Object.entries(productLineCounts).map(([key, count]) => `${productLineLabels[key] || key} ${count}`).join(' / ') || '尚無資料'}</small>
             </div>
           </div>
           <div className="table-scroll">
@@ -6748,18 +6993,23 @@ function AdminConsole() {
               <thead>
                 <tr>
                   <th>申請時間</th>
-                  <th>Email</th>
+                  <th>電子信箱</th>
                   <th>公司 / 品牌</th>
                   <th>聯絡人</th>
                   <th>電話</th>
                   <th>LINE</th>
                   <th>統編</th>
                   <th>階段</th>
-                  <th>行業</th>
-                  <th>狀態</th>
-                  <th>目前方案</th>
+                  <th>行業版本</th>
+                  <th>目前產品線</th>
+                  <th>設定產品線</th>
+                  <th>會員狀態</th>
+                  <th>測試狀態</th>
+                  <th>免費測試</th>
+                  <th>方案狀態</th>
                   <th>設定方案</th>
-                  <th>條款</th>
+                  <th>條款版本</th>
+                  <th>同意時間</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -6775,34 +7025,48 @@ function AdminConsole() {
                     <td>{row.tax_id || row.user_tax_id || '未提供'}</td>
                     <td>{row.company_company_stage || row.company_stage || '-'}</td>
                     <td>{getIndustryName(row.industry)}</td>
-                    <td><span className="admin-pill">{row.approval_status || row.status || row.review_status || 'pending_review'}</span></td>
-                    <td>{row.plan || 'trial'}</td>
+                    <td>{productLineLabels[row.product_line] || row.product_line || '一般中小企業版'}</td>
+                    <td>
+                      <select
+                        value={memberProductLineForm[row.id] || row.product_line || 'general'}
+                        onChange={(e) => setMemberProductLineForm({ ...memberProductLineForm, [row.id]: e.target.value })}
+                      >
+                        {Object.entries(productLineLabels).map(([value, label]) => (
+                          <option key={value} value={value}>{label}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td><span className="admin-pill">{getReviewStatusLabel(row.approval_status || row.status || row.review_status || 'pending_review')}</span></td>
+                    <td>{getBetaStatusLabel(row.beta_status)}</td>
+                    <td>{Number(row.is_free_beta || 0) === 1 ? '是' : '否'}</td>
+                    <td>{getPlanDisplayLabel(row.plan || 'trial')}</td>
                     <td>
                       <select
                         value={memberPlanForm[row.id] || row.plan || 'trial'}
                         onChange={(e) => setMemberPlanForm({ ...memberPlanForm, [row.id]: e.target.value })}
                       >
-                        <option value="trial">trial</option>
-                        <option value="starter">starter</option>
-                        <option value="pro">pro</option>
-                        <option value="enterprise">enterprise</option>
-                        <option value="custom">custom</option>
+                        <option value="trial">封閉測試</option>
+                        <option value="starter">入門版</option>
+                        <option value="pro">專業版</option>
+                        <option value="enterprise">企業版</option>
+                        <option value="custom">客製方案</option>
                       </select>
                     </td>
                     <td>{row.terms_version || '-'}</td>
+                    <td>{formatDate(row.terms_accepted_at)}</td>
                     <td>
                       <div className="inline-actions">
-                        <button type="button" onClick={() => reviewUser(row.id, 'approve')}>通過審核 / 啟用帳號</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'reject', '未通過審核')}>拒絕</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'suspend', '暫停使用')}>停權</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'restore')}>恢復</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'demo')}>設為 demo</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'approve')}>通過免費測試</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'reject', '未通過審核')}>拒絕申請</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'suspend', '暫停使用')}>停權帳號</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'restore')}>恢復帳號</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'demo')}>設為 Demo</button>
                       </div>
                     </td>
                   </tr>
                 ))}
                 {!reviewUsers.length && (
-                  <tr><td colSpan="14">目前沒有會員申請資料。</td></tr>
+                  <tr><td colSpan="19">目前沒有會員申請資料。</td></tr>
                 )}
               </tbody>
             </table>
@@ -6822,10 +7086,10 @@ function AdminConsole() {
 
           {demoResult && (
             <div className="admin-detail-list">
-              <p><span>Email</span><strong>{demoResult.email}</strong></p>
-              <p><span>Password</span><strong>{demoResult.password}</strong></p>
-              <p><span>Company ID</span><strong>#{demoResult.companyId}</strong></p>
-              <p><span>Company Name</span><strong>{demoResult.companyName}</strong></p>
+              <p><span>電子信箱</span><strong>{demoResult.email}</strong></p>
+              <p><span>登入密碼</span><strong>{demoResult.password}</strong></p>
+              <p><span>公司編號</span><strong>#{demoResult.companyId}</strong></p>
+              <p><span>公司名稱</span><strong>{demoResult.companyName}</strong></p>
             </div>
           )}
         </div>
@@ -6897,7 +7161,7 @@ function AdminConsole() {
                       <td>{getSubscriptionPlanLabel(company.subscription_plan)}</td>
                       <td>
                         <span className={`admin-status-dot ${company.billing_status || 'trial'}`} />
-                        {getBillingStatusLabel(company.billing_status)}
+                        {getAdminBillingStatusLabel(company.billing_status)}
                       </td>
                       <td>{company.subscription_expires_at || '未設定'}</td>
                       <td>{Number(company.is_tester || 0) === 1 ? '是' : '否'}</td>
@@ -6923,6 +7187,11 @@ function AdminConsole() {
                     <p><span>公司 ID</span><strong>#{selected.id}</strong></p>
                     <p><span>公司名稱</span><strong>{selected.name}</strong></p>
                     <p><span>行業別</span><strong>{getIndustryName(selected.industry)}</strong></p>
+                    <p><span>產品線</span><strong>{productLineLabels[selected.product_line] || selected.product_line || '一般中小企業版'}</strong></p>
+                    <p><span>測試狀態</span><strong>{getBetaStatusLabel(selected.beta_status)}</strong></p>
+                    <p><span>免費封閉測試</span><strong>{Number(selected.is_free_beta || 0) === 1 ? '是' : '否'}</strong></p>
+                    <p><span>測試群組</span><strong>{getReviewStatusLabel(selected.beta_group || 'closed_beta')}</strong></p>
+                    <p><span>測試核准時間</span><strong>{selected.beta_approved_at || '未設定'}</strong></p>
                     <p><span>是否正式客戶</span><strong>{yesNoPaid(selected.is_paid_customer)}</strong></p>
                     <p><span>早期體驗使用者</span><strong>{Number(selected.is_tester || 0) === 1 ? '是' : '否'}</strong></p>
                     <p><span>使用回饋狀態</span><strong>{selected.tester_feedback_status || '尚未回饋'}</strong></p>
@@ -7191,23 +7460,21 @@ function AdminConsole() {
 function Settings({ company }) {
   return (
     <section>
-      <Title title="公司設定" desc="公司基本資料、方案、行業別與稅籍資訊。" />
+      <Title title="公司設定" desc="公司基本資料、行業別與早期體驗狀態。" />
       <div className="panel">
         <h2>{company.name}</h2>
-        <p>帳號狀態：依公司使用狀態與方案開放功能</p>
+        <p>帳號狀態：已依 BookAI 核准範圍開放功能</p>
         <p>產業：{getIndustryName(company.industry)}</p>
+        <p>產品線：{productLineLabels[company.product_line] || '一般中小企業版'}</p>
         <p>統編：{company.tax_id || '未設定'}</p>
         <p>公司 / 營業地址：{company.address || company.company_address || '未設定'}</p>
       </div>
 
       <div className="panel">
-        <h2>使用狀態</h2>
-        <p>目前使用狀態：{getBillingStatusLabel(company.billing_status)}</p>
-        <p>目前方案：{getSubscriptionPlanLabel(company.subscription_plan)}</p>
-        <p>是否正式客戶：{yesNoPaid(company.is_paid_customer)}</p>
-        <p>啟用日期：{company.subscription_started_at || '未設定'}</p>
-        <p>到期日期：{company.subscription_expires_at || '未設定'}</p>
-        <p>備註：{company.billing_note || '無'}</p>
+        <h2>早期體驗</h2>
+        <p>目前階段：{getBetaStatusLabel(company.beta_status) === '未設定' ? '已開通使用' : getBetaStatusLabel(company.beta_status)}</p>
+        <p>測試群組：{getReviewStatusLabel(company.beta_group || 'closed_beta')}</p>
+        <p>注意事項：早期體驗期間功能與開放範圍可能依產品測試安排調整。</p>
       </div>
     </section>
   );
@@ -7219,7 +7486,7 @@ function Locked({ feature }) {
       <main className="locked">
         <h1>此功能尚未開放</h1>
         <p>你正在開啟的功能：{feature}</p>
-        <p>此功能尚未包含在目前公司方案，請確認方案或聯絡 BookAI 官方。</p>
+        <p>此功能尚未包含在目前公司開放範圍，請聯絡 BookAI 官方確認開通狀態。</p>
       </main>
     </div>
   );

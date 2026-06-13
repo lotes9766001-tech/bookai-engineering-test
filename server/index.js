@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { db, initDb, audit as sqliteAudit, DB_PATH, DB_PROVIDER, DATABASE_URL } from './db.js';
-import { PG_ENABLED, initPostgresDb, pgAll, pgOne, pgQuery } from './pg-db.js';
+import { PG_ENABLED, initPostgresDb, getPool, pgAll, pgOne, pgQuery } from './pg-db.js';
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
@@ -768,7 +768,7 @@ function hasCompanyFeature(company, feature) {
 const requireFeature = (feature) => (req, res, next) => {
   if (!hasCompanyFeature(req.company, feature)) {
     return res.status(403).json({
-      error: '此功能需要升級方案',
+      error: '此功能尚未開放，請聯繫 BookAI 官方客服確認開通狀態',
       feature
     });
   }
@@ -1446,6 +1446,7 @@ app.post('/api/auth/register', async (req, res) => {
   const finalCompanyStage = String(companyStage || req.body.company_stage || '').trim();
   const finalLineContact = String(lineContact || req.body.line_contact || '').trim();
   const finalPlan = 'trial';
+  const finalProductLine = inferProductLine(industry || '');
   const acceptedTerms = termsAccepted === true || termsAccepted === 'true' || termsAccepted === 1 || termsAccepted === '1';
 
   if (!normalizedEmail || !password || !finalCompanyName) {
@@ -1548,9 +1549,15 @@ app.post('/api/auth/register', async (req, res) => {
           phone,
           line_contact,
           use_case,
-          company_stage
+          company_stage,
+          beta_status,
+          is_free_beta,
+          beta_group,
+          beta_limit_group,
+          product_line,
+          industry_type
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
         RETURNING id
       `, [
         finalCompanyName,
@@ -1567,7 +1574,13 @@ app.post('/api/auth/register', async (req, res) => {
         finalPhone,
         finalLineContact,
         finalUseCase,
-        finalCompanyStage
+        finalCompanyStage,
+        'pending_review',
+        0,
+        'closed_beta',
+        '',
+        finalProductLine,
+        industry || ''
       ]);
 
       await pgQuery(`
@@ -1648,9 +1661,15 @@ app.post('/api/auth/register', async (req, res) => {
       phone,
       line_contact,
       use_case,
-      company_stage
+      company_stage,
+      beta_status,
+      is_free_beta,
+      beta_group,
+      beta_limit_group,
+      product_line,
+      industry_type
     )
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       finalCompanyName,
       finalTaxId,
@@ -1666,7 +1685,13 @@ app.post('/api/auth/register', async (req, res) => {
       finalPhone,
       finalLineContact,
       finalUseCase,
-      finalCompanyStage
+      finalCompanyStage,
+      'pending_review',
+      0,
+      'closed_beta',
+      '',
+      finalProductLine,
+      industry || ''
     );
 
     db.prepare(`
@@ -2272,6 +2297,10 @@ const feedbackCategories = new Set(['操作問題', '介面建議', '功能需�
 const feedbackStatuses = new Set(['new', 'reviewing', 'resolved', 'ignored']);
 const reviewStatuses = new Set(['pending_review', 'approved', 'rejected', 'suspended', 'founder', 'admin', 'demo']);
 const memberPlans = new Set(['trial', 'starter', 'pro', 'enterprise', 'custom']);
+const productLines = new Set(['engineering', 'commerce', 'restaurant', 'beverage', 'retail', 'studio', 'accountant', 'general']);
+const betaStatuses = new Set(['not_started', 'pending_review', 'approved', 'rejected', 'suspended', 'demo']);
+const freeBetaSoftTarget = 20;
+const freeBetaHardLimitEnabled = false;
 const adminSettingKeys = new Set([
   'official_site_url',
   'official_line_url',
@@ -2324,7 +2353,18 @@ async function listAdminMembers(status = 'all') {
       c.use_case AS company_use_case,
       c.company_stage AS company_company_stage,
       c.review_status AS company_review_status,
-      COALESCE(c.approval_status, c.review_status, 'pending_review') AS company_approval_status
+      COALESCE(c.approval_status, c.review_status, 'pending_review') AS company_approval_status,
+      COALESCE(c.beta_status, 'not_started') AS beta_status,
+      COALESCE(c.is_free_beta, 0) AS is_free_beta,
+      COALESCE(c.beta_group, '') AS beta_group,
+      COALESCE(c.beta_limit_group, '') AS beta_limit_group,
+      COALESCE(c.product_line, 'general') AS product_line,
+      COALESCE(c.industry_type, c.industry, '') AS industry_type,
+      c.beta_approved_at,
+      c.approved_at,
+      c.approved_by,
+      c.rejected_at,
+      c.suspended_at
     FROM users u
     LEFT JOIN companies c ON c.owner_id = u.id
     ${where}
@@ -2364,9 +2404,10 @@ app.get('/api/admin/members', auth, requireAdmin, async (req, res) => {
   }
 });
 
-async function updateMemberReview(userId, adminId, status, note = '', plan = 'trial') {
+async function updateMemberReview(userId, adminId, status, note = '', plan = 'trial', productLine = '') {
   const now = new Date().toISOString();
   const nextPlan = memberPlans.has(String(plan || '').trim()) ? String(plan).trim() : 'trial';
+  const nextProductLine = productLines.has(String(productLine || '').trim()) ? String(productLine).trim() : '';
   const existing = PG_ENABLED
     ? await pgOne('SELECT id, email FROM users WHERE id = $1', [userId])
     : db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId);
@@ -2410,9 +2451,16 @@ async function updateMemberReview(userId, adminId, status, note = '', plan = 'tr
             approved_at = $1,
             approved_by = $2,
             review_note = $3,
-            plan = $4
-        WHERE owner_id = $5
-      `, [now, adminId, note, nextPlan, userId]);
+            plan = $4,
+            beta_status = $5,
+            is_free_beta = 1,
+            beta_group = COALESCE(NULLIF(beta_group, ''), 'closed_beta'),
+            beta_limit_group = COALESCE(beta_limit_group, ''),
+            product_line = COALESCE(NULLIF($6, ''), product_line, 'general'),
+            industry_type = COALESCE(industry_type, industry, ''),
+            beta_approved_at = COALESCE(beta_approved_at, $1)
+        WHERE owner_id = $7
+      `, [now, adminId, note, nextPlan, status === 'demo' ? 'demo' : 'approved', nextProductLine, userId]);
     } else if (status === 'rejected') {
       await pgQuery(`
         UPDATE users
@@ -2428,6 +2476,7 @@ async function updateMemberReview(userId, adminId, status, note = '', plan = 'tr
         UPDATE companies
         SET review_status = 'rejected',
             approval_status = 'rejected',
+            beta_status = 'rejected',
             is_active = 0,
             rejected_at = $1,
             rejected_by = $2,
@@ -2449,10 +2498,13 @@ async function updateMemberReview(userId, adminId, status, note = '', plan = 'tr
         UPDATE companies
         SET review_status = 'suspended',
             approval_status = 'suspended',
+            beta_status = 'suspended',
             is_active = 0,
-            review_note = $1
-        WHERE owner_id = $2
-      `, [note, userId]);
+            suspended_at = $1,
+            suspended_by = $2,
+            review_note = $3
+        WHERE owner_id = $4
+      `, [now, adminId, note, userId]);
     }
   } else {
     if (status === 'approved' || status === 'demo') {
@@ -2460,20 +2512,20 @@ async function updateMemberReview(userId, adminId, status, note = '', plan = 'tr
         UPDATE users SET status = ?, review_status = ?, approval_status = ?, approved_at = ?, approved_by = ?, review_note = ? WHERE id = ?
       `).run(userPatch.status, userPatch.review_status, userPatch.approval_status, now, adminId, note, userId);
       db.prepare(`
-        UPDATE companies SET review_status = 'approved', approval_status = 'approved', is_active = 1, approved_at = ?, approved_by = ?, review_note = ?, plan = ? WHERE owner_id = ?
-      `).run(now, adminId, note, nextPlan, userId);
+        UPDATE companies SET review_status = 'approved', approval_status = 'approved', is_active = 1, approved_at = ?, approved_by = ?, review_note = ?, plan = ?, beta_status = ?, is_free_beta = 1, beta_group = COALESCE(NULLIF(beta_group, ''), 'closed_beta'), beta_limit_group = COALESCE(beta_limit_group, ''), product_line = COALESCE(NULLIF(?, ''), product_line, 'general'), industry_type = COALESCE(industry_type, industry, ''), beta_approved_at = COALESCE(beta_approved_at, ?) WHERE owner_id = ?
+      `).run(now, adminId, note, nextPlan, status === 'demo' ? 'demo' : 'approved', nextProductLine, now, userId);
     } else if (status === 'rejected') {
       db.prepare(`
         UPDATE users SET status = 'rejected', review_status = 'rejected', approval_status = 'rejected', rejected_at = ?, rejected_by = ?, review_note = ? WHERE id = ?
       `).run(now, adminId, note, userId);
       db.prepare(`
-        UPDATE companies SET review_status = 'rejected', approval_status = 'rejected', is_active = 0, rejected_at = ?, rejected_by = ?, review_note = ? WHERE owner_id = ?
+        UPDATE companies SET review_status = 'rejected', approval_status = 'rejected', beta_status = 'rejected', is_active = 0, rejected_at = ?, rejected_by = ?, review_note = ? WHERE owner_id = ?
       `).run(now, adminId, note, userId);
     } else if (status === 'suspended') {
       db.prepare(`
         UPDATE users SET status = 'suspended', review_status = 'suspended', approval_status = 'suspended', suspended_at = ?, suspended_by = ?, review_note = ? WHERE id = ?
       `).run(now, adminId, note, userId);
-      db.prepare(`UPDATE companies SET review_status = 'suspended', approval_status = 'suspended', is_active = 0, review_note = ? WHERE owner_id = ?`).run(note, userId);
+      db.prepare(`UPDATE companies SET review_status = 'suspended', approval_status = 'suspended', beta_status = 'suspended', is_active = 0, suspended_at = ?, suspended_by = ?, review_note = ? WHERE owner_id = ?`).run(now, adminId, note, userId);
     }
   }
 
@@ -2489,7 +2541,8 @@ function reviewAction(status) {
         req.user.id,
         status,
         req.body?.reviewNote || req.body?.note || '',
-        req.body?.plan || 'trial'
+        req.body?.plan || 'trial',
+        req.body?.product_line || req.body?.productLine || ''
       );
       if (!result) return res.status(404).json({ error: '找不到使用者' });
       if (result.protected) return res.status(400).json({ error: 'Founder / Admin 帳號不可由審核中心變更狀態' });
@@ -2528,6 +2581,7 @@ app.patch('/api/admin/members/:id', auth, requireAdmin, async (req, res) => {
     const userId = Number(req.params.id);
     const status = String(req.body?.approval_status || req.body?.status || '').trim();
     const plan = String(req.body?.plan || 'trial').trim();
+    const productLine = String(req.body?.product_line || req.body?.productLine || '').trim();
     const note = String(req.body?.reviewNote || req.body?.review_note || req.body?.note || '');
 
     if (!reviewStatuses.has(status) || status === 'founder' || status === 'admin') {
@@ -2538,7 +2592,11 @@ app.patch('/api/admin/members/:id', auth, requireAdmin, async (req, res) => {
       return res.status(400).json({ error: '方案不正確' });
     }
 
-    const result = await updateMemberReview(userId, req.user.id, status, note, plan || 'trial');
+    if (productLine && !productLines.has(productLine)) {
+      return res.status(400).json({ error: '產品線不正確' });
+    }
+
+    const result = await updateMemberReview(userId, req.user.id, status, note, plan || 'trial', productLine);
     if (!result) return res.status(404).json({ error: '找不到使用者' });
     if (result.protected) return res.status(400).json({ error: 'Founder / Admin 帳號不可由審核中心變更狀態' });
     res.json({ ok: true });
@@ -2602,6 +2660,13 @@ app.get('/api/admin/companies', auth, requireAdmin, async (req, res) => {
         c.tester_started_at,
         c.tester_note,
         c.tester_feedback_status,
+        c.beta_status,
+        c.is_free_beta,
+        c.beta_group,
+        c.beta_limit_group,
+        c.product_line,
+        c.industry_type,
+        c.beta_approved_at,
         c.created_at,
         u.name AS owner_name,
         u.email AS owner_email
@@ -2633,6 +2698,13 @@ app.get('/api/admin/companies', auth, requireAdmin, async (req, res) => {
       c.tester_started_at,
       c.tester_note,
       c.tester_feedback_status,
+      c.beta_status,
+      c.is_free_beta,
+      c.beta_group,
+      c.beta_limit_group,
+      c.product_line,
+      c.industry_type,
+      c.beta_approved_at,
       c.created_at,
       u.name AS owner_name,
       u.email AS owner_email
@@ -3914,13 +3986,38 @@ function contactRow(row) {
 
 function databaseError(res, route, req, err) {
   console.error('DATABASE_ERROR', {
+    method: req.method,
     route,
     userId: req.user?.id,
     companyId: req.company?.id,
     code: err?.code,
     message: err?.message
   });
-  return res.status(500).json({ error: '資料讀取失敗', code: 'DATABASE_ERROR' });
+  return res.status(500).json({ error: '資料暫時無法載入，請稍後再試或聯繫 BookAI 官方客服', code: 'DATABASE_ERROR' });
+}
+
+function inferProductLine(industry = '') {
+  const value = String(industry || '').trim();
+  if ([
+    'construction',
+    'painting',
+    'water_electric',
+    'masonry',
+    'interior',
+    'aircon_repair',
+    'waterproof',
+    'demolition',
+    'low_voltage',
+    'other_construction',
+    'painting_water_electric'
+  ].includes(value)) return 'engineering';
+  if (['ecommerce', 'hosted_commerce', 'marketplace', 'social_commerce'].includes(value)) return 'commerce';
+  if (value === 'restaurant' || value === 'food') return 'restaurant';
+  if (value === 'beverage') return 'beverage';
+  if (value === 'retail') return 'retail';
+  if (value === 'studio' || value === 'service') return 'studio';
+  if (value === 'accounting_firm') return 'accountant';
+  return 'general';
 }
 
 function purchaseRow(row) {
@@ -4053,6 +4150,486 @@ function purchasePaymentRow(row) {
     note: row.note || '',
     createdAt: row.created_at || ''
   };
+}
+
+const tenderDefaultKeywords = [
+  ['工程', '工程', 'engineering'],
+  ['修繕', '修繕', 'engineering'],
+  ['裝修', '裝修', 'engineering'],
+  ['裝潢', '裝修', 'engineering'],
+  ['水電', '水電', 'engineering'],
+  ['冷氣', '空調', 'engineering'],
+  ['空調', '空調', 'engineering'],
+  ['機電', '機電', 'engineering'],
+  ['消防', '消防', 'engineering'],
+  ['防水', '防水', 'engineering'],
+  ['油漆', '油漆', 'engineering'],
+  ['木作', '裝修', 'engineering'],
+  ['室內裝修', '裝修', 'engineering'],
+  ['土木', '土木', 'engineering'],
+  ['營造', '營造', 'engineering'],
+  ['維修', '維修', 'engineering'],
+  ['保養', '維修', 'engineering'],
+  ['設備', '設備', 'engineering'],
+  ['管線', '水電', 'engineering'],
+  ['弱電', '弱電', 'engineering'],
+  ['監視器', '弱電', 'engineering'],
+  ['照明', '水電', 'engineering'],
+  ['屋頂', '防水', 'engineering'],
+  ['外牆', '修繕', 'engineering'],
+  ['地坪', '土木', 'engineering'],
+  ['門窗', '裝修', 'engineering']
+];
+
+const tenderRegions = ['全國', '台北', '新北', '桃園', '台中', '台南', '高雄', '宜蘭', '新竹', '苗栗', '彰化', '南投', '雲林', '嘉義', '屏東', '花蓮', '台東', '澎湖', '金門', '連江', '其他'];
+let tenderSyncRunning = false;
+let lastTenderSyncState = {
+  status: 'idle',
+  finishedAt: null,
+  insertedCount: 0,
+  updatedCount: 0,
+  errorMessage: ''
+};
+
+function tenderRow(row = {}) {
+  return {
+    id: row.id,
+    source: row.source || '',
+    sourceTenderId: row.source_tender_id || '',
+    tenderNo: row.tender_no || '',
+    tenderName: row.tender_name || '',
+    title: row.tender_name || '',
+    agencyName: row.agency_name || '',
+    agency: row.agency_name || '',
+    agencyCode: row.agency_code || '',
+    agencyLevel: row.agency_level || 'other',
+    agencyType: tenderAgencyLevelLabel(row.agency_level),
+    region: row.region || '其他',
+    category: row.category || '工程',
+    projectType: row.category || '工程',
+    procurementType: row.procurement_type || '',
+    tenderType: row.tender_type || '',
+    announcementType: row.announcement_type || '',
+    budgetAmount: Number(row.budget_amount || 0),
+    budget: Number(row.budget_amount || 0),
+    awardAmount: Number(row.award_amount || 0),
+    publishDate: row.publish_date || '',
+    deadlineDate: row.deadline_date || '',
+    deadline: row.deadline_date || '',
+    openingDate: row.opening_date || '',
+    status: row.status || '',
+    url: row.url || '',
+    sourceUrl: row.url || '',
+    summary: row.raw_payload ? safeTenderSummary(row.raw_payload, row.tender_name) : `${row.agency_name || '公開機關'}：${row.tender_name || '標案資料'}`,
+    reason: row.keyword ? `命中關鍵字：${row.keyword}` : '依公開標案欄位整理，請進一步評估預算、地區與履約條件。',
+    fitScore: Number(row.score || 70),
+    estimatedCost: Math.round(Number(row.budget_amount || 0) * 0.72),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastSeenAt: row.last_seen_at
+  };
+}
+
+function safeTenderSummary(rawPayload, fallback) {
+  try {
+    const data = JSON.parse(rawPayload);
+    return data.summary || data.description || fallback || '公開標案資料';
+  } catch {
+    return String(rawPayload || fallback || '公開標案資料').slice(0, 180);
+  }
+}
+
+function tenderAgencyLevelLabel(level) {
+  const labels = {
+    central: '中央部會',
+    local: '地方政府',
+    public_school: '學校機關',
+    public_enterprise: '公營事業',
+    other: '其他機關'
+  };
+  return labels[level] || labels.other;
+}
+
+function inferTenderRegion(text = '') {
+  const value = String(text || '');
+  return tenderRegions.find((region) => region !== '全國' && region !== '其他' && value.includes(region)) || (value.includes('全國') ? '全國' : '其他');
+}
+
+function inferTenderAgencyLevel(text = '') {
+  const value = String(text || '');
+  if (/教育部|經濟部|交通部|內政部|行政院|農業部|國防部|財政部/.test(value)) return 'central';
+  if (/市政府|縣政府|區公所|鄉公所|鎮公所|工務局|交通局|水利局|環保局/.test(value)) return 'local';
+  if (/學校|國小|國中|高中|大學|學院/.test(value)) return 'public_school';
+  if (/台電|中油|台水|自來水|港務|郵政|鐵路/.test(value)) return 'public_enterprise';
+  return 'other';
+}
+
+function normalizeTenderSourceValue(value = '') {
+  const text = String(value || '').toLowerCase();
+  if (text.includes('local')) return 'local_government';
+  if (text.includes('procurement') || text.includes('pcc')) return 'government_procurement';
+  if (text.includes('manual')) return 'manual_import';
+  if (text.includes('fallback')) return 'fallback_snapshot';
+  return text || 'official_open_data';
+}
+
+function normalizeTenderItem(raw = {}, source = 'official_open_data') {
+  const tenderName = raw.tender_name || raw.tenderName || raw.title || raw.name || raw.subject || '';
+  const agencyName = raw.agency_name || raw.agencyName || raw.agency || raw.unit || raw.org_name || '';
+  const sourceTenderId = String(raw.source_tender_id || raw.sourceTenderId || raw.id || raw.tender_no || raw.tenderNo || `${source}-${tenderName}-${agencyName}`).slice(0, 220);
+  const region = raw.region || inferTenderRegion(`${agencyName} ${tenderName}`);
+  const category = raw.category || tenderDefaultKeywords.find(([keyword]) => tenderName.includes(keyword))?.[1] || '工程';
+  const agencyLevel = raw.agency_level || raw.agencyLevel || inferTenderAgencyLevel(agencyName);
+  return {
+    source: normalizeTenderSourceValue(source),
+    sourceTenderId,
+    tenderNo: raw.tender_no || raw.tenderNo || '',
+    tenderName: tenderName || '未命名標案',
+    agencyName,
+    agencyCode: raw.agency_code || raw.agencyCode || '',
+    agencyLevel,
+    region,
+    category,
+    procurementType: raw.procurement_type || raw.procurementType || '工程類採購',
+    tenderType: raw.tender_type || raw.tenderType || '',
+    announcementType: raw.announcement_type || raw.announcementType || '招標公告',
+    budgetAmount: Math.max(0, Number(raw.budget_amount ?? raw.budgetAmount ?? raw.budget ?? 0) || 0),
+    awardAmount: Math.max(0, Number(raw.award_amount ?? raw.awardAmount ?? 0) || 0),
+    publishDate: raw.publish_date || raw.publishDate || new Date().toISOString().slice(0, 10),
+    deadlineDate: raw.deadline_date || raw.deadlineDate || '',
+    openingDate: raw.opening_date || raw.openingDate || '',
+    status: raw.status || '公開中',
+    url: raw.url || raw.link || '',
+    rawPayload: JSON.stringify(raw)
+  };
+}
+
+function fallbackTenderRows() {
+  const agencies = [
+    ['台北市政府工務局', 'local', '台北'],
+    ['新北市政府採購處', 'local', '新北'],
+    ['桃園市政府水務局', 'local', '桃園'],
+    ['台中市政府建設局', 'local', '台中'],
+    ['台南市政府工務局', 'local', '台南'],
+    ['高雄市政府工務局', 'local', '高雄'],
+    ['宜蘭縣政府', 'local', '宜蘭'],
+    ['交通部公路局', 'central', '全國'],
+    ['經濟部水利署', 'central', '全國'],
+    ['台灣電力股份有限公司', 'public_enterprise', '全國'],
+    ['國立台灣大學', 'public_school', '台北'],
+    ['彰化縣政府', 'local', '彰化']
+  ];
+  const topics = [
+    ['校舍教室油漆與修繕工程', '油漆', 980000],
+    ['辦公區水電照明設備汰換', '水電', 1350000],
+    ['抽水站機電設備保養維修', '機電', 2680000],
+    ['屋頂防水層與外牆修繕', '防水', 1860000],
+    ['冷氣空調設備汰換與保養', '空調', 2250000],
+    ['弱電監視器與網路管線改善', '弱電', 1180000],
+    ['道路照明與交通安全改善', '照明', 3200000],
+    ['公共空間室內裝修改善', '裝修', 2100000],
+    ['排水溝渠清淤與護岸修繕', '土木', 3600000],
+    ['消防設備改善工程', '消防', 1750000]
+  ];
+  const today = new Date();
+  return agencies.flatMap(([agency, level, region], agencyIndex) => topics.slice(0, 4).map(([name, category, base], topicIndex) => {
+    const publish = new Date(today);
+    publish.setDate(today.getDate() - ((agencyIndex + topicIndex) % 14));
+    const deadline = new Date(today);
+    deadline.setDate(today.getDate() + 7 + ((agencyIndex * 3 + topicIndex) % 24));
+    return normalizeTenderItem({
+      id: `${agencyIndex + 1}-${topicIndex + 1}`,
+      tender_no: `BKAI-${String(agencyIndex + 1).padStart(2, '0')}${String(topicIndex + 1).padStart(2, '0')}`,
+      tender_name: `${region}${name}`,
+      agency_name: agency,
+      agency_level: level,
+      region,
+      category,
+      budget_amount: base + agencyIndex * 130000 + topicIndex * 65000,
+      publish_date: publish.toISOString().slice(0, 10),
+      deadline_date: deadline.toISOString().slice(0, 10),
+      announcement_type: topicIndex % 3 === 0 ? '更正公告' : '招標公告',
+      status: '公開中',
+      summary: '系統內建公開標案格式快照；正式環境可設定官方開放資料來源 URL 進行同步。',
+      url: 'https://web.pcc.gov.tw/'
+    }, 'fallback_snapshot');
+  }));
+}
+
+async function fetchTenderAdapter(url, source) {
+  if (!url) return [];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12000);
+  try {
+    const response = await fetch(url, { signal: controller.signal, headers: { accept: 'application/json' } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const rows = Array.isArray(data) ? data : Array.isArray(data.items) ? data.items : Array.isArray(data.records) ? data.records : [];
+    return rows.map((item) => normalizeTenderItem(item, source));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function ensureTenderKeywords(client = null) {
+  if (PG_ENABLED) {
+    const executor = client || await getPool();
+    for (const [keyword, category, productLine] of tenderDefaultKeywords) {
+      await executor.query(`
+        INSERT INTO tender_keywords (keyword, category, product_line, enabled)
+        VALUES ($1,$2,$3,1)
+        ON CONFLICT (keyword) DO NOTHING
+      `, [keyword, category, productLine]);
+    }
+    const result = await executor.query('SELECT keyword, category, product_line FROM tender_keywords WHERE enabled = 1 ORDER BY id');
+    return result.rows;
+  }
+
+  const stmt = db.prepare(`
+    INSERT OR IGNORE INTO tender_keywords (keyword, category, product_line, enabled)
+    VALUES (?,?,?,1)
+  `);
+  tenderDefaultKeywords.forEach((row) => stmt.run(...row));
+  return db.prepare('SELECT keyword, category, product_line FROM tender_keywords WHERE enabled = 1 ORDER BY id').all();
+}
+
+function computeTenderMatch(tender, keywords) {
+  const text = `${tender.tenderName} ${tender.agencyName} ${tender.category} ${tender.region}`.toLowerCase();
+  const matched = keywords.filter((row) => text.includes(String(row.keyword || '').toLowerCase()));
+  if (!matched.length) return { keyword: '', score: 62, reason: '未命中工程關鍵字，仍保留供人工判斷' };
+  const first = matched[0];
+  const score = Math.min(96, 68 + matched.length * 7 + (tender.budgetAmount > 1500000 ? 8 : 0));
+  return {
+    keyword: first.keyword,
+    score,
+    reason: `命中 ${matched.map((row) => row.keyword).slice(0, 4).join('、')}`
+  };
+}
+
+async function runTenderSync({ source = 'all', triggeredBy = 'system' } = {}) {
+  if (tenderSyncRunning) return { ok: false, code: 'TENDER_SYNC_RUNNING', message: '標案同步已在執行中' };
+  tenderSyncRunning = true;
+
+  const startedAt = new Date().toISOString();
+  const dateFrom = new Date(Date.now() - 1000 * 60 * 60 * 24 * 45).toISOString().slice(0, 10);
+  const dateTo = new Date(Date.now() + 1000 * 60 * 60 * 24 * 45).toISOString().slice(0, 10);
+  let runId = null;
+  let client = null;
+  const state = { fetchedCount: 0, insertedCount: 0, updatedCount: 0, skippedCount: 0, errorCount: 0, errorMessage: '' };
+
+  try {
+    if (PG_ENABLED) {
+      const pool = await getPool();
+      client = await pool.connect();
+      const createdRun = await client.query(`
+        INSERT INTO tender_sync_runs (source, started_at, status, date_from, date_to)
+        VALUES ($1,CURRENT_TIMESTAMP,'running',$2,$3)
+        RETURNING id
+      `, [source, dateFrom, dateTo]);
+      runId = createdRun.rows[0].id;
+    } else {
+      const createdRun = db.prepare(`
+        INSERT INTO tender_sync_runs (source, started_at, status, date_from, date_to)
+        VALUES (?,CURRENT_TIMESTAMP,'running',?,?)
+      `).run(source, dateFrom, dateTo);
+      runId = createdRun.lastInsertRowid;
+    }
+
+    const adapters = [
+      ['official_open_data', () => fetchTenderAdapter(process.env.TENDER_OFFICIAL_SOURCE_URL, 'official_open_data')],
+      ['government_procurement', () => fetchTenderAdapter(process.env.TENDER_GOV_PROCUREMENT_URL, 'government_procurement')],
+      ['local_government', () => fetchTenderAdapter(process.env.TENDER_LOCAL_SOURCE_URL, 'local_government')],
+      ['fallback_snapshot', async () => fallbackTenderRows()]
+    ];
+
+    const rows = [];
+    for (const [adapterSource, load] of adapters) {
+      if (source !== 'all' && source !== adapterSource) continue;
+      try {
+        rows.push(...await load());
+      } catch (err) {
+        state.errorCount += 1;
+        state.errorMessage = [state.errorMessage, `${adapterSource}: ${err.message || err}`].filter(Boolean).join(' | ');
+      }
+    }
+
+    const unique = new Map();
+    rows.map((row) => normalizeTenderItem(row, row.source)).forEach((row) => {
+      unique.set(`${row.source}:${row.sourceTenderId}`, row);
+    });
+    const tenders = [...unique.values()];
+    state.fetchedCount = tenders.length;
+
+    if (PG_ENABLED) {
+      await client.query('BEGIN');
+      const keywords = await ensureTenderKeywords(client);
+      for (const item of tenders) {
+        const existing = await client.query('SELECT id FROM tenders WHERE source = $1 AND source_tender_id = $2', [item.source, item.sourceTenderId]);
+        const upsert = await client.query(`
+          INSERT INTO tenders (
+            source, source_tender_id, tender_no, tender_name, agency_name, agency_code, agency_level,
+            region, category, procurement_type, tender_type, announcement_type, budget_amount, award_amount,
+            publish_date, deadline_date, opening_date, status, url, raw_payload, updated_at, last_seen_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+          ON CONFLICT (source, source_tender_id) DO UPDATE SET
+            tender_no = EXCLUDED.tender_no,
+            tender_name = EXCLUDED.tender_name,
+            agency_name = EXCLUDED.agency_name,
+            agency_code = EXCLUDED.agency_code,
+            agency_level = EXCLUDED.agency_level,
+            region = EXCLUDED.region,
+            category = EXCLUDED.category,
+            procurement_type = EXCLUDED.procurement_type,
+            tender_type = EXCLUDED.tender_type,
+            announcement_type = EXCLUDED.announcement_type,
+            budget_amount = EXCLUDED.budget_amount,
+            award_amount = EXCLUDED.award_amount,
+            publish_date = EXCLUDED.publish_date,
+            deadline_date = EXCLUDED.deadline_date,
+            opening_date = EXCLUDED.opening_date,
+            status = EXCLUDED.status,
+            url = EXCLUDED.url,
+            raw_payload = EXCLUDED.raw_payload,
+            updated_at = CURRENT_TIMESTAMP,
+            last_seen_at = CURRENT_TIMESTAMP
+          RETURNING id
+        `, [
+          item.source, item.sourceTenderId, item.tenderNo, item.tenderName, item.agencyName, item.agencyCode, item.agencyLevel,
+          item.region, item.category, item.procurementType, item.tenderType, item.announcementType, item.budgetAmount, item.awardAmount,
+          item.publishDate, item.deadlineDate, item.openingDate, item.status, item.url, item.rawPayload
+        ]);
+        if (existing.rowCount) state.updatedCount += 1;
+        else state.insertedCount += 1;
+        const tenderId = upsert.rows[0].id;
+        const match = computeTenderMatch(item, keywords);
+        await client.query('DELETE FROM tender_matches WHERE tender_id = $1 AND company_id IS NULL', [tenderId]);
+        if (match.keyword) {
+          await client.query(`
+            INSERT INTO tender_matches (tender_id, company_id, keyword, score, matched_reason)
+            VALUES ($1,NULL,$2,$3,$4)
+          `, [tenderId, match.keyword, match.score, match.reason]);
+        }
+      }
+      await client.query(`
+        UPDATE tender_sync_runs
+        SET finished_at = CURRENT_TIMESTAMP,
+            status = $1,
+            fetched_count = $2,
+            inserted_count = $3,
+            updated_count = $4,
+            skipped_count = $5,
+            error_count = $6,
+            error_message = $7
+        WHERE id = $8
+      `, [state.errorCount ? 'partial' : 'success', state.fetchedCount, state.insertedCount, state.updatedCount, state.skippedCount, state.errorCount, state.errorMessage, runId]);
+      await client.query('COMMIT');
+    } else {
+      const keywords = await ensureTenderKeywords();
+      const tx = db.transaction(() => {
+        const upsertStmt = db.prepare(`
+          INSERT INTO tenders (
+            source, source_tender_id, tender_no, tender_name, agency_name, agency_code, agency_level,
+            region, category, procurement_type, tender_type, announcement_type, budget_amount, award_amount,
+            publish_date, deadline_date, opening_date, status, url, raw_payload, updated_at, last_seen_at
+          )
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+          ON CONFLICT(source, source_tender_id) DO UPDATE SET
+            tender_no = excluded.tender_no,
+            tender_name = excluded.tender_name,
+            agency_name = excluded.agency_name,
+            agency_code = excluded.agency_code,
+            agency_level = excluded.agency_level,
+            region = excluded.region,
+            category = excluded.category,
+            procurement_type = excluded.procurement_type,
+            tender_type = excluded.tender_type,
+            announcement_type = excluded.announcement_type,
+            budget_amount = excluded.budget_amount,
+            award_amount = excluded.award_amount,
+            publish_date = excluded.publish_date,
+            deadline_date = excluded.deadline_date,
+            opening_date = excluded.opening_date,
+            status = excluded.status,
+            url = excluded.url,
+            raw_payload = excluded.raw_payload,
+            updated_at = CURRENT_TIMESTAMP,
+            last_seen_at = CURRENT_TIMESTAMP
+        `);
+        for (const item of tenders) {
+          const existing = db.prepare('SELECT id FROM tenders WHERE source = ? AND source_tender_id = ?').get(item.source, item.sourceTenderId);
+          upsertStmt.run(item.source, item.sourceTenderId, item.tenderNo, item.tenderName, item.agencyName, item.agencyCode, item.agencyLevel, item.region, item.category, item.procurementType, item.tenderType, item.announcementType, item.budgetAmount, item.awardAmount, item.publishDate, item.deadlineDate, item.openingDate, item.status, item.url, item.rawPayload);
+          if (existing) state.updatedCount += 1;
+          else state.insertedCount += 1;
+          const tender = db.prepare('SELECT id FROM tenders WHERE source = ? AND source_tender_id = ?').get(item.source, item.sourceTenderId);
+          const match = computeTenderMatch(item, keywords);
+          db.prepare('DELETE FROM tender_matches WHERE tender_id = ? AND company_id IS NULL').run(tender.id);
+          if (match.keyword) {
+            db.prepare('INSERT INTO tender_matches (tender_id, company_id, keyword, score, matched_reason) VALUES (?,NULL,?,?,?)').run(tender.id, match.keyword, match.score, match.reason);
+          }
+        }
+        db.prepare(`
+          UPDATE tender_sync_runs
+          SET finished_at = CURRENT_TIMESTAMP,
+              status = ?,
+              fetched_count = ?,
+              inserted_count = ?,
+              updated_count = ?,
+              skipped_count = ?,
+              error_count = ?,
+              error_message = ?
+          WHERE id = ?
+        `).run(state.errorCount ? 'partial' : 'success', state.fetchedCount, state.insertedCount, state.updatedCount, state.skippedCount, state.errorCount, state.errorMessage, runId);
+      });
+      tx();
+    }
+
+    lastTenderSyncState = {
+      status: state.errorCount ? 'partial' : 'success',
+      finishedAt: new Date().toISOString(),
+      insertedCount: state.insertedCount,
+      updatedCount: state.updatedCount,
+      errorMessage: state.errorMessage
+    };
+    return { ok: !state.errorCount, ...state, runId, triggeredBy, startedAt };
+  } catch (err) {
+    try {
+      if (PG_ENABLED && client) {
+        try { await client.query('ROLLBACK'); } catch {}
+        if (runId) {
+          await client.query(`
+            UPDATE tender_sync_runs
+            SET finished_at = CURRENT_TIMESTAMP,
+                status = 'failed',
+                error_count = $1,
+                error_message = $2
+            WHERE id = $3
+          `, [state.errorCount + 1, err.message || String(err), runId]);
+        }
+      } else if (runId) {
+        db.prepare(`
+          UPDATE tender_sync_runs
+          SET finished_at = CURRENT_TIMESTAMP,
+              status = 'failed',
+              error_count = ?,
+              error_message = ?
+          WHERE id = ?
+        `).run(state.errorCount + 1, err.message || String(err), runId);
+      }
+    } catch {}
+    lastTenderSyncState = {
+      status: 'failed',
+      finishedAt: new Date().toISOString(),
+      insertedCount: state.insertedCount,
+      updatedCount: state.updatedCount,
+      errorMessage: err.message || String(err)
+    };
+    console.error('[tender sync] failed', { code: err.code || null, message: err.message || String(err) });
+    return { ok: false, code: 'TENDER_SYNC_FAILED', error: '標案資料同步暫時失敗，系統已保留既有資料。', ...state, errorMessage: err.message || String(err) };
+  } finally {
+    if (client) client.release();
+    tenderSyncRunning = false;
+  }
 }
 
 app.get('/api/suppliers/list', auth, company, async (req, res) => {
@@ -4299,7 +4876,11 @@ app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', '
   if (!items.length) return res.status(400).json({ error: '請至少新增一筆進貨明細' });
 
   if (PG_ENABLED) {
+    let client;
     try {
+      const pool = await getPool();
+      client = await pool.connect();
+      await client.query('BEGIN');
       const subtotal = Math.round(items.reduce((sum, item) => sum + item.subtotal, 0) * 100) / 100;
       const tax = erpTax(subtotal, body.tax);
       const total = Math.round((subtotal + tax) * 100) / 100;
@@ -4307,12 +4888,15 @@ app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', '
       const supplierId = Number(body.supplierId || 0) || null;
       let supplierName = body.supplierName || '';
       if (supplierId) {
-        const supplier = await pgOne('SELECT name FROM suppliers WHERE id = $1 AND company_id = $2', [supplierId, req.company.id]);
-        if (!supplier) return res.status(400).json({ error: '找不到供應商' });
-        supplierName = supplier.name;
+        const supplier = await client.query('SELECT name FROM suppliers WHERE id = $1 AND company_id = $2', [supplierId, req.company.id]);
+        if (!supplier.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: '找不到供應商' });
+        }
+        supplierName = supplier.rows[0].name;
       }
 
-      const purchase = await pgOne(`
+      const created = await client.query(`
         INSERT INTO purchases (
           company_id, supplier_id, supplier_name, purchase_no, purchase_date, category,
           subtotal, tax, total, payment_status, paid_amount, status, note, updated_at
@@ -4333,27 +4917,41 @@ app.post('/api/purchases/create', auth, company, requireRole('owner', 'admin', '
         erpNumber(body.paidAmount, 0),
         body.note || ''
       ]);
+      const purchase = created.rows[0];
 
       for (const item of items) {
-        await pgQuery(`
+        await client.query(`
           INSERT INTO purchase_items (
             company_id, purchase_id, product_id, item_name, quantity, unit, unit_cost, unit_price, subtotal, note
           )
           VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9)
         `, [req.company.id, purchase.id, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note]);
         if (item.productId) {
-          const product = await pgOne('SELECT * FROM products WHERE id = $1 AND company_id = $2', [item.productId, req.company.id]);
-          if (product) {
-            const nextStock = Math.round((erpNumber(product.stock, 0) + item.quantity) * 100) / 100;
-            await pgQuery('UPDATE products SET stock = $1, cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND company_id = $4', [nextStock, item.price, item.productId, req.company.id]);
-          }
+          const productResult = await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.productId, req.company.id]);
+          if (!productResult.rowCount) throw new Error(`找不到商品 / 材料：${item.itemName}`);
+          const product = productResult.rows[0];
+          const beforeStock = erpNumber(product.stock, 0);
+          const nextStock = Math.round((beforeStock + item.quantity) * 100) / 100;
+          await client.query('UPDATE products SET stock = $1, cost = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3 AND company_id = $4', [nextStock, item.price, item.productId, req.company.id]);
+          await client.query(`
+            INSERT INTO inventory_movements (
+              company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+            )
+            VALUES ($1,$2,'purchase',$3,$4,$5,$6,$7)
+          `, [req.company.id, item.productId, item.quantity, beforeStock, nextStock, item.price, `進貨單 ${body.purchaseNo || purchase.id}`]);
         }
       }
 
+      await client.query('COMMIT');
       audit(req.company.id, req.user.id, 'purchase_created', String(purchase.id));
       return res.json(purchaseRow(purchase));
     } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {}
       return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
     }
   }
 
@@ -4434,7 +5032,24 @@ app.delete('/api/purchases/:id', auth, company, requireRole('owner', 'admin'), (
   res.status(400).json({ error: '此版本尚未開放刪除已入庫單據' });
 });
 
-app.get('/api/purchases/:id/payments', auth, company, (req, res) => {
+app.get('/api/purchases/:id/payments', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const purchase = await pgOne('SELECT id FROM purchases WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
+      const rows = await pgAll(`
+        SELECT *
+        FROM purchase_payments
+        WHERE purchase_id = $1
+          AND company_id = $2
+        ORDER BY payment_date DESC, id DESC
+      `, [req.params.id, req.company.id]);
+      return res.json(rows.map(purchasePaymentRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const purchase = db.prepare('SELECT id FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
 
@@ -4449,8 +5064,10 @@ app.get('/api/purchases/:id/payments', auth, company, (req, res) => {
   res.json(rows.map(purchasePaymentRow));
 });
 
-app.post('/api/purchases/:id/payments', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
-  const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+app.post('/api/purchases/:id/payments', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), async (req, res) => {
+  const purchase = PG_ENABLED
+    ? await pgOne('SELECT * FROM purchases WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id])
+    : db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
   if ((purchase.status || 'confirmed') === 'void') return res.status(400).json({ error: '作廢進貨單不可新增付款' });
 
@@ -4461,6 +5078,40 @@ app.post('/api/purchases/:id/payments', auth, company, requireRole('owner', 'adm
   const paidAmount = erpNumber(purchase.paid_amount, 0);
   const nextPaid = Math.round((paidAmount + amount) * 100) / 100;
   if (nextPaid > total) return res.status(400).json({ error: '付款金額不可超過進貨單總額' });
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO purchase_payments (
+          company_id, purchase_id, amount, payment_date, method, note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6)
+        RETURNING id
+      `, [
+        req.company.id,
+        purchase.id,
+        amount,
+        req.body?.paymentDate || req.body?.payment_date || new Date().toISOString().slice(0, 10),
+        req.body?.method || '',
+        req.body?.note || ''
+      ]);
+
+      await pgQuery(`
+        UPDATE purchases
+        SET paid_amount = $1,
+            payment_status = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+          AND company_id = $4
+      `, [nextPaid, purchasePaymentStatus(total, nextPaid), purchase.id, req.company.id]);
+
+      audit(req.company.id, req.user.id, 'purchase_payment_created', String(row.id));
+      const updated = await pgOne('SELECT * FROM purchases WHERE id = $1 AND company_id = $2', [purchase.id, req.company.id]);
+      return res.json({ ok: true, paymentId: row.id, purchase: purchaseRow(updated) });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const result = db.transaction(() => {
     const row = db.prepare(`
@@ -4499,7 +5150,60 @@ app.post('/api/purchases/:id/payments', auth, company, requireRole('owner', 'adm
   res.json({ ok: true, paymentId: result, purchase: purchaseRow(updated) });
 });
 
-app.post('/api/purchases/:id/void', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/purchases/:id/void', auth, company, requireRole('owner', 'admin'), async (req, res) => {
+  if (PG_ENABLED) {
+    let client;
+    try {
+      const pool = await getPool();
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const purchaseResult = await client.query('SELECT * FROM purchases WHERE id = $1 AND company_id = $2 FOR UPDATE', [req.params.id, req.company.id]);
+      const purchase = purchaseResult.rows[0];
+      if (!purchase) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '找不到進貨單' });
+      }
+      if ((purchase.status || 'confirmed') === 'void') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '此進貨單已作廢' });
+      }
+      const paymentCount = await client.query('SELECT COUNT(*)::int AS count FROM purchase_payments WHERE purchase_id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if ((paymentCount.rows[0]?.count || 0) > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '已有付款紀錄，請先確認帳務處理' });
+      }
+      const items = await client.query('SELECT * FROM purchase_items WHERE purchase_id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      for (const item of items.rows) {
+        if (!item.product_id) continue;
+        const productResult = await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.product_id, req.company.id]);
+        const product = productResult.rows[0];
+        if (!product) throw new Error(`找不到商品 / 材料：${item.item_name}`);
+        const quantity = Math.max(0, erpNumber(item.quantity, 0));
+        const beforeStock = erpNumber(product.stock, 0);
+        const afterStock = Math.round((beforeStock - quantity) * 100) / 100;
+        if (afterStock < 0) throw new Error(`作廢後庫存不可小於 0：${product.name}`);
+        await client.query('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [afterStock, item.product_id, req.company.id]);
+        await client.query(`
+          INSERT INTO inventory_movements (
+            company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+          )
+          VALUES ($1,$2,'purchase_void',$3,$4,$5,$6,$7)
+        `, [req.company.id, item.product_id, quantity, beforeStock, afterStock, erpNumber(item.unit_cost, 0), `作廢進貨單 ${purchase.purchase_no || purchase.id}`]);
+      }
+      await client.query('UPDATE purchases SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', ['void', req.params.id, req.company.id]);
+      await client.query('COMMIT');
+      audit(req.company.id, req.user.id, 'purchase_voided', String(req.params.id));
+      return res.json({ ok: true });
+    } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {}
+      return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
+    }
+  }
+
   const purchase = db.prepare('SELECT * FROM purchases WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!purchase) return res.status(404).json({ error: '找不到進貨單' });
   if ((purchase.status || 'confirmed') === 'void') return res.status(400).json({ error: '此進貨單已作廢' });
@@ -4588,12 +5292,21 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
   if (!items.length) return res.status(400).json({ error: '請至少新增一筆銷貨明細' });
 
   if (PG_ENABLED) {
+    let client;
     try {
+      const pool = await getPool();
+      client = await pool.connect();
+      await client.query('BEGIN');
       for (const item of items) {
         if (item.productId) {
-          const product = await pgOne('SELECT * FROM products WHERE id = $1 AND company_id = $2', [item.productId, req.company.id]);
-          if (!product) return res.status(400).json({ error: `找不到商品 / 材料：${item.itemName}` });
+          const productResult = await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.productId, req.company.id]);
+          if (!productResult.rowCount) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: `找不到商品 / 材料：${item.itemName}` });
+          }
+          const product = productResult.rows[0];
           if (erpNumber(product.stock, 0) < item.quantity) {
+            await client.query('ROLLBACK');
             return res.status(400).json({ error: `${product.name} 庫存不足，目前 ${product.stock || 0}，需要 ${item.quantity}` });
           }
         }
@@ -4606,12 +5319,15 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
       const customerId = Number(body.customerId || 0) || null;
       let customerName = body.customerName || '';
       if (customerId) {
-        const customer = await pgOne('SELECT name FROM customers WHERE id = $1 AND company_id = $2', [customerId, req.company.id]);
-        if (!customer) return res.status(400).json({ error: '找不到客戶' });
-        customerName = customer.name;
+        const customer = await client.query('SELECT name FROM customers WHERE id = $1 AND company_id = $2', [customerId, req.company.id]);
+        if (!customer.rowCount) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: '找不到客戶' });
+        }
+        customerName = customer.rows[0].name;
       }
 
-      const sale = await pgOne(`
+      const created = await client.query(`
         INSERT INTO sales (
           company_id, customer_id, customer_name, sale_no, sale_date, category,
           subtotal, tax, total, collection_status, received_amount, status, note, updated_at
@@ -4632,25 +5348,39 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
         erpNumber(body.receivedAmount, 0),
         body.note || ''
       ]);
+      const sale = created.rows[0];
 
       for (const item of items) {
-        await pgQuery(`
+        await client.query(`
           INSERT INTO sale_items (
             company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, note
           )
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         `, [req.company.id, sale.id, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note]);
         if (item.productId) {
-          const product = await pgOne('SELECT * FROM products WHERE id = $1 AND company_id = $2', [item.productId, req.company.id]);
+          const product = (await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.productId, req.company.id])).rows[0];
+          const beforeStock = erpNumber(product.stock, 0);
           const nextStock = Math.round((erpNumber(product.stock, 0) - item.quantity) * 100) / 100;
-          await pgQuery('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [nextStock, item.productId, req.company.id]);
+          await client.query('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [nextStock, item.productId, req.company.id]);
+          await client.query(`
+            INSERT INTO inventory_movements (
+              company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+            )
+            VALUES ($1,$2,'sale',$3,$4,$5,$6,$7)
+          `, [req.company.id, item.productId, item.quantity, beforeStock, nextStock, erpNumber(product.cost, 0), `銷貨單 ${body.saleNo || sale.id}`]);
         }
       }
 
+      await client.query('COMMIT');
       audit(req.company.id, req.user.id, 'sale_created', String(sale.id));
       return res.json(saleRow(sale));
     } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {}
       return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
     }
   }
 
@@ -4741,7 +5471,24 @@ app.delete('/api/sales/:id', auth, company, requireRole('owner', 'admin'), (req,
   res.status(400).json({ error: '此版本尚未開放刪除已出庫單據' });
 });
 
-app.get('/api/sales/:id/receipts', auth, company, (req, res) => {
+app.get('/api/sales/:id/receipts', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const sale = await pgOne('SELECT id FROM sales WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
+      const rows = await pgAll(`
+        SELECT *
+        FROM sale_receipts
+        WHERE sale_id = $1
+          AND company_id = $2
+        ORDER BY receipt_date DESC, id DESC
+      `, [req.params.id, req.company.id]);
+      return res.json(rows.map(saleReceiptRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const sale = db.prepare('SELECT id FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
 
@@ -4756,8 +5503,10 @@ app.get('/api/sales/:id/receipts', auth, company, (req, res) => {
   res.json(rows.map(saleReceiptRow));
 });
 
-app.post('/api/sales/:id/receipts', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), (req, res) => {
-  const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
+app.post('/api/sales/:id/receipts', auth, company, requireRole('owner', 'admin', 'accounting', 'staff'), async (req, res) => {
+  const sale = PG_ENABLED
+    ? await pgOne('SELECT * FROM sales WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id])
+    : db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
   if ((sale.status || 'confirmed') === 'void') return res.status(400).json({ error: '作廢銷貨單不可新增收款' });
 
@@ -4768,6 +5517,40 @@ app.post('/api/sales/:id/receipts', auth, company, requireRole('owner', 'admin',
   const receivedAmount = erpNumber(sale.received_amount, 0);
   const nextReceived = Math.round((receivedAmount + amount) * 100) / 100;
   if (nextReceived > total) return res.status(400).json({ error: '收款金額不可超過銷貨單總額' });
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO sale_receipts (
+          company_id, sale_id, amount, receipt_date, method, note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6)
+        RETURNING id
+      `, [
+        req.company.id,
+        sale.id,
+        amount,
+        req.body?.receiptDate || req.body?.receipt_date || new Date().toISOString().slice(0, 10),
+        req.body?.method || '',
+        req.body?.note || ''
+      ]);
+
+      await pgQuery(`
+        UPDATE sales
+        SET received_amount = $1,
+            collection_status = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+          AND company_id = $4
+      `, [nextReceived, salesCollectionStatus(total, nextReceived), sale.id, req.company.id]);
+
+      audit(req.company.id, req.user.id, 'sale_receipt_created', String(row.id));
+      const updated = await pgOne('SELECT * FROM sales WHERE id = $1 AND company_id = $2', [sale.id, req.company.id]);
+      return res.json({ ok: true, receiptId: row.id, sale: saleRow(updated) });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const result = db.transaction(() => {
     const row = db.prepare(`
@@ -4806,7 +5589,59 @@ app.post('/api/sales/:id/receipts', auth, company, requireRole('owner', 'admin',
   res.json({ ok: true, receiptId: result, sale: saleRow(updated) });
 });
 
-app.post('/api/sales/:id/void', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/sales/:id/void', auth, company, requireRole('owner', 'admin'), async (req, res) => {
+  if (PG_ENABLED) {
+    let client;
+    try {
+      const pool = await getPool();
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const saleResult = await client.query('SELECT * FROM sales WHERE id = $1 AND company_id = $2 FOR UPDATE', [req.params.id, req.company.id]);
+      const sale = saleResult.rows[0];
+      if (!sale) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '找不到銷貨單' });
+      }
+      if ((sale.status || 'confirmed') === 'void') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '此銷貨單已作廢' });
+      }
+      const receiptCount = await client.query('SELECT COUNT(*)::int AS count FROM sale_receipts WHERE sale_id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if ((receiptCount.rows[0]?.count || 0) > 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '已有收款紀錄，請先確認帳務處理' });
+      }
+      const items = await client.query('SELECT * FROM sale_items WHERE sale_id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      for (const item of items.rows) {
+        if (!item.product_id) continue;
+        const productResult = await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.product_id, req.company.id]);
+        const product = productResult.rows[0];
+        if (!product) throw new Error(`找不到商品 / 材料：${item.item_name}`);
+        const quantity = Math.max(0, erpNumber(item.quantity, 0));
+        const beforeStock = erpNumber(product.stock, 0);
+        const afterStock = Math.round((beforeStock + quantity) * 100) / 100;
+        await client.query('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [afterStock, item.product_id, req.company.id]);
+        await client.query(`
+          INSERT INTO inventory_movements (
+            company_id, product_id, movement_type, quantity, before_stock, after_stock, unit_cost, note
+          )
+          VALUES ($1,$2,'sale_void',$3,$4,$5,$6,$7)
+        `, [req.company.id, item.product_id, quantity, beforeStock, afterStock, erpNumber(product.cost, 0), `作廢銷貨單 ${sale.sale_no || sale.id}`]);
+      }
+      await client.query('UPDATE sales SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', ['void', req.params.id, req.company.id]);
+      await client.query('COMMIT');
+      audit(req.company.id, req.user.id, 'sale_voided', String(req.params.id));
+      return res.json({ ok: true });
+    } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {}
+      return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
+    }
+  }
+
   const sale = db.prepare('SELECT * FROM sales WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id);
   if (!sale) return res.status(404).json({ error: '找不到銷貨單' });
   if ((sale.status || 'confirmed') === 'void') return res.status(400).json({ error: '此銷貨單已作廢' });
@@ -4845,23 +5680,47 @@ app.post('/api/sales/:id/void', auth, company, requireRole('owner', 'admin'), (r
   }
 });
 
-app.get('/api/receivables/list', auth, company, (req, res) => {
-  const rows = db.prepare(`
-    SELECT
-      id,
-      sale_no,
-      customer_name,
-      sale_date,
-      total,
-      received_amount,
-      collection_status,
-      note
-    FROM sales
-    WHERE company_id = ?
-      AND COALESCE(status, 'confirmed') != 'void'
-      AND COALESCE(total, 0) > COALESCE(received_amount, 0)
-    ORDER BY sale_date DESC, id DESC
-  `).all(req.company.id);
+app.get('/api/receivables/list', auth, company, async (req, res) => {
+  let rows;
+  if (PG_ENABLED) {
+    try {
+      rows = await pgAll(`
+        SELECT
+          id,
+          sale_no,
+          customer_name,
+          sale_date,
+          total,
+          received_amount,
+          collection_status,
+          note
+        FROM sales
+        WHERE company_id = $1
+          AND COALESCE(status, 'confirmed') != 'void'
+          AND COALESCE(total, 0) > COALESCE(received_amount, 0)
+        ORDER BY sale_date DESC, id DESC
+      `, [req.company.id]);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  } else {
+    rows = db.prepare(`
+      SELECT
+        id,
+        sale_no,
+        customer_name,
+        sale_date,
+        total,
+        received_amount,
+        collection_status,
+        note
+      FROM sales
+      WHERE company_id = ?
+        AND COALESCE(status, 'confirmed') != 'void'
+        AND COALESCE(total, 0) > COALESCE(received_amount, 0)
+      ORDER BY sale_date DESC, id DESC
+    `).all(req.company.id);
+  }
 
   res.json(rows.map((row) => ({
     id: row.id,
@@ -4876,23 +5735,47 @@ app.get('/api/receivables/list', auth, company, (req, res) => {
   })));
 });
 
-app.get('/api/payables/list', auth, company, (req, res) => {
-  const rows = db.prepare(`
-    SELECT
-      id,
-      purchase_no,
-      supplier_name,
-      purchase_date,
-      total,
-      paid_amount,
-      payment_status,
-      note
-    FROM purchases
-    WHERE company_id = ?
-      AND COALESCE(status, 'confirmed') != 'void'
-      AND COALESCE(total, 0) > COALESCE(paid_amount, 0)
-    ORDER BY purchase_date DESC, id DESC
-  `).all(req.company.id);
+app.get('/api/payables/list', auth, company, async (req, res) => {
+  let rows;
+  if (PG_ENABLED) {
+    try {
+      rows = await pgAll(`
+        SELECT
+          id,
+          purchase_no,
+          supplier_name,
+          purchase_date,
+          total,
+          paid_amount,
+          payment_status,
+          note
+        FROM purchases
+        WHERE company_id = $1
+          AND COALESCE(status, 'confirmed') != 'void'
+          AND COALESCE(total, 0) > COALESCE(paid_amount, 0)
+        ORDER BY purchase_date DESC, id DESC
+      `, [req.company.id]);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  } else {
+    rows = db.prepare(`
+      SELECT
+        id,
+        purchase_no,
+        supplier_name,
+        purchase_date,
+        total,
+        paid_amount,
+        payment_status,
+        note
+      FROM purchases
+      WHERE company_id = ?
+        AND COALESCE(status, 'confirmed') != 'void'
+        AND COALESCE(total, 0) > COALESCE(paid_amount, 0)
+      ORDER BY purchase_date DESC, id DESC
+    `).all(req.company.id);
+  }
 
   res.json(rows.map((row) => ({
     id: row.id,
@@ -4950,16 +5833,81 @@ app.get('/api/companies/:companyId/summary', auth, company, async (req, res) => 
       const vouchersTotal = erpNumber(vouchers?.total, 0);
       const monthlySalesTotal = erpNumber(monthlySales?.total, 0);
       const monthlyPurchasesTotal = erpNumber(monthlyPurchases?.total, 0);
+      const [
+        platformFeeComparison,
+        lowStockItems,
+        receivableTrend,
+        payableTrend,
+        inventoryValue
+      ] = await Promise.all([
+        pgAll(`
+          SELECT
+            COALESCE(platform_key, 'manual') AS name,
+            COALESCE(SUM(gross_amount), 0) AS revenue,
+            COALESCE(SUM(platform_fee), 0) AS fee,
+            CASE WHEN COALESCE(SUM(gross_amount), 0) > 0
+              THEN ROUND((COALESCE(SUM(platform_fee), 0) / COALESCE(SUM(gross_amount), 0) * 100)::numeric, 2)
+              ELSE 0
+            END AS fee_rate
+          FROM transactions
+          WHERE company_id = $1
+          GROUP BY COALESCE(platform_key, 'manual')
+          ORDER BY fee_rate DESC, revenue DESC
+        `, [req.company.id]),
+        pgAll(`
+          SELECT name, sku, unit, stock, safety_stock, updated_at
+          FROM products
+          WHERE company_id = $1
+          ORDER BY (COALESCE(stock, 0) - COALESCE(safety_stock, 0)) ASC, updated_at DESC NULLS LAST
+          LIMIT 8
+        `, [req.company.id]),
+        pgAll(`
+          SELECT sale_date AS date, COALESCE(SUM(GREATEST(COALESCE(total,0) - COALESCE(received_amount,0), 0)),0) AS value
+          FROM sales
+          WHERE company_id = $1
+            AND COALESCE(status, 'confirmed') != 'void'
+            AND sale_date >= (CURRENT_DATE - INTERVAL '30 days')::text
+          GROUP BY sale_date
+          ORDER BY sale_date ASC
+        `, [req.company.id]),
+        pgAll(`
+          SELECT purchase_date AS date, COALESCE(SUM(GREATEST(COALESCE(total,0) - COALESCE(paid_amount,0), 0)),0) AS value
+          FROM purchases
+          WHERE company_id = $1
+            AND COALESCE(status, 'confirmed') != 'void'
+            AND purchase_date >= (CURRENT_DATE - INTERVAL '30 days')::text
+          GROUP BY purchase_date
+          ORDER BY purchase_date ASC
+        `, [req.company.id]),
+        pgOne('SELECT COALESCE(SUM(COALESCE(stock,0) * COALESCE(cost,0)),0) AS total FROM products WHERE company_id = $1', [req.company.id])
+      ]);
+      const grossProfit = incomeTotal + monthlySalesTotal - cogsTotal - monthlyPurchasesTotal;
+      const grossMarginRate = incomeTotal + monthlySalesTotal > 0
+        ? Math.round((grossProfit / (incomeTotal + monthlySalesTotal)) * 1000) / 10
+        : 0;
+      const cashflowAlerts = [
+        erpNumber(unpaidSales?.total, 0) > 0 ? `應收未收 ${erpNumber(unpaidSales?.total, 0).toLocaleString('zh-TW')} 元，請安排收款追蹤。` : '',
+        erpNumber(unpaidPurchases?.total, 0) > 0 ? `應付未付 ${erpNumber(unpaidPurchases?.total, 0).toLocaleString('zh-TW')} 元，請確認付款時程。` : '',
+        grossMarginRate > 0 && grossMarginRate < 25 ? '毛利率低於 25%，建議檢查進貨成本、平台費或案場成本。' : ''
+      ].filter(Boolean);
 
       return res.json({
         revenue: incomeTotal + monthlySalesTotal,
         expenses: feesTotal + cogsTotal + vouchersTotal,
         netProfit: incomeTotal + monthlySalesTotal - feesTotal - cogsTotal - vouchersTotal - monthlyPurchasesTotal,
+        grossProfit,
+        grossMarginRate,
         cogs: cogsTotal,
         fees: feesTotal,
         txCount: txCount?.count || 0,
         invoicesPending: 0,
         revenueByPlatform,
+        platformFeeComparison,
+        lowStockItems,
+        receivableTrend,
+        payableTrend,
+        inventoryValue: erpNumber(inventoryValue?.total, 0),
+        cashflowAlerts,
         lowStock: lowStock?.count || 0,
         monthlySales: monthlySalesTotal,
         monthlyPurchases: monthlyPurchasesTotal,
@@ -5072,15 +6020,82 @@ app.get('/api/companies/:companyId/summary', auth, company, async (req, res) => 
       AND COALESCE(status, 'confirmed') != 'void'
   `).get(req.company.id).total;
 
+  const platformFeeComparison = db.prepare(`
+    SELECT
+      COALESCE(platform_key, 'manual') AS name,
+      COALESCE(SUM(gross_amount), 0) AS revenue,
+      COALESCE(SUM(platform_fee), 0) AS fee,
+      CASE WHEN COALESCE(SUM(gross_amount), 0) > 0
+        THEN ROUND(COALESCE(SUM(platform_fee), 0) / COALESCE(SUM(gross_amount), 0) * 100, 2)
+        ELSE 0
+      END AS fee_rate
+    FROM transactions
+    WHERE company_id = ?
+    GROUP BY COALESCE(platform_key, 'manual')
+    ORDER BY fee_rate DESC, revenue DESC
+  `).all(req.company.id);
+
+  const lowStockItems = db.prepare(`
+    SELECT name, sku, unit, stock, safety_stock, updated_at
+    FROM products
+    WHERE company_id = ?
+    ORDER BY (COALESCE(stock, 0) - COALESCE(safety_stock, 0)) ASC, updated_at DESC
+    LIMIT 8
+  `).all(req.company.id);
+
+  const receivableTrend = db.prepare(`
+    SELECT sale_date AS date, COALESCE(SUM(MAX(total - received_amount, 0)),0) AS value
+    FROM sales
+    WHERE company_id = ?
+      AND COALESCE(status, 'confirmed') != 'void'
+      AND date(sale_date) >= date('now', '-30 days')
+    GROUP BY sale_date
+    ORDER BY sale_date ASC
+  `).all(req.company.id);
+
+  const payableTrend = db.prepare(`
+    SELECT purchase_date AS date, COALESCE(SUM(MAX(total - paid_amount, 0)),0) AS value
+    FROM purchases
+    WHERE company_id = ?
+      AND COALESCE(status, 'confirmed') != 'void'
+      AND date(purchase_date) >= date('now', '-30 days')
+    GROUP BY purchase_date
+    ORDER BY purchase_date ASC
+  `).all(req.company.id);
+
+  const inventoryValue = db.prepare(`
+    SELECT COALESCE(SUM(COALESCE(stock,0) * COALESCE(cost,0)),0) AS total
+    FROM products
+    WHERE company_id = ?
+  `).get(req.company.id).total;
+
+  const grossProfit = income + monthlySales - cogs - monthlyPurchases;
+  const grossMarginRate = income + monthlySales > 0
+    ? Math.round((grossProfit / (income + monthlySales)) * 1000) / 10
+    : 0;
+  const cashflowAlerts = [
+    unpaidSales > 0 ? `應收未收 ${Number(unpaidSales).toLocaleString('zh-TW')} 元，請安排收款追蹤。` : '',
+    unpaidPurchases > 0 ? `應付未付 ${Number(unpaidPurchases).toLocaleString('zh-TW')} 元，請確認付款時程。` : '',
+    grossMarginRate > 0 && grossMarginRate < 25 ? '毛利率低於 25%，建議檢查進貨成本、平台費或案場成本。' : ''
+  ].filter(Boolean);
+
   res.json({
     revenue: income + monthlySales,
     expenses: fees + cogs + vouchers,
     netProfit: income + monthlySales - fees - cogs - vouchers - monthlyPurchases,
+    grossProfit,
+    grossMarginRate,
     cogs,
     fees,
     txCount,
     invoicesPending,
     revenueByPlatform,
+    platformFeeComparison,
+    lowStockItems,
+    receivableTrend,
+    payableTrend,
+    inventoryValue,
+    cashflowAlerts,
     lowStock,
     monthlySales,
     monthlyPurchases,
@@ -5089,6 +6104,254 @@ app.get('/api/companies/:companyId/summary', auth, company, async (req, res) => 
     collectedSales,
     paidPurchases
   });
+});
+
+app.get('/api/tenders/stats', auth, company, async (req, res) => {
+  try {
+    if (PG_ENABLED) {
+      const [
+        total,
+        latestRun,
+        agencyLevels,
+        regions,
+        categories,
+        upcoming,
+        highBudget,
+        keywordMatches
+      ] = await Promise.all([
+        pgOne('SELECT COUNT(*)::int AS count FROM tenders'),
+        pgOne('SELECT * FROM tender_sync_runs ORDER BY started_at DESC, id DESC LIMIT 1'),
+        pgAll('SELECT COALESCE(agency_level, $1) AS key, COUNT(*)::int AS count FROM tenders GROUP BY COALESCE(agency_level, $1) ORDER BY count DESC', ['other']),
+        pgAll('SELECT COALESCE(region, $1) AS key, COUNT(*)::int AS count FROM tenders GROUP BY COALESCE(region, $1) ORDER BY count DESC LIMIT 12', ['其他']),
+        pgAll('SELECT COALESCE(category, $1) AS key, COUNT(*)::int AS count FROM tenders GROUP BY COALESCE(category, $1) ORDER BY count DESC LIMIT 12', ['工程']),
+        pgAll(`
+          SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+          FROM tenders t
+          LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+          WHERE NULLIF(t.deadline_date, '') IS NOT NULL
+          ORDER BY t.deadline_date ASC, t.id DESC
+          LIMIT 6
+        `),
+        pgAll(`
+          SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+          FROM tenders t
+          LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+          ORDER BY COALESCE(t.budget_amount, 0) DESC, t.id DESC
+          LIMIT 6
+        `),
+        pgAll(`
+          SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+          FROM tender_matches tm
+          JOIN tenders t ON t.id = tm.tender_id
+          WHERE tm.company_id IS NULL
+          ORDER BY tm.score DESC, t.deadline_date ASC NULLS LAST, t.id DESC
+          LIMIT 8
+        `)
+      ]);
+      return res.json({
+        ok: true,
+        total: total?.count || 0,
+        lastSyncState: lastTenderSyncState,
+        latestRun,
+        agencyLevels,
+        regions,
+        categories,
+        upcoming: upcoming.map(tenderRow),
+        highBudget: highBudget.map(tenderRow),
+        keywordMatches: keywordMatches.map(tenderRow)
+      });
+    }
+
+    const total = db.prepare('SELECT COUNT(*) AS count FROM tenders').get().count || 0;
+    const latestRun = db.prepare('SELECT * FROM tender_sync_runs ORDER BY started_at DESC, id DESC LIMIT 1').get() || null;
+    const agencyLevels = db.prepare("SELECT COALESCE(agency_level, 'other') AS key, COUNT(*) AS count FROM tenders GROUP BY COALESCE(agency_level, 'other') ORDER BY count DESC").all();
+    const regions = db.prepare("SELECT COALESCE(region, '其他') AS key, COUNT(*) AS count FROM tenders GROUP BY COALESCE(region, '其他') ORDER BY count DESC LIMIT 12").all();
+    const categories = db.prepare("SELECT COALESCE(category, '工程') AS key, COUNT(*) AS count FROM tenders GROUP BY COALESCE(category, '工程') ORDER BY count DESC LIMIT 12").all();
+    const upcoming = db.prepare(`
+      SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+      FROM tenders t
+      LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+      WHERE NULLIF(t.deadline_date, '') IS NOT NULL
+      ORDER BY t.deadline_date ASC, t.id DESC
+      LIMIT 6
+    `).all();
+    const highBudget = db.prepare(`
+      SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+      FROM tenders t
+      LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+      ORDER BY COALESCE(t.budget_amount, 0) DESC, t.id DESC
+      LIMIT 6
+    `).all();
+    const keywordMatches = db.prepare(`
+      SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+      FROM tender_matches tm
+      JOIN tenders t ON t.id = tm.tender_id
+      WHERE tm.company_id IS NULL
+      ORDER BY tm.score DESC, t.deadline_date ASC, t.id DESC
+      LIMIT 8
+    `).all();
+    return res.json({ ok: true, total, lastSyncState: lastTenderSyncState, latestRun, agencyLevels, regions, categories, upcoming: upcoming.map(tenderRow), highBudget: highBudget.map(tenderRow), keywordMatches: keywordMatches.map(tenderRow) });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.get('/api/tenders/sync-runs', auth, company, async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit || 10) || 10, 50);
+    const rows = PG_ENABLED
+      ? await pgAll('SELECT * FROM tender_sync_runs ORDER BY started_at DESC, id DESC LIMIT $1', [limit])
+      : db.prepare('SELECT * FROM tender_sync_runs ORDER BY started_at DESC, id DESC LIMIT ?').all(limit);
+    res.json({ ok: true, rows });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.get('/api/tenders', auth, company, async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit || 80) || 80, 200);
+    const q = String(req.query.search || req.query.q || '').trim();
+    const region = String(req.query.region || '').trim();
+    const agencyLevel = String(req.query.agency_level || req.query.agencyLevel || '').trim();
+    const category = String(req.query.category || '').trim();
+
+    if (PG_ENABLED) {
+      const params = [];
+      const where = [];
+      if (q) {
+        params.push(`%${q}%`);
+        where.push(`(t.tender_name ILIKE $${params.length} OR t.agency_name ILIKE $${params.length} OR t.region ILIKE $${params.length} OR t.category ILIKE $${params.length})`);
+      }
+      if (region && region !== '全部地區') {
+        params.push(region);
+        where.push(`t.region = $${params.length}`);
+      }
+      if (agencyLevel && agencyLevel !== '全部機關') {
+        params.push(agencyLevel);
+        where.push(`t.agency_level = $${params.length}`);
+      }
+      if (category && category !== '全部工程') {
+        params.push(category);
+        where.push(`t.category = $${params.length}`);
+      }
+      params.push(limit);
+      const rows = await pgAll(`
+        SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+        FROM tenders t
+        LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY COALESCE(t.deadline_date, '') ASC, t.publish_date DESC NULLS LAST, t.id DESC
+        LIMIT $${params.length}
+      `, params);
+      return res.json({ ok: true, items: rows.map(tenderRow), total: rows.length });
+    }
+
+    const params = [];
+    const where = [];
+    if (q) {
+      const like = `%${q}%`;
+      where.push('(t.tender_name LIKE ? OR t.agency_name LIKE ? OR t.region LIKE ? OR t.category LIKE ?)');
+      params.push(like, like, like, like);
+    }
+    if (region && region !== '全部地區') {
+      where.push('t.region = ?');
+      params.push(region);
+    }
+    if (agencyLevel && agencyLevel !== '全部機關') {
+      where.push('t.agency_level = ?');
+      params.push(agencyLevel);
+    }
+    if (category && category !== '全部工程') {
+      where.push('t.category = ?');
+      params.push(category);
+    }
+    params.push(limit);
+    const rows = db.prepare(`
+      SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+      FROM tenders t
+      LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY COALESCE(t.deadline_date, '') ASC, t.publish_date DESC, t.id DESC
+      LIMIT ?
+    `).all(...params);
+    return res.json({ ok: true, items: rows.map(tenderRow), total: rows.length });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.get('/api/tenders/:id', auth, company, async (req, res) => {
+  try {
+    const row = PG_ENABLED
+      ? await pgOne(`
+        SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+        FROM tenders t
+        LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+        WHERE t.id = $1
+      `, [req.params.id])
+      : db.prepare(`
+        SELECT t.*, tm.keyword, tm.score, tm.matched_reason
+        FROM tenders t
+        LEFT JOIN tender_matches tm ON tm.tender_id = t.id AND tm.company_id IS NULL
+        WHERE t.id = ?
+      `).get(req.params.id);
+    if (!row) return res.status(404).json({ error: '找不到標案資料' });
+    res.json(tenderRow(row));
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.post('/api/admin/tenders/sync-now', auth, requireAdmin, async (req, res) => {
+  const result = await runTenderSync({ source: req.body?.source || 'all', triggeredBy: req.user.email || req.user.id });
+  if (!result.ok && result.code === 'TENDER_SYNC_FAILED') {
+    return res.status(503).json({ ok: false, error: '標案資料同步暫時失敗，系統已保留既有資料。', code: 'TENDER_SYNC_FAILED', detail: result.errorMessage || '' });
+  }
+  res.json(result);
+});
+
+app.get('/api/admin/tenders/sources', auth, requireAdmin, (req, res) => {
+  res.json({
+    ok: true,
+    sources: [
+      { key: 'official_open_data', label: '官方開放資料', configured: Boolean(process.env.TENDER_OFFICIAL_SOURCE_URL) },
+      { key: 'government_procurement', label: '政府採購資料來源', configured: Boolean(process.env.TENDER_GOV_PROCUREMENT_URL) },
+      { key: 'local_government', label: '地方政府資料集', configured: Boolean(process.env.TENDER_LOCAL_SOURCE_URL) },
+      { key: 'fallback_snapshot', label: '內建公開格式快照', configured: true },
+      { key: 'manual_import', label: '手動匯入', configured: false }
+    ],
+    running: tenderSyncRunning,
+    lastTenderSyncState
+  });
+});
+
+app.put('/api/admin/tenders/keywords', auth, requireAdmin, async (req, res) => {
+  const keyword = String(req.body?.keyword || '').trim();
+  if (!keyword) return res.status(400).json({ error: '請輸入關鍵字' });
+  const category = String(req.body?.category || '工程').trim();
+  const productLine = String(req.body?.productLine || req.body?.product_line || 'engineering').trim();
+  const enabled = req.body?.enabled === false ? 0 : 1;
+  try {
+    if (PG_ENABLED) {
+      const row = await pgOne(`
+        INSERT INTO tender_keywords (keyword, category, product_line, enabled)
+        VALUES ($1,$2,$3,$4)
+        ON CONFLICT (keyword) DO UPDATE SET category = EXCLUDED.category, product_line = EXCLUDED.product_line, enabled = EXCLUDED.enabled
+        RETURNING *
+      `, [keyword, category, productLine, enabled]);
+      return res.json({ ok: true, keyword: row });
+    }
+    db.prepare(`
+      INSERT INTO tender_keywords (keyword, category, product_line, enabled)
+      VALUES (?,?,?,?)
+      ON CONFLICT(keyword) DO UPDATE SET category = excluded.category, product_line = excluded.product_line, enabled = excluded.enabled
+    `).run(keyword, category, productLine, enabled);
+    const row = db.prepare('SELECT * FROM tender_keywords WHERE keyword = ?').get(keyword);
+    return res.json({ ok: true, keyword: row });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
 });
 
 const leadStatuses = new Set(['new', 'contacted', 'site_visit', 'quoted', 'won', 'lost', 'converted']);
@@ -5172,28 +6435,47 @@ function getLead(companyId, leadId) {
   `).get(leadId, companyId);
 }
 
-app.get('/api/companies/:companyId/leads', auth, company, (req, res) => {
+async function getLeadPg(companyId, leadId) {
+  return pgOne(`
+    SELECT *
+    FROM leads
+    WHERE id = $1
+      AND company_id = $2
+  `, [leadId, companyId]);
+}
+
+app.get('/api/companies/:companyId/leads', auth, company, async (req, res) => {
   const where = ['company_id = ?'];
   const params = [req.company.id];
+  const pgWhere = ['company_id = $1'];
+  const pgParams = [req.company.id];
 
   if (req.query.status) {
     where.push('status = ?');
     params.push(req.query.status);
+    pgParams.push(req.query.status);
+    pgWhere.push(`status = $${pgParams.length}`);
   }
 
   if (req.query.source) {
     where.push('source = ?');
     params.push(req.query.source);
+    pgParams.push(req.query.source);
+    pgWhere.push(`source = $${pgParams.length}`);
   }
 
   if (req.query.project_type) {
     where.push('project_type = ?');
     params.push(req.query.project_type);
+    pgParams.push(req.query.project_type);
+    pgWhere.push(`project_type = $${pgParams.length}`);
   }
 
   if (req.query.risk_level) {
     where.push('risk_level = ?');
     params.push(req.query.risk_level);
+    pgParams.push(req.query.risk_level);
+    pgWhere.push(`risk_level = $${pgParams.length}`);
   }
 
   if (req.query.search) {
@@ -5208,6 +6490,32 @@ app.get('/api/companies/:companyId/leads', auth, company, (req, res) => {
     )`);
     const q = `%${req.query.search}%`;
     params.push(q, q, q, q, q, q, q);
+
+    const start = pgParams.length + 1;
+    pgWhere.push(`(
+      title ILIKE $${start}
+      OR client_name ILIKE $${start + 1}
+      OR client_phone ILIKE $${start + 2}
+      OR source ILIKE $${start + 3}
+      OR region ILIKE $${start + 4}
+      OR project_type ILIKE $${start + 5}
+      OR note ILIKE $${start + 6}
+    )`);
+    pgParams.push(q, q, q, q, q, q, q);
+  }
+
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM leads
+        WHERE ${pgWhere.join(' AND ')}
+        ORDER BY created_at DESC, id DESC
+      `, pgParams);
+      return res.json(rows.map(leadRow));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const rows = db.prepare(`
@@ -5220,11 +6528,49 @@ app.get('/api/companies/:companyId/leads', auth, company, (req, res) => {
   res.json(rows.map(leadRow));
 });
 
-app.post('/api/companies/:companyId/leads', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.post('/api/companies/:companyId/leads', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const input = normalizeLeadInput(req.body);
 
   if (!input.title) {
     return res.status(400).json({ error: '請輸入案源名稱' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO leads (
+          company_id, title, client_name, client_phone, source, region,
+          agency_type, project_type, estimated_amount, estimated_cost,
+          expected_margin, risk_level, fit_score, status, next_action,
+          note, tender_source, tender_ref, created_at, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [
+        req.company.id,
+        input.title,
+        input.clientName,
+        input.clientPhone,
+        input.source,
+        input.region,
+        input.agencyType,
+        input.projectType,
+        input.estimatedAmount,
+        input.estimatedCost,
+        input.expectedMargin,
+        input.riskLevel,
+        input.fitScore,
+        input.status,
+        input.nextAction,
+        input.note,
+        input.tenderSource,
+        input.tenderRef
+      ]);
+      audit(req.company.id, req.user.id, 'lead_created', String(row.id));
+      return res.json(leadRow(row));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const row = db.prepare(`
@@ -5277,9 +6623,9 @@ app.post('/api/companies/:companyId/leads', auth, company, requireRole('owner', 
   res.json(leadRow(getLead(req.company.id, row.lastInsertRowid)));
 });
 
-app.patch('/api/companies/:companyId/leads/:leadId', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.patch('/api/companies/:companyId/leads/:leadId', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const leadId = Number(req.params.leadId);
-  const existing = getLead(req.company.id, leadId);
+  const existing = PG_ENABLED ? await getLeadPg(req.company.id, leadId) : getLead(req.company.id, leadId);
 
   if (!existing) {
     return res.status(404).json({ error: '找不到此案源，或你沒有權限修改' });
@@ -5289,6 +6635,60 @@ app.patch('/api/companies/:companyId/leads/:leadId', auth, company, requireRole(
 
   if (!input.title) {
     return res.status(400).json({ error: '請輸入案源名稱' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        UPDATE leads
+        SET
+          title = $1,
+          client_name = $2,
+          client_phone = $3,
+          source = $4,
+          region = $5,
+          agency_type = $6,
+          project_type = $7,
+          estimated_amount = $8,
+          estimated_cost = $9,
+          expected_margin = $10,
+          risk_level = $11,
+          fit_score = $12,
+          status = $13,
+          next_action = $14,
+          note = $15,
+          tender_source = $16,
+          tender_ref = $17,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $18
+          AND company_id = $19
+        RETURNING *
+      `, [
+        input.title,
+        input.clientName,
+        input.clientPhone,
+        input.source,
+        input.region,
+        input.agencyType,
+        input.projectType,
+        input.estimatedAmount,
+        input.estimatedCost,
+        input.expectedMargin,
+        input.riskLevel,
+        input.fitScore,
+        input.status,
+        input.nextAction,
+        input.note,
+        input.tenderSource,
+        input.tenderRef,
+        leadId,
+        req.company.id
+      ]);
+      audit(req.company.id, req.user.id, 'lead_updated', String(leadId));
+      return res.json(leadRow(row));
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   db.prepare(`
@@ -5341,12 +6741,22 @@ app.patch('/api/companies/:companyId/leads/:leadId', auth, company, requireRole(
   res.json(leadRow(getLead(req.company.id, leadId)));
 });
 
-app.delete('/api/companies/:companyId/leads/:leadId', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.delete('/api/companies/:companyId/leads/:leadId', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const leadId = Number(req.params.leadId);
-  const existing = getLead(req.company.id, leadId);
+  const existing = PG_ENABLED ? await getLeadPg(req.company.id, leadId) : getLead(req.company.id, leadId);
 
   if (!existing) {
     return res.status(404).json({ error: '找不到此案源，或你沒有權限刪除' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      await pgQuery('DELETE FROM leads WHERE id = $1 AND company_id = $2', [leadId, req.company.id]);
+      audit(req.company.id, req.user.id, 'lead_deleted', String(leadId));
+      return res.json({ ok: true });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   db.prepare(`
@@ -5360,9 +6770,9 @@ app.delete('/api/companies/:companyId/leads/:leadId', auth, company, requireRole
   res.json({ ok: true });
 });
 
-app.post('/api/companies/:companyId/leads/:leadId/convert-to-jobsite', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/companies/:companyId/leads/:leadId/convert-to-jobsite', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const leadId = Number(req.params.leadId);
-  const lead = getLead(req.company.id, leadId);
+  const lead = PG_ENABLED ? await getLeadPg(req.company.id, leadId) : getLead(req.company.id, leadId);
 
   if (!lead) {
     return res.status(404).json({ error: '找不到此案源，或你沒有權限轉成案場' });
@@ -5370,6 +6780,76 @@ app.post('/api/companies/:companyId/leads/:leadId/convert-to-jobsite', auth, com
 
   if (lead.converted_job_site_id) {
     return res.status(400).json({ error: '此案源已轉成案場' });
+  }
+
+  if (PG_ENABLED) {
+    let client;
+    try {
+      const pgPool = await getPool();
+      client = await pgPool.connect();
+      await client.query('BEGIN');
+      const created = await client.query(`
+        INSERT INTO job_sites (
+          company_id, name, site_name, client_name, client_phone, address,
+          project_type, quote_amount, subtotal_amount, total_amount,
+          status, note, created_at, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$8,$8,$9,$10,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        RETURNING id
+      `, [
+        req.company.id,
+        lead.title,
+        lead.title,
+        lead.client_name || '',
+        lead.client_phone || '',
+        lead.region || '',
+        lead.project_type || '',
+        Number(lead.estimated_amount || 0),
+        '已簽約',
+        lead.note || '由接案中心轉成案場'
+      ]);
+      const jobSiteId = created.rows[0].id;
+      await client.query(`
+        UPDATE leads
+        SET status = 'converted',
+            converted_job_site_id = $1,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND company_id = $3
+      `, [jobSiteId, leadId, req.company.id]);
+      await client.query('COMMIT');
+
+      audit(req.company.id, req.user.id, 'lead_converted_to_jobsite', `${leadId} -> ${jobSiteId}`);
+      const [updatedLead, jobSite] = await Promise.all([
+        getLeadPg(req.company.id, leadId),
+        pgOne(`
+          SELECT
+            id,
+            company_id AS "companyId",
+            COALESCE(site_name, name) AS "siteName",
+            COALESCE(client_name, '') AS "clientName",
+            COALESCE(client_phone, '') AS "clientPhone",
+            COALESCE(address, '') AS address,
+            COALESCE(project_type, '') AS "projectType",
+            COALESCE(quote_amount, 0) AS "quoteAmount",
+            COALESCE(status, '已簽約') AS status,
+            COALESCE(note, '') AS note,
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
+          FROM job_sites
+          WHERE id = $1 AND company_id = $2
+        `, [jobSiteId, req.company.id])
+      ]);
+      return res.json({ lead: leadRow(updatedLead), jobSite });
+    } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {
+        // ignore rollback errors
+      }
+      return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
+    }
   }
 
   const tx = db.transaction(() => {
@@ -5771,7 +7251,7 @@ app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner
 });
 
 
-app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
   if (!jobsiteId) {
@@ -5810,6 +7290,95 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
 
   if (!finalSiteName.trim()) {
     return res.status(400).json({ error: '請輸入案場名稱' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      const updated = await pgOne(`
+        UPDATE job_sites
+        SET name = $1,
+            site_name = $2,
+            client_name = $3,
+            client_phone = $4,
+            address = $5,
+            project_type = $6,
+            area_pings = $7,
+            price_per_ping = $8,
+            food_cost = $9,
+            quote_amount = $10,
+            tax_mode = $11,
+            tax_rate = $12,
+            subtotal_amount = $13,
+            tax_amount = $14,
+            total_amount = $15,
+            received_amount = $16,
+            material_cost = $17,
+            labor_cost = $18,
+            outsourced_cost = $19,
+            misc_cost = $20,
+            status = $21,
+            note = $22,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $23
+          AND company_id = $24
+        RETURNING
+          id,
+          company_id AS "companyId",
+          COALESCE(site_name, name) AS "siteName",
+          COALESCE(client_name, '') AS "clientName",
+          COALESCE(client_phone, '') AS "clientPhone",
+          COALESCE(address, '') AS address,
+          COALESCE(project_type, '') AS "projectType",
+          COALESCE(area_pings, 0) AS "areaPings",
+          COALESCE(price_per_ping, 0) AS "pricePerPing",
+          COALESCE(food_cost, 0) AS "foodCost",
+          COALESCE(quote_amount, 0) AS "quoteAmount",
+          COALESCE(tax_mode, 'not_taxed') AS "taxMode",
+          COALESCE(tax_rate, 0.05) AS "taxRate",
+          COALESCE(subtotal_amount, quote_amount, 0) AS "subtotalAmount",
+          COALESCE(tax_amount, 0) AS "taxAmount",
+          COALESCE(total_amount, quote_amount, 0) AS "totalAmount",
+          COALESCE(received_amount, 0) AS "receivedAmount",
+          COALESCE(material_cost, 0) AS "materialCost",
+          COALESCE(labor_cost, 0) AS "laborCost",
+          COALESCE(outsourced_cost, 0) AS "outsourcedCost",
+          COALESCE(misc_cost, 0) AS "miscCost",
+          COALESCE(status, '已報價') AS status,
+          COALESCE(note, '') AS note,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+      `, [
+        finalSiteName.trim(),
+        finalSiteName.trim(),
+        clientName || '',
+        clientPhone || '',
+        address || '',
+        projectType || '',
+        Number(areaPings ?? areaPing ?? paintAreaPing ?? 0),
+        Number(pricePerPing ?? paintPricePerPing ?? 0),
+        Number(foodCost || 0),
+        Number(quoteAmount || totalAmount || 0),
+        taxMode || 'not_taxed',
+        Number(taxRate ?? 0.05),
+        Number(subtotalAmount ?? quoteAmount ?? totalAmount ?? 0),
+        Number(taxAmount || 0),
+        Number(totalAmount ?? quoteAmount ?? 0),
+        Number(receivedAmount || 0),
+        Number(materialCost || 0),
+        Number(laborCost || 0),
+        Number(outsourcedCost || 0),
+        Number(miscCost || 0),
+        status || '已報價',
+        note || '',
+        jobsiteId,
+        req.company.id
+      ]);
+      if (!updated) return res.status(404).json({ error: '找不到此案場，或你沒有權限修改' });
+      audit(req.company.id, req.user.id, 'jobsite_updated', String(jobsiteId));
+      return res.json(updated);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const result = db.prepare(`
@@ -5915,11 +7484,46 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
   res.json(updated);
 });
 
-app.delete('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.delete('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
   if (!jobsiteId) {
     return res.status(400).json({ error: '缺少案場 ID' });
+  }
+
+  if (PG_ENABLED) {
+    let client;
+    try {
+      const pool = await getPool();
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const site = await client.query('SELECT id FROM job_sites WHERE id = $1 AND company_id = $2', [jobsiteId, req.company.id]);
+      if (!site.rowCount) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '找不到此案場，或你沒有權限刪除' });
+      }
+      const deletedEstimateItems = await client.query('DELETE FROM job_site_estimate_items WHERE company_id = $1 AND job_site_id = $2', [req.company.id, jobsiteId]);
+      const deletedPayments = await client.query('DELETE FROM job_site_payments WHERE company_id = $1 AND job_site_id = $2', [req.company.id, jobsiteId]);
+      const detachedInventoryMovements = await client.query('UPDATE inventory_movements SET job_site_id = NULL WHERE company_id = $1 AND job_site_id = $2', [req.company.id, jobsiteId]);
+      const deletedJobSite = await client.query('DELETE FROM job_sites WHERE id = $1 AND company_id = $2', [jobsiteId, req.company.id]);
+      if (!deletedJobSite.rowCount) throw new Error('案場刪除失敗，找不到資料');
+      await client.query('COMMIT');
+      audit(req.company.id, req.user.id, 'jobsite_deleted', JSON.stringify({ jobsiteId, deletedEstimateItems: deletedEstimateItems.rowCount, deletedPayments: deletedPayments.rowCount, detachedInventoryMovements: detachedInventoryMovements.rowCount }));
+      return res.json({
+        ok: true,
+        deletedJobSite: deletedJobSite.rowCount,
+        deletedEstimateItems: deletedEstimateItems.rowCount,
+        deletedPayments: deletedPayments.rowCount,
+        detachedInventoryMovements: detachedInventoryMovements.rowCount
+      });
+    } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {}
+      return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
+    }
   }
 
   const jobsite = ensureJobSite(req.company.id, jobsiteId);
@@ -6074,12 +7678,98 @@ function refreshJobSiteEstimateTotals(companyId, jobsiteId) {
   };
 }
 
+async function refreshJobSiteEstimateTotalsPg(companyId, jobsiteId) {
+  const totals = await pgOne(`
+    SELECT
+      COALESCE(SUM(amount), 0) AS "estimateTotal",
+      COALESCE(SUM(cost_amount), 0) AS "estimateCostTotal"
+    FROM job_site_estimate_items
+    WHERE company_id = $1
+      AND job_site_id = $2
+  `, [companyId, jobsiteId]);
 
-app.get('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, company, (req, res) => {
+  const site = await pgOne(`
+    SELECT
+      COALESCE(tax_mode, 'not_taxed') AS "taxMode",
+      COALESCE(tax_rate, 0.05) AS "taxRate"
+    FROM job_sites
+    WHERE company_id = $1
+      AND id = $2
+  `, [companyId, jobsiteId]);
+
+  const estimateTotal = Number(totals?.estimateTotal || 0);
+  const estimateCostTotal = Number(totals?.estimateCostTotal || 0);
+  const taxMode = site?.taxMode || 'not_taxed';
+  const taxRate = Number(site?.taxRate ?? 0.05);
+
+  let subtotalAmount = estimateTotal;
+  let taxAmount = 0;
+  let totalAmount = estimateTotal;
+
+  if (taxMode === 'tax_excluded') {
+    subtotalAmount = estimateTotal;
+    taxAmount = Math.round(subtotalAmount * taxRate);
+    totalAmount = subtotalAmount + taxAmount;
+  } else if (taxMode === 'tax_included') {
+    totalAmount = estimateTotal;
+    subtotalAmount = taxRate > 0 ? Math.round(totalAmount / (1 + taxRate)) : totalAmount;
+    taxAmount = totalAmount - subtotalAmount;
+  }
+
+  await pgQuery(`
+    UPDATE job_sites
+    SET quote_amount = $1,
+        subtotal_amount = $2,
+        tax_amount = $3,
+        total_amount = $4,
+        estimate_cost_total = $5,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE company_id = $6
+      AND id = $7
+  `, [totalAmount, subtotalAmount, taxAmount, totalAmount, estimateCostTotal, companyId, jobsiteId]);
+
+  return { estimateTotal, estimateCostTotal, subtotalAmount, taxAmount, totalAmount, taxMode, taxRate };
+}
+
+
+app.get('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, company, async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
   if (!jobsiteId) {
     return res.status(400).json({ error: '缺少 jobsiteId' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      const jobsite = await pgOne('SELECT id FROM job_sites WHERE id = $1 AND company_id = $2', [jobsiteId, req.company.id]);
+      if (!jobsite) return res.status(404).json({ error: '找不到此案場，或你沒有權限查看估價明細' });
+      const items = await pgAll(`
+        SELECT
+          id,
+          company_id AS "companyId",
+          job_site_id AS "jobSiteId",
+          work_type AS "workType",
+          item_category AS "itemCategory",
+          item_name AS "itemName",
+          quantity,
+          unit,
+          unit_price AS "unitPrice",
+          amount,
+          cost_amount AS "costAmount",
+          note,
+          sort_order AS "sortOrder",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM job_site_estimate_items
+        WHERE company_id = $1
+          AND job_site_id = $2
+        ORDER BY sort_order ASC, id ASC
+      `, [req.company.id, jobsiteId]);
+      const totals = await refreshJobSiteEstimateTotalsPg(req.company.id, jobsiteId);
+      return res.json({ items, totals });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const jobsite = ensureJobSite(req.company.id, jobsiteId);
@@ -6119,17 +7809,11 @@ app.get('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, co
   });
 });
 
-app.post('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
   if (!jobsiteId) {
     return res.status(400).json({ error: '缺少 jobsiteId' });
-  }
-
-  const jobsite = ensureJobSite(req.company.id, jobsiteId);
-
-  if (!jobsite) {
-    return res.status(404).json({ error: '找不到此案場，或你沒有權限新增估價明細' });
   }
 
   const {
@@ -6156,6 +7840,48 @@ app.post('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, c
   const finalAmount = amount === undefined || amount === null
     ? calculateEstimateAmount(finalQuantity, finalUnitPrice)
     : Number(amount || 0);
+
+  if (PG_ENABLED) {
+    try {
+      const jobsite = await pgOne('SELECT id, project_type FROM job_sites WHERE id = $1 AND company_id = $2', [jobsiteId, req.company.id]);
+      if (!jobsite) return res.status(404).json({ error: '找不到此案場，或你沒有權限新增估價明細' });
+      const item = await pgOne(`
+        INSERT INTO job_site_estimate_items (
+          company_id, job_site_id, work_type, item_category, item_name,
+          quantity, unit, unit_price, amount, cost_amount, note, sort_order,
+          created_at, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        RETURNING
+          id,
+          company_id AS "companyId",
+          job_site_id AS "jobSiteId",
+          work_type AS "workType",
+          item_category AS "itemCategory",
+          item_name AS "itemName",
+          quantity,
+          unit,
+          unit_price AS "unitPrice",
+          amount,
+          cost_amount AS "costAmount",
+          note,
+          sort_order AS "sortOrder",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+      `, [req.company.id, jobsiteId, workType || jobsite.project_type || '', itemCategory || 'estimate', finalItemName, finalQuantity, unit || '', finalUnitPrice, finalAmount, Number(costAmount || 0), note || '', Number(sortOrder || 0)]);
+      const totals = await refreshJobSiteEstimateTotalsPg(req.company.id, jobsiteId);
+      audit(req.company.id, req.user.id, 'jobsite_estimate_item_created', String(item.id));
+      return res.json({ item, totals });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限新增估價明細' });
+  }
 
   const row = db.prepare(`
     INSERT INTO job_site_estimate_items (
@@ -6222,30 +7948,12 @@ app.post('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items', auth, c
   });
 });
 
-app.put('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.put('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
   const itemId = Number(req.params.itemId);
 
   if (!jobsiteId || !itemId) {
     return res.status(400).json({ error: '缺少 jobsiteId 或 itemId' });
-  }
-
-  const jobsite = ensureJobSite(req.company.id, jobsiteId);
-
-  if (!jobsite) {
-    return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯估價明細' });
-  }
-
-  const existing = db.prepare(`
-    SELECT id
-    FROM job_site_estimate_items
-    WHERE id = ?
-      AND job_site_id = ?
-      AND company_id = ?
-  `).get(itemId, jobsiteId, req.company.id);
-
-  if (!existing) {
-    return res.status(404).json({ error: '找不到此估價明細' });
   }
 
   const {
@@ -6272,6 +7980,70 @@ app.put('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', 
   const finalAmount = amount === undefined || amount === null
     ? calculateEstimateAmount(finalQuantity, finalUnitPrice)
     : Number(amount || 0);
+
+  if (PG_ENABLED) {
+    try {
+      const jobsite = await pgOne('SELECT id, project_type FROM job_sites WHERE id = $1 AND company_id = $2', [jobsiteId, req.company.id]);
+      if (!jobsite) return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯估價明細' });
+      const item = await pgOne(`
+        UPDATE job_site_estimate_items
+        SET work_type = $1,
+            item_category = $2,
+            item_name = $3,
+            quantity = $4,
+            unit = $5,
+            unit_price = $6,
+            amount = $7,
+            cost_amount = $8,
+            note = $9,
+            sort_order = $10,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $11
+          AND job_site_id = $12
+          AND company_id = $13
+        RETURNING
+          id,
+          company_id AS "companyId",
+          job_site_id AS "jobSiteId",
+          work_type AS "workType",
+          item_category AS "itemCategory",
+          item_name AS "itemName",
+          quantity,
+          unit,
+          unit_price AS "unitPrice",
+          amount,
+          cost_amount AS "costAmount",
+          note,
+          sort_order AS "sortOrder",
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+      `, [workType || jobsite.project_type || '', itemCategory || 'estimate', finalItemName, finalQuantity, unit || '', finalUnitPrice, finalAmount, Number(costAmount || 0), note || '', Number(sortOrder || 0), itemId, jobsiteId, req.company.id]);
+      if (!item) return res.status(404).json({ error: '找不到此估價明細' });
+      const totals = await refreshJobSiteEstimateTotalsPg(req.company.id, jobsiteId);
+      audit(req.company.id, req.user.id, 'jobsite_estimate_item_updated', String(itemId));
+      return res.json({ item, totals });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
+  const jobsite = ensureJobSite(req.company.id, jobsiteId);
+
+  if (!jobsite) {
+    return res.status(404).json({ error: '找不到此案場，或你沒有權限編輯估價明細' });
+  }
+
+  const existing = db.prepare(`
+    SELECT id
+    FROM job_site_estimate_items
+    WHERE id = ?
+      AND job_site_id = ?
+      AND company_id = ?
+  `).get(itemId, jobsiteId, req.company.id);
+
+  if (!existing) {
+    return res.status(404).json({ error: '找不到此估價明細' });
+  }
 
   db.prepare(`
     UPDATE job_site_estimate_items
@@ -6338,12 +8110,31 @@ app.put('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', 
   });
 });
 
-app.delete('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', auth, company, requireRole('owner', 'admin'), (req, res) => {
+app.delete('/api/companies/:companyId/jobsites/:jobsiteId/estimate-items/:itemId', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
   const itemId = Number(req.params.itemId);
 
   if (!jobsiteId || !itemId) {
     return res.status(400).json({ error: '缺少 jobsiteId 或 itemId' });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      const jobsite = await pgOne('SELECT id FROM job_sites WHERE id = $1 AND company_id = $2', [jobsiteId, req.company.id]);
+      if (!jobsite) return res.status(404).json({ error: '找不到此案場，或你沒有權限刪除估價明細' });
+      const result = await pgQuery(`
+        DELETE FROM job_site_estimate_items
+        WHERE id = $1
+          AND job_site_id = $2
+          AND company_id = $3
+      `, [itemId, jobsiteId, req.company.id]);
+      if (!result.rowCount) return res.status(404).json({ error: '找不到此估價明細' });
+      const totals = await refreshJobSiteEstimateTotalsPg(req.company.id, jobsiteId);
+      audit(req.company.id, req.user.id, 'jobsite_estimate_item_deleted', String(itemId));
+      return res.json({ ok: true, totals });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   const jobsite = ensureJobSite(req.company.id, jobsiteId);
@@ -6908,7 +8699,7 @@ app.post('/api/companies/:companyId/integrations/:platformKey/connect', auth, co
   res.json({ ok: true });
 });
 
-app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const p = platforms.find((x) => x.platformKey === req.params.platformKey);
 
   if (!p) {
@@ -6945,6 +8736,53 @@ app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, compa
     });
 
     const orderId = `${p.platformKey.toUpperCase()}-${nanoid(8)}`;
+
+    if (PG_ENABLED) {
+      try {
+        const row = await pgOne(`
+          INSERT INTO transactions (
+            company_id, platform_key, channel_type, external_order_id, gross_amount,
+            platform_fee, discount_amount, shipping_fee, refund_amount, net_amount,
+            tax_amount, cost_of_goods_sold, platform_profit, profit, items_json
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$13,$14)
+          RETURNING id
+        `, [
+          req.company.id,
+          p.platformKey,
+          p.category,
+          orderId,
+          gross,
+          fee,
+          discount,
+          shipping,
+          refund,
+          net,
+          tax,
+          cogs,
+          profit,
+          JSON.stringify([
+            {
+              name: '示範商品',
+              qty: 1,
+              price: gross,
+              cost: cogs
+            }
+          ])
+        ]);
+
+        inserted.push({
+          id: row.id,
+          orderId,
+          gross,
+          net,
+          profit
+        });
+        continue;
+      } catch (err) {
+        return databaseError(res, req.path, req, err);
+      }
+    }
 
     const row = db.prepare(`
       INSERT INTO transactions (
@@ -6995,6 +8833,23 @@ app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, compa
       net,
       profit
     });
+  }
+
+  if (PG_ENABLED) {
+    try {
+      await pgQuery(`
+        INSERT INTO platform_accounts (company_id, platform_key, status, last_sync_at, updated_at)
+        VALUES ($1,$2,$3,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        ON CONFLICT (company_id, platform_key) DO UPDATE SET
+          status = EXCLUDED.status,
+          last_sync_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      `, [req.company.id, p.platformKey, 'mock']);
+      audit(req.company.id, req.user.id, 'integration_sync', `${p.platformKey} ${count}筆`);
+      return res.json({ ok: true, inserted });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   db.prepare(`
@@ -7132,7 +8987,21 @@ app.post('/api/companies/:companyId/transactions', auth, company, requireRole('o
   });
 });
 
-app.get('/api/companies/:companyId/invoices', auth, company, (req, res) => {
+app.get('/api/companies/:companyId/invoices', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM invoices
+        WHERE company_id = $1
+        ORDER BY created_at DESC, id DESC
+      `, [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM invoices
@@ -7143,12 +9012,46 @@ app.get('/api/companies/:companyId/invoices', auth, company, (req, res) => {
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/invoices', auth, company, requireRole('owner', 'admin', 'accounting'), (req, res) => {
+app.post('/api/companies/:companyId/invoices', auth, company, requireRole('owner', 'admin', 'accounting'), async (req, res) => {
   const b = req.body;
   const amount = Number(b.amountExclTax || 0);
   const tax = Math.round(amount * 0.05 * 100) / 100;
   const incl = amount + tax;
   const invoiceNo = b.invoiceNo || `BK-${Date.now()}`;
+
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        INSERT INTO invoices (
+          company_id, invoice_no, invoice_type, buyer_name, buyer_tax_id,
+          amount_excl_tax, tax_amount, amount_incl_tax, status, issued_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+        RETURNING *
+      `, [
+        req.company.id,
+        invoiceNo,
+        b.invoiceType || 'B2C',
+        b.buyerName || '',
+        b.buyerTaxId || '',
+        amount,
+        tax,
+        incl,
+        b.status || 'draft',
+        b.status === 'issued' ? new Date().toISOString() : null
+      ]);
+
+      audit(req.company.id, req.user.id, 'invoice_created', invoiceNo);
+      return res.json({
+        id: row.id,
+        invoiceNo,
+        taxAmount: tax,
+        amountInclTax: incl
+      });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
 
   const row = db.prepare(`
     INSERT INTO invoices (
@@ -7282,8 +9185,141 @@ app.post('/api/companies/:companyId/products', auth, company, requireRole('owner
   });
 });
 
+app.put('/api/companies/:companyId/products/:id', auth, company, requireRole('owner', 'admin'), async (req, res) => {
+  const p = req.body || {};
+  const name = String(p.name || '').trim();
+  if (!name) return res.status(400).json({ error: '請輸入商品 / 材料名稱' });
 
-app.get('/api/companies/:companyId/inventory-movements', auth, company, (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const row = await pgOne(`
+        UPDATE products
+        SET sku = $1,
+            name = $2,
+            category = $3,
+            unit = $4,
+            price = $5,
+            cost = $6,
+            stock = $7,
+            safety_stock = $8,
+            supplier = $9,
+            storage_location = $10,
+            note = $11,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $12 AND company_id = $13
+        RETURNING *
+      `, [
+        p.sku || '',
+        name,
+        p.category || '',
+        p.unit || '',
+        Number(p.price || 0),
+        Number(p.cost || 0),
+        Number(p.stock || 0),
+        Number(p.safetyStock ?? p.safety_stock ?? 5),
+        p.supplier || '',
+        p.storageLocation || p.storage_location || '',
+        p.note || '',
+        req.params.id,
+        req.company.id
+      ]);
+      if (!row) return res.status(404).json({ error: '找不到商品 / 材料' });
+      audit(req.company.id, req.user.id, 'product_updated', String(req.params.id));
+      return res.json(row);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
+  const result = db.prepare(`
+    UPDATE products
+    SET sku = ?,
+        name = ?,
+        category = ?,
+        unit = ?,
+        price = ?,
+        cost = ?,
+        stock = ?,
+        safety_stock = ?,
+        supplier = ?,
+        storage_location = ?,
+        note = ?
+    WHERE id = ? AND company_id = ?
+  `).run(
+    p.sku || '',
+    name,
+    p.category || '',
+    p.unit || '',
+    Number(p.price || 0),
+    Number(p.cost || 0),
+    Number(p.stock || 0),
+    Number(p.safetyStock ?? p.safety_stock ?? 5),
+    p.supplier || '',
+    p.storageLocation || p.storage_location || '',
+    p.note || '',
+    req.params.id,
+    req.company.id
+  );
+  if (!result.changes) return res.status(404).json({ error: '找不到商品 / 材料' });
+  audit(req.company.id, req.user.id, 'product_updated', String(req.params.id));
+  res.json(db.prepare('SELECT * FROM products WHERE id = ? AND company_id = ?').get(req.params.id, req.company.id));
+});
+
+app.delete('/api/companies/:companyId/products/:id', auth, company, requireRole('owner', 'admin'), async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const result = await pgQuery('DELETE FROM products WHERE id = $1 AND company_id = $2', [req.params.id, req.company.id]);
+      if (!result.rowCount) return res.status(404).json({ error: '找不到商品 / 材料' });
+      audit(req.company.id, req.user.id, 'product_deleted', String(req.params.id));
+      return res.json({ ok: true });
+    } catch (err) {
+      if (err.code === '23503') {
+        return res.status(400).json({ error: '已有單據使用此商品，請保留歷史資料' });
+      }
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
+  const result = db.prepare('DELETE FROM products WHERE id = ? AND company_id = ?').run(req.params.id, req.company.id);
+  if (!result.changes) return res.status(404).json({ error: '找不到商品 / 材料' });
+  audit(req.company.id, req.user.id, 'product_deleted', String(req.params.id));
+  res.json({ ok: true });
+});
+
+
+app.get('/api/companies/:companyId/inventory-movements', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT
+          im.id,
+          im.company_id AS "companyId",
+          im.product_id AS "productId",
+          im.job_site_id AS "jobSiteId",
+          im.movement_type AS "movementType",
+          im.quantity,
+          im.before_stock AS "beforeStock",
+          im.after_stock AS "afterStock",
+          im.unit_cost AS "unitCost",
+          im.note,
+          im.created_at AS "createdAt",
+          p.name AS "productName",
+          p.sku AS "productSku",
+          p.unit AS unit,
+          js.site_name AS "jobSiteName"
+        FROM inventory_movements im
+        LEFT JOIN products p ON p.id = im.product_id AND p.company_id = im.company_id
+        LEFT JOIN job_sites js ON js.id = im.job_site_id AND js.company_id = im.company_id
+        WHERE im.company_id = $1
+        ORDER BY im.id DESC
+        LIMIT 100
+      `, [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const rows = db.prepare(`
     SELECT
       im.id,
@@ -7312,7 +9348,7 @@ app.get('/api/companies/:companyId/inventory-movements', auth, company, (req, re
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/inventory-movements', auth, company, requireRole('owner', 'admin', 'staff'), (req, res) => {
+app.post('/api/companies/:companyId/inventory-movements', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
   const {
     productId,
     jobSiteId,
@@ -7330,6 +9366,105 @@ app.post('/api/companies/:companyId/inventory-movements', auth, company, require
 
   if (finalQuantity <= 0) {
     return res.status(400).json({ error: '數量必須大於 0' });
+  }
+
+  if (PG_ENABLED) {
+    const type = movementType || '進貨入庫';
+    if (!['進貨入庫', '案場用料', '退料回庫', '報廢損耗', '盤點調整'].includes(type)) {
+      return res.status(400).json({ error: '不支援的庫存異動類型' });
+    }
+    const finalJobSiteId = jobSiteId ? Number(jobSiteId) : null;
+    if ((type === '案場用料' || type === '退料回庫') && !finalJobSiteId) {
+      return res.status(400).json({
+        error: type === '案場用料'
+          ? '案場用料必須選擇關聯案場，才能正確同步案場材料費'
+          : '退料回庫必須選擇關聯案場，才能正確扣回案場材料費'
+      });
+    }
+
+    let client;
+    try {
+      const pgPool = await getPool();
+      client = await pgPool.connect();
+      await client.query('BEGIN');
+      const productResult = await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [finalProductId, req.company.id]);
+      const product = productResult.rows[0];
+      if (!product) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: '找不到此材料 / 工具' });
+      }
+
+      if (finalJobSiteId) {
+        const siteResult = await client.query('SELECT id FROM job_sites WHERE id = $1 AND company_id = $2', [finalJobSiteId, req.company.id]);
+        if (!siteResult.rows[0]) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: '找不到此案場編號，或此案場不屬於目前公司' });
+        }
+      }
+
+      const beforeStock = erpNumber(product.stock, 0);
+      let afterStock = beforeStock;
+      if (type === '進貨入庫' || type === '退料回庫') afterStock = beforeStock + finalQuantity;
+      if (type === '案場用料' || type === '報廢損耗') afterStock = beforeStock - finalQuantity;
+      if (type === '盤點調整') afterStock = finalQuantity;
+      if (afterStock < 0) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ error: '庫存不足，無法扣到負數' });
+      }
+
+      const unitCost = erpNumber(product.cost, 0);
+      const movementCost = finalQuantity * unitCost;
+      await client.query('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [afterStock, finalProductId, req.company.id]);
+      if (finalJobSiteId && type === '案場用料') {
+        await client.query('UPDATE job_sites SET material_cost = COALESCE(material_cost, 0) + $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [movementCost, finalJobSiteId, req.company.id]);
+      }
+      if (finalJobSiteId && type === '退料回庫') {
+        await client.query('UPDATE job_sites SET material_cost = GREATEST(COALESCE(material_cost, 0) - $1, 0), updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [movementCost, finalJobSiteId, req.company.id]);
+      }
+      const insert = await client.query(`
+        INSERT INTO inventory_movements (
+          company_id, product_id, job_site_id, movement_type, quantity,
+          before_stock, after_stock, unit_cost, note
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        RETURNING id
+      `, [req.company.id, finalProductId, finalJobSiteId, type, finalQuantity, beforeStock, afterStock, unitCost, note || '']);
+      await client.query('COMMIT');
+
+      const rows = await pgAll(`
+        SELECT
+          im.id,
+          im.company_id AS "companyId",
+          im.product_id AS "productId",
+          im.job_site_id AS "jobSiteId",
+          im.movement_type AS "movementType",
+          im.quantity,
+          im.before_stock AS "beforeStock",
+          im.after_stock AS "afterStock",
+          im.unit_cost AS "unitCost",
+          im.note,
+          im.created_at AS "createdAt",
+          p.name AS "productName",
+          p.sku AS "productSku",
+          p.unit AS unit,
+          js.site_name AS "jobSiteName"
+        FROM inventory_movements im
+        LEFT JOIN products p ON p.id = im.product_id AND p.company_id = im.company_id
+        LEFT JOIN job_sites js ON js.id = im.job_site_id AND js.company_id = im.company_id
+        WHERE im.id = $1 AND im.company_id = $2
+      `, [insert.rows[0].id, req.company.id]);
+      audit(req.company.id, req.user.id, 'inventory_movement_created', String(insert.rows[0].id));
+      return res.json(rows[0]);
+    } catch (err) {
+      try {
+        if (client) await client.query('ROLLBACK');
+      } catch {
+        // ignore rollback errors
+      }
+      return databaseError(res, req.path, req, err);
+    } finally {
+      if (client) client.release();
+    }
   }
 
   const product = db.prepare(`
@@ -7566,7 +9701,11 @@ app.post('/api/companies/:companyId/vouchers', auth, company, requireRole('owner
   });
 });
 
-app.get('/api/companies/:companyId/accounting/accounts', auth, company, requireFeature('accounting_engine'), (req, res) => {
+app.get('/api/companies/:companyId/accounting/accounts', auth, company, requireFeature('accounting_engine'), async (req, res) => {
+  if (PG_ENABLED) {
+    return res.json([]);
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM accounts
@@ -7577,7 +9716,38 @@ app.get('/api/companies/:companyId/accounting/accounts', auth, company, requireF
   res.json(rows);
 });
 
-app.get('/api/companies/:companyId/accounting/reports', auth, company, requireFeature('accounting_engine'), (req, res) => {
+app.get('/api/companies/:companyId/accounting/reports', auth, company, requireFeature('accounting_engine'), async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const [revenueRow, cogsRow, feesRow] = await Promise.all([
+        pgOne('SELECT COALESCE(SUM(gross_amount),0) AS total FROM transactions WHERE company_id = $1', [req.company.id]),
+        pgOne('SELECT COALESCE(SUM(cost_of_goods_sold),0) AS total FROM transactions WHERE company_id = $1', [req.company.id]),
+        pgOne('SELECT COALESCE(SUM(platform_fee),0) AS total FROM transactions WHERE company_id = $1', [req.company.id])
+      ]);
+      const revenue = erpNumber(revenueRow?.total, 0);
+      const cogs = erpNumber(cogsRow?.total, 0);
+      const fees = erpNumber(feesRow?.total, 0);
+      const grossMargin = revenue - cogs;
+      const netProfit = revenue - cogs - fees;
+
+      return res.json({
+        incomeStatement: {
+          revenue,
+          cogs,
+          grossMargin,
+          fees,
+          netProfit
+        },
+        costAccounting: {
+          grossMarginRate: revenue ? grossMargin / revenue : 0,
+          platformFeeRate: revenue ? fees / revenue : 0
+        }
+      });
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const revenue = db.prepare(`
     SELECT COALESCE(SUM(gross_amount),0) total
     FROM transactions
@@ -7662,7 +9832,11 @@ app.get('/api/companies/:companyId/tax/vat', auth, company, requireFeature('tax_
   });
 });
 
-app.get('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), (req, res) => {
+app.get('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), async (req, res) => {
+  if (PG_ENABLED) {
+    return res.json([]);
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM accountant_clients
@@ -7673,7 +9847,14 @@ app.get('/api/companies/:companyId/accountant/clients', auth, company, requireFe
   res.json(rows);
 });
 
-app.post('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), requireRole('owner', 'admin'), (req, res) => {
+app.post('/api/companies/:companyId/accountant/clients', auth, company, requireFeature('accountant_console'), requireRole('owner', 'admin'), async (req, res) => {
+  if (PG_ENABLED) {
+    return res.status(501).json({
+      error: '記帳士客戶管理目前尚未開放正式環境寫入',
+      code: 'FEATURE_NOT_READY'
+    });
+  }
+
   const c = req.body;
 
   const row = db.prepare(`
@@ -7701,7 +9882,22 @@ app.post('/api/companies/:companyId/accountant/clients', auth, company, requireF
   });
 });
 
-app.get('/api/companies/:companyId/audit-logs', auth, company, (req, res) => {
+app.get('/api/companies/:companyId/audit-logs', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT *
+        FROM audit_logs
+        WHERE company_id = $1
+        ORDER BY id DESC
+        LIMIT 100
+      `, [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM audit_logs
@@ -7806,4 +10002,14 @@ try {
 app.listen(PORT, HOST, () => {
   console.log(`BookAI API running on http://${HOST}:${PORT}`);
   checkPostgresStartup();
+  setTimeout(() => {
+    runTenderSync({ source: 'all', triggeredBy: 'startup' }).catch((err) => {
+      console.error('[tender sync startup] failed', { code: err.code || null, message: err.message || String(err) });
+    });
+  }, 30000);
+  setInterval(() => {
+    runTenderSync({ source: 'all', triggeredBy: 'schedule' }).catch((err) => {
+      console.error('[tender sync schedule] failed', { code: err.code || null, message: err.message || String(err) });
+    });
+  }, Number(process.env.TENDER_SYNC_INTERVAL_MS || 3 * 60 * 60 * 1000));
 });
