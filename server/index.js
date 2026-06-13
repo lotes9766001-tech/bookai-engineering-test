@@ -3345,6 +3345,10 @@ function purchasePaymentRow(row) {
 }
 
 app.get('/api/suppliers/list', auth, company, (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
+    return res.json([]);
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM suppliers
@@ -3443,6 +3447,10 @@ app.delete('/api/customers/:id', auth, company, requireRole('owner', 'admin'), (
 });
 
 app.get('/api/purchases/list', auth, company, (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
+    return res.json([]);
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM purchases
@@ -3924,6 +3932,21 @@ app.get('/api/payables/list', auth, company, (req, res) => {
 });
 
 app.get('/api/companies/:companyId/summary', auth, company, (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
+    return res.json({
+      income: 0,
+      fees: 0,
+      cogs: 0,
+      vouchers: 0,
+      monthIncome: 0,
+      monthFees: 0,
+      monthCogs: 0,
+      monthVouchers: 0,
+      grossMargin: 0,
+      netProfit: 0
+    });
+  }
+
   const monthStart = new Date();
   monthStart.setDate(1);
   const monthStartText = monthStart.toISOString().slice(0, 10);
@@ -5941,6 +5964,10 @@ app.post('/api/companies/:companyId/integrations/:platformKey/sync', auth, compa
 });
 
 app.get('/api/companies/:companyId/transactions', auth, company, (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
+    return res.json([]);
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM transactions
@@ -6061,6 +6088,10 @@ app.post('/api/companies/:companyId/invoices', auth, company, requireRole('owner
 });
 
 app.get('/api/companies/:companyId/products', auth, company, (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
+    return res.json([]);
+  }
+
   const rows = db.prepare(`
     SELECT *
     FROM products
@@ -6412,6 +6443,16 @@ app.get('/api/companies/:companyId/accounting/reports', auth, company, requireFe
 });
 
 app.get('/api/companies/:companyId/tax/vat', auth, company, requireFeature('tax_center'), (req, res) => {
+  if (process.env.NODE_ENV === 'production' && process.env.DATABASE_URL) {
+    return res.json({
+      taxableSales: 0,
+      deductiblePurchases: 0,
+      outputTax: 0,
+      inputTax: 0,
+      vatPayable: 0
+    });
+  }
+
   const taxableSales = db.prepare(`
     SELECT COALESCE(SUM(gross_amount / 1.05),0) total
     FROM transactions
