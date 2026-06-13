@@ -614,7 +614,8 @@ async function requireApproved(req, res, next) {
         id,
         email,
         COALESCE(status, 'pending_review') AS status,
-        COALESCE(review_status, 'pending_review') AS review_status
+        COALESCE(review_status, 'pending_review') AS review_status,
+        COALESCE(approval_status, review_status, status, 'pending_review') AS approval_status
       FROM users
       WHERE id = $1
     `, [req.user?.id])
@@ -623,7 +624,8 @@ async function requireApproved(req, res, next) {
         id,
         email,
         COALESCE(status, 'pending_review') AS status,
-        COALESCE(review_status, 'pending_review') AS review_status
+        COALESCE(review_status, 'pending_review') AS review_status,
+        COALESCE(approval_status, review_status, status, 'pending_review') AS approval_status
       FROM users
       WHERE id = ?
     `).get(req.user?.id);
@@ -631,8 +633,8 @@ async function requireApproved(req, res, next) {
   if (!user) return res.status(401).json({ error: '未登入' });
   if (isPrivilegedEmail(user.email)) return next();
 
-  const userStatus = user.status || user.review_status || 'pending_review';
-  const companyStatus = req.company?.review_status || '';
+  const userStatus = user.approval_status || user.status || user.review_status || 'pending_review';
+  const companyStatus = req.company?.approval_status || req.company?.review_status || '';
 
   if (userStatus === 'rejected' || companyStatus === 'rejected') {
     return res.status(403).json({ error: '帳號申請未通過，請聯繫 BookAI 官方客服', code: 'ACCOUNT_REJECTED' });
@@ -836,16 +838,17 @@ async function ensureAdminBootstrapAccount() {
             password_hash = $2,
             status = $3,
             review_status = $4,
+            approval_status = $5,
             approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP::text),
             approved_by = COALESCE(approved_by, id)
-        WHERE id = $5
-      `, [ADMIN_NAME, hash, 'admin', 'approved', userId]);
+        WHERE id = $6
+      `, [ADMIN_NAME, hash, 'admin', 'approved', 'approved', userId]);
     } else {
       const created = await pgOne(`
-        INSERT INTO users (name, email, password_hash, created_source, created_utm_source, status, review_status, approved_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
+        INSERT INTO users (name, email, password_hash, created_source, created_utm_source, status, review_status, approval_status, approved_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP)
         RETURNING id
-      `, [ADMIN_NAME, ADMIN_EMAIL, hash, 'bootstrap', 'bootstrap', 'admin', 'approved']);
+      `, [ADMIN_NAME, ADMIN_EMAIL, hash, 'bootstrap', 'bootstrap', 'admin', 'approved', 'approved']);
       userId = created.id;
     }
 
@@ -869,18 +872,21 @@ async function ensureAdminBootstrapAccount() {
             billing_status = $5,
             subscription_plan = $6,
             is_paid_customer = $7,
-            billing_note = $8
+            billing_note = $8,
+            review_status = 'approved',
+            approval_status = 'approved',
+            is_active = 1
         WHERE id = $9
       `, [ADMIN_COMPANY, 'admin', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 系統管理員帳號', companyId]);
     } else {
       const company = await pgOne(`
         INSERT INTO companies (
           name, tax_id, industry, companyAddress, address, plan, owner_id,
-          billing_status, subscription_plan, is_paid_customer, billing_note
+          billing_status, subscription_plan, is_paid_customer, billing_note, review_status, approval_status, is_active
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         RETURNING id
-      `, [ADMIN_COMPANY, '', 'admin', '', '', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 系統管理員帳號']);
+      `, [ADMIN_COMPANY, '', 'admin', '', '', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 系統管理員帳號', 'approved', 'approved', 1]);
       companyId = company.id;
     }
 
@@ -1029,16 +1035,17 @@ async function ensureFounderBootstrapAccount() {
             password_hash = $2,
             status = $3,
             review_status = $4,
+            approval_status = $5,
             approved_at = COALESCE(approved_at, CURRENT_TIMESTAMP::text),
             approved_by = COALESCE(approved_by, id)
-        WHERE id = $5
-      `, ['BookAI Founder', hash, 'founder', 'approved', userId]);
+        WHERE id = $6
+      `, ['BookAI Founder', hash, 'founder', 'approved', 'approved', userId]);
     } else {
       const user = await pgOne(`
-        INSERT INTO users (name, email, password_hash, created_source, created_utm_source, status, review_status, approved_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
+        INSERT INTO users (name, email, password_hash, created_source, created_utm_source, status, review_status, approval_status, approved_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP)
         RETURNING id
-      `, ['BookAI Founder', founderEmail, hash, 'bootstrap', 'bootstrap', 'founder', 'approved']);
+      `, ['BookAI Founder', founderEmail, hash, 'bootstrap', 'bootstrap', 'founder', 'approved', 'approved']);
       userId = user.id;
     }
 
@@ -1063,18 +1070,21 @@ async function ensureFounderBootstrapAccount() {
             billing_status = $5,
             subscription_plan = $6,
             is_paid_customer = $7,
-            billing_note = $8
+            billing_note = $8,
+            review_status = 'approved',
+            approval_status = 'approved',
+            is_active = 1
         WHERE id = $9
       `, [companyName, 'admin', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 創辦人帳號', companyId]);
     } else {
       const company = await pgOne(`
         INSERT INTO companies (
           name, tax_id, industry, companyAddress, address, plan, owner_id,
-          billing_status, subscription_plan, is_paid_customer, billing_note
+          billing_status, subscription_plan, is_paid_customer, billing_note, review_status, approval_status, is_active
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
         RETURNING id
-      `, [companyName, '', 'admin', '', '', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 創辦人帳號']);
+      `, [companyName, '', 'admin', '', '', 'pro', userId, 'active', 'engineering_premium', 1, 'BookAI 創辦人帳號', 'approved', 'approved', 1]);
       companyId = company.id;
     }
 
@@ -1422,8 +1432,7 @@ app.post('/api/auth/register', async (req, res) => {
     companyStage,
     termsAccepted,
     companyAddress,
-    address,
-    plan = 'business'
+    address
   } = req.body;
   const tracking = sanitizeTrackingBody(req.body || {});
 
@@ -1435,6 +1444,8 @@ app.post('/api/auth/register', async (req, res) => {
   const finalUseCase = String(useCase || req.body.use_case || '').trim();
   const finalTaxId = String(taxId || req.body.tax_id || '').trim();
   const finalCompanyStage = String(companyStage || req.body.company_stage || '').trim();
+  const finalLineContact = String(lineContact || req.body.line_contact || '').trim();
+  const finalPlan = 'trial';
   const acceptedTerms = termsAccepted === true || termsAccepted === 'true' || termsAccepted === 1 || termsAccepted === '1';
 
   if (!normalizedEmail || !password || !finalCompanyName) {
@@ -1465,10 +1476,6 @@ app.post('/api/auth/register', async (req, res) => {
     return res.status(400).json({ error: '請選擇行業別' });
   }
 
-  if (finalUseCase.length < 10) {
-    return res.status(400).json({ error: '請至少用 10 個字說明想使用 BookAI 的情境' });
-  }
-
   if (finalTaxId && !/^\d{8}$/.test(finalTaxId)) {
     return res.status(400).json({ error: '統一編號若有填寫，必須為 8 碼數字' });
   }
@@ -1479,10 +1486,6 @@ app.post('/api/auth/register', async (req, res) => {
 
   if (isAdminEmail(normalizedEmail)) {
     return res.status(403).json({ error: '此管理者帳號只能由 Bootstrap 建立或重設' });
-  }
-
-  if (!plans[plan]) {
-    return res.status(400).json({ error: '未知方案' });
   }
 
   const finalAddress = companyAddress || address || '';
@@ -1499,14 +1502,17 @@ app.post('/api/auth/register', async (req, res) => {
         created_utm_source,
         status,
         review_status,
+        approval_status,
         terms_accepted_at,
         terms_version,
         line_contact,
         company_stage,
         phone,
+        contact_name,
+        tax_id,
         use_case
       )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP,$8,$9,$10,$11,$12)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,CURRENT_TIMESTAMP,$9,$10,$11,$12,$13,$14,$15)
         RETURNING id, name, email
       `, [
         finalContactName,
@@ -1516,10 +1522,13 @@ app.post('/api/auth/register', async (req, res) => {
         tracking.utm_source || '',
         'pending_review',
         'pending_review',
+        'pending_review',
         'v1.0',
-        lineContact || req.body.line_contact || '',
+        finalLineContact,
         finalCompanyStage,
         finalPhone,
+        finalContactName,
+        finalTaxId,
         finalUseCase
       ]);
 
@@ -1533,13 +1542,15 @@ app.post('/api/auth/register', async (req, res) => {
           plan,
           owner_id,
           review_status,
+          approval_status,
           is_active,
           contact_name,
           phone,
+          line_contact,
           use_case,
           company_stage
         )
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
         RETURNING id
       `, [
         finalCompanyName,
@@ -1547,12 +1558,14 @@ app.post('/api/auth/register', async (req, res) => {
         industry || '',
         finalAddress,
         finalAddress,
-        plan,
+        finalPlan,
         user.id,
+        'pending_review',
         'pending_review',
         0,
         finalContactName,
         finalPhone,
+        finalLineContact,
         finalUseCase,
         finalCompanyStage
       ]);
@@ -1589,14 +1602,17 @@ app.post('/api/auth/register', async (req, res) => {
       created_utm_source,
       status,
       review_status,
+      approval_status,
       terms_accepted_at,
       terms_version,
       line_contact,
       company_stage,
       phone,
+      contact_name,
+      tax_id,
       use_case
     )
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       finalContactName,
       normalizedEmail,
@@ -1605,11 +1621,14 @@ app.post('/api/auth/register', async (req, res) => {
       tracking.utm_source || '',
       'pending_review',
       'pending_review',
+      'pending_review',
       new Date().toISOString(),
       'v1.0',
-      lineContact || req.body.line_contact || '',
+      finalLineContact,
       finalCompanyStage,
       finalPhone,
+      finalContactName,
+      finalTaxId,
       finalUseCase
     );
 
@@ -1623,25 +1642,29 @@ app.post('/api/auth/register', async (req, res) => {
         plan,
       owner_id,
       review_status,
+      approval_status,
       is_active,
       contact_name,
       phone,
+      line_contact,
       use_case,
       company_stage
     )
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       finalCompanyName,
       finalTaxId,
       industry || '',
       finalAddress,
       finalAddress,
-      plan,
+      finalPlan,
       user.lastInsertRowid,
+      'pending_review',
       'pending_review',
       0,
       finalContactName,
       finalPhone,
+      finalLineContact,
       finalUseCase,
       finalCompanyStage
     );
@@ -1813,6 +1836,7 @@ app.get('/api/me', auth, async (req, res) => {
         email,
         COALESCE(status, 'pending_review') AS status,
         COALESCE(review_status, 'pending_review') AS review_status,
+        COALESCE(approval_status, review_status, status, 'pending_review') AS approval_status,
         review_note,
         terms_accepted_at,
         terms_version
@@ -1826,6 +1850,7 @@ app.get('/api/me', auth, async (req, res) => {
         email,
         COALESCE(status, 'pending_review') AS status,
         COALESCE(review_status, 'pending_review') AS review_status,
+        COALESCE(approval_status, review_status, status, 'pending_review') AS approval_status,
         review_note,
         terms_accepted_at,
         terms_version
@@ -1839,9 +1864,11 @@ app.get('/api/me', auth, async (req, res) => {
     if (user.isFounder) {
       user.status = 'founder';
       user.review_status = 'approved';
+      user.approval_status = 'approved';
     } else if (user.isAdmin) {
       user.status = 'admin';
       user.review_status = 'approved';
+      user.approval_status = 'approved';
     }
   }
 
@@ -2244,6 +2271,7 @@ const testerFeedbackStatuses = new Set(['尚未回饋', '已回饋', '需追蹤'
 const feedbackCategories = new Set(['操作問題', '介面建議', '功能需求', '錯誤回報', '其他']);
 const feedbackStatuses = new Set(['new', 'reviewing', 'resolved', 'ignored']);
 const reviewStatuses = new Set(['pending_review', 'approved', 'rejected', 'suspended', 'founder', 'admin', 'demo']);
+const memberPlans = new Set(['trial', 'starter', 'pro', 'enterprise', 'custom']);
 const adminSettingKeys = new Set([
   'official_site_url',
   'official_line_url',
@@ -2253,58 +2281,80 @@ const adminSettingKeys = new Set([
   'system_announcement'
 ]);
 
+async function listAdminMembers(status = 'all') {
+  const normalizedStatus = String(status || 'all').trim();
+  const hasStatusFilter = normalizedStatus !== 'all' && reviewStatuses.has(normalizedStatus);
+  const where = hasStatusFilter
+    ? PG_ENABLED
+      ? 'WHERE COALESCE(u.approval_status, u.status, u.review_status, $1) = $1'
+      : 'WHERE COALESCE(u.approval_status, u.status, u.review_status, ?) = ?'
+    : '';
+  const params = hasStatusFilter
+    ? PG_ENABLED ? [normalizedStatus] : [normalizedStatus, normalizedStatus]
+    : [];
+
+  const sql = `
+    SELECT
+      u.id,
+      u.email,
+      u.name,
+      u.phone,
+      u.contact_name,
+      u.tax_id AS user_tax_id,
+      u.use_case,
+      u.line_contact,
+      u.company_stage,
+      u.status,
+      u.review_status,
+      COALESCE(u.approval_status, u.status, u.review_status, 'pending_review') AS approval_status,
+      u.review_note,
+      u.terms_accepted_at,
+      u.terms_version,
+      u.last_login_at,
+      COALESCE(u.login_count, 0) AS login_count,
+      u.created_at,
+      c.id AS company_id,
+      c.name AS company_name,
+      c.tax_id,
+      c.industry,
+      c.plan,
+      c.contact_name AS company_contact_name,
+      c.phone AS company_phone,
+      c.line_contact AS company_line_contact,
+      c.use_case AS company_use_case,
+      c.company_stage AS company_company_stage,
+      c.review_status AS company_review_status,
+      COALESCE(c.approval_status, c.review_status, 'pending_review') AS company_approval_status
+    FROM users u
+    LEFT JOIN companies c ON c.owner_id = u.id
+    ${where}
+    ORDER BY u.created_at DESC, u.id DESC
+  `;
+
+  return PG_ENABLED ? pgAll(sql, params) : db.prepare(sql).all(...params);
+}
+
 app.get('/api/admin/review/users', auth, requireAdmin, async (req, res) => {
   try {
-    const status = String(req.query.status || '').trim();
-    const where = status && reviewStatuses.has(status)
-      ? PG_ENABLED
-        ? 'WHERE COALESCE(u.status, u.review_status, $1) = $1'
-        : 'WHERE COALESCE(u.status, u.review_status, ?) = ?'
-      : '';
-    const params = status && reviewStatuses.has(status)
-      ? PG_ENABLED ? [status] : [status, status]
-      : [];
-    const sql = `
-      SELECT
-        u.id,
-        u.email,
-        u.name,
-        u.phone,
-        u.use_case,
-        u.line_contact,
-        u.company_stage,
-        u.status,
-        u.review_status,
-        u.review_note,
-        u.terms_accepted_at,
-        u.terms_version,
-        u.last_login_at,
-        COALESCE(u.login_count, 0) AS login_count,
-        u.created_at,
-        c.id AS company_id,
-        c.name AS company_name,
-        c.tax_id,
-        c.industry,
-        c.contact_name,
-        c.phone AS company_phone,
-        c.use_case AS company_use_case,
-        c.company_stage AS company_company_stage,
-        c.review_status AS company_review_status
-      FROM users u
-      LEFT JOIN companies c ON c.owner_id = u.id
-      ${where}
-      ORDER BY u.created_at DESC, u.id DESC
-    `;
-    const rows = PG_ENABLED ? await pgAll(sql, params) : db.prepare(sql).all(...params);
-    res.json(rows);
+    res.json(await listAdminMembers(req.query.status || 'all'));
   } catch (err) {
     console.error('admin review users failed', { userId: req.user?.id, code: err.code, message: err.message });
     res.status(500).json({ error: '資料讀取失敗', code: 'DATABASE_ERROR' });
   }
 });
 
-async function updateMemberReview(userId, adminId, status, note = '') {
+app.get('/api/admin/members', auth, requireAdmin, async (req, res) => {
+  try {
+    res.json(await listAdminMembers(req.query.status || 'all'));
+  } catch (err) {
+    console.error('admin members list failed', { userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '會員審核資料讀取失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
+  }
+});
+
+async function updateMemberReview(userId, adminId, status, note = '', plan = 'trial') {
   const now = new Date().toISOString();
+  const nextPlan = memberPlans.has(String(plan || '').trim()) ? String(plan).trim() : 'trial';
   const existing = PG_ENABLED
     ? await pgOne('SELECT id, email FROM users WHERE id = $1', [userId])
     : db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId);
@@ -2317,6 +2367,7 @@ async function updateMemberReview(userId, adminId, status, note = '') {
   const userPatch = {
     status,
     review_status: status === 'demo' ? 'approved' : status,
+    approval_status: status === 'demo' ? 'approved' : status,
     review_note: note
   };
 
@@ -2333,25 +2384,29 @@ async function updateMemberReview(userId, adminId, status, note = '') {
         UPDATE users
         SET status = $1,
             review_status = $2,
-            approved_at = $3,
-            approved_by = $4,
-            review_note = $5
-        WHERE id = $6
-      `, [userPatch.status, userPatch.review_status, now, adminId, note, userId]);
+            approval_status = $3,
+            approved_at = $4,
+            approved_by = $5,
+            review_note = $6
+        WHERE id = $7
+      `, [userPatch.status, userPatch.review_status, userPatch.approval_status, now, adminId, note, userId]);
       await pgQuery(`
         UPDATE companies
         SET review_status = 'approved',
+            approval_status = 'approved',
             is_active = 1,
             approved_at = $1,
             approved_by = $2,
-            review_note = $3
-        WHERE owner_id = $4
-      `, [now, adminId, note, userId]);
+            review_note = $3,
+            plan = $4
+        WHERE owner_id = $5
+      `, [now, adminId, note, nextPlan, userId]);
     } else if (status === 'rejected') {
       await pgQuery(`
         UPDATE users
         SET status = 'rejected',
             review_status = 'rejected',
+            approval_status = 'rejected',
             rejected_at = $1,
             rejected_by = $2,
             review_note = $3
@@ -2360,6 +2415,7 @@ async function updateMemberReview(userId, adminId, status, note = '') {
       await pgQuery(`
         UPDATE companies
         SET review_status = 'rejected',
+            approval_status = 'rejected',
             is_active = 0,
             rejected_at = $1,
             rejected_by = $2,
@@ -2371,6 +2427,7 @@ async function updateMemberReview(userId, adminId, status, note = '') {
         UPDATE users
         SET status = 'suspended',
             review_status = 'suspended',
+            approval_status = 'suspended',
             suspended_at = $1,
             suspended_by = $2,
             review_note = $3
@@ -2379,6 +2436,7 @@ async function updateMemberReview(userId, adminId, status, note = '') {
       await pgQuery(`
         UPDATE companies
         SET review_status = 'suspended',
+            approval_status = 'suspended',
             is_active = 0,
             review_note = $1
         WHERE owner_id = $2
@@ -2387,23 +2445,23 @@ async function updateMemberReview(userId, adminId, status, note = '') {
   } else {
     if (status === 'approved' || status === 'demo') {
       db.prepare(`
-        UPDATE users SET status = ?, review_status = ?, approved_at = ?, approved_by = ?, review_note = ? WHERE id = ?
-      `).run(userPatch.status, userPatch.review_status, now, adminId, note, userId);
+        UPDATE users SET status = ?, review_status = ?, approval_status = ?, approved_at = ?, approved_by = ?, review_note = ? WHERE id = ?
+      `).run(userPatch.status, userPatch.review_status, userPatch.approval_status, now, adminId, note, userId);
       db.prepare(`
-        UPDATE companies SET review_status = 'approved', is_active = 1, approved_at = ?, approved_by = ?, review_note = ? WHERE owner_id = ?
-      `).run(now, adminId, note, userId);
+        UPDATE companies SET review_status = 'approved', approval_status = 'approved', is_active = 1, approved_at = ?, approved_by = ?, review_note = ?, plan = ? WHERE owner_id = ?
+      `).run(now, adminId, note, nextPlan, userId);
     } else if (status === 'rejected') {
       db.prepare(`
-        UPDATE users SET status = 'rejected', review_status = 'rejected', rejected_at = ?, rejected_by = ?, review_note = ? WHERE id = ?
+        UPDATE users SET status = 'rejected', review_status = 'rejected', approval_status = 'rejected', rejected_at = ?, rejected_by = ?, review_note = ? WHERE id = ?
       `).run(now, adminId, note, userId);
       db.prepare(`
-        UPDATE companies SET review_status = 'rejected', is_active = 0, rejected_at = ?, rejected_by = ?, review_note = ? WHERE owner_id = ?
+        UPDATE companies SET review_status = 'rejected', approval_status = 'rejected', is_active = 0, rejected_at = ?, rejected_by = ?, review_note = ? WHERE owner_id = ?
       `).run(now, adminId, note, userId);
     } else if (status === 'suspended') {
       db.prepare(`
-        UPDATE users SET status = 'suspended', review_status = 'suspended', suspended_at = ?, suspended_by = ?, review_note = ? WHERE id = ?
+        UPDATE users SET status = 'suspended', review_status = 'suspended', approval_status = 'suspended', suspended_at = ?, suspended_by = ?, review_note = ? WHERE id = ?
       `).run(now, adminId, note, userId);
-      db.prepare(`UPDATE companies SET review_status = 'suspended', is_active = 0, review_note = ? WHERE owner_id = ?`).run(note, userId);
+      db.prepare(`UPDATE companies SET review_status = 'suspended', approval_status = 'suspended', is_active = 0, review_note = ? WHERE owner_id = ?`).run(note, userId);
     }
   }
 
@@ -2414,7 +2472,13 @@ async function updateMemberReview(userId, adminId, status, note = '') {
 function reviewAction(status) {
   return async (req, res) => {
     try {
-      const result = await updateMemberReview(Number(req.params.id), req.user.id, status, req.body?.reviewNote || req.body?.note || '');
+      const result = await updateMemberReview(
+        Number(req.params.id),
+        req.user.id,
+        status,
+        req.body?.reviewNote || req.body?.note || '',
+        req.body?.plan || 'trial'
+      );
       if (!result) return res.status(404).json({ error: '找不到使用者' });
       if (result.protected) return res.status(400).json({ error: 'Founder / Admin 帳號不可由審核中心變更狀態' });
       res.json({ ok: true });
@@ -2444,6 +2508,31 @@ app.put('/api/admin/review/users/:id/note', auth, requireAdmin, async (req, res)
   } catch (err) {
     console.error('admin review note failed', { userId: req.user?.id, code: err.code, message: err.message });
     res.status(500).json({ error: '資料更新失敗', code: 'DATABASE_ERROR' });
+  }
+});
+
+app.patch('/api/admin/members/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    const status = String(req.body?.approval_status || req.body?.status || '').trim();
+    const plan = String(req.body?.plan || 'trial').trim();
+    const note = String(req.body?.reviewNote || req.body?.review_note || req.body?.note || '');
+
+    if (!reviewStatuses.has(status) || status === 'founder' || status === 'admin') {
+      return res.status(400).json({ error: '會員狀態不正確' });
+    }
+
+    if (plan && !memberPlans.has(plan)) {
+      return res.status(400).json({ error: '方案不正確' });
+    }
+
+    const result = await updateMemberReview(userId, req.user.id, status, note, plan || 'trial');
+    if (!result) return res.status(404).json({ error: '找不到使用者' });
+    if (result.protected) return res.status(400).json({ error: 'Founder / Admin 帳號不可由審核中心變更狀態' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('admin member patch failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '會員審核資料更新失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
   }
 });
 

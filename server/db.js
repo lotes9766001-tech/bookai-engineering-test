@@ -674,6 +674,7 @@ export function initDb() {
   safeAddColumn('companies', 'tester_note', 'TEXT');
   safeAddColumn('companies', 'tester_feedback_status', "TEXT DEFAULT '尚未回饋'");
   safeAddColumn('companies', 'review_status', "TEXT DEFAULT 'pending_review'");
+  safeAddColumn('companies', 'approval_status', "TEXT DEFAULT 'pending_review'");
   safeAddColumn('companies', 'is_active', 'INTEGER DEFAULT 0');
   safeAddColumn('companies', 'approved_at', 'TEXT');
   safeAddColumn('companies', 'approved_by', 'INTEGER');
@@ -682,6 +683,7 @@ export function initDb() {
   safeAddColumn('companies', 'review_note', 'TEXT');
   safeAddColumn('companies', 'contact_name', 'TEXT');
   safeAddColumn('companies', 'phone', 'TEXT');
+  safeAddColumn('companies', 'line_contact', 'TEXT');
   safeAddColumn('companies', 'use_case', 'TEXT');
   safeAddColumn('companies', 'company_stage', 'TEXT');
   safeAddColumn('users', 'last_login_at', 'TEXT');
@@ -690,6 +692,7 @@ export function initDb() {
   safeAddColumn('users', 'login_count', 'INTEGER DEFAULT 0');
   safeAddColumn('users', 'status', "TEXT DEFAULT 'pending_review'");
   safeAddColumn('users', 'review_status', "TEXT DEFAULT 'pending_review'");
+  safeAddColumn('users', 'approval_status', "TEXT DEFAULT 'pending_review'");
   safeAddColumn('users', 'approved_at', 'TEXT');
   safeAddColumn('users', 'approved_by', 'INTEGER');
   safeAddColumn('users', 'rejected_at', 'TEXT');
@@ -702,6 +705,8 @@ export function initDb() {
   safeAddColumn('users', 'line_contact', 'TEXT');
   safeAddColumn('users', 'company_stage', 'TEXT');
   safeAddColumn('users', 'phone', 'TEXT');
+  safeAddColumn('users', 'contact_name', 'TEXT');
+  safeAddColumn('users', 'tax_id', 'TEXT');
   safeAddColumn('users', 'use_case', 'TEXT');
 
   const defaultSettings = {

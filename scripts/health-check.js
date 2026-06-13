@@ -107,8 +107,8 @@ const pgCoreTables = [
 ];
 
 const pgCoreColumns = {
-  users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'created_at'],
-  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'is_tester', 'tester_feedback_status', 'created_at'],
+  users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'approval_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'phone', 'line_contact', 'contact_name', 'company_stage', 'tax_id', 'created_at'],
+  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'approval_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'contact_name', 'phone', 'line_contact', 'company_stage', 'is_tester', 'tester_feedback_status', 'created_at'],
   company_users: ['id', 'company_id', 'user_id', 'role', 'created_at'],
   job_sites: ['id', 'company_id', 'name', 'site_name', 'client_name', 'quote_amount', 'received_amount', 'status', 'created_at', 'updated_at'],
   job_site_payments: ['id', 'company_id', 'job_site_id', 'amount', 'payment_date', 'method', 'note', 'created_at'],
@@ -293,10 +293,18 @@ const requiredColumns = {
     'name',
     'email',
     'password_hash',
+    'status',
+    'review_status',
+    'approval_status',
     'last_login_at',
     'created_source',
     'created_utm_source',
     'login_count',
+    'phone',
+    'line_contact',
+    'contact_name',
+    'company_stage',
+    'tax_id',
     'created_at'
   ],
   companies: [
@@ -306,6 +314,13 @@ const requiredColumns = {
     'industry',
     'plan',
     'owner_id',
+    'review_status',
+    'approval_status',
+    'is_active',
+    'contact_name',
+    'phone',
+    'line_contact',
+    'company_stage',
     'is_tester',
     'tester_started_at',
     'tester_note',

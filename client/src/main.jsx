@@ -60,6 +60,19 @@ function hasCompanyFeature(company, page) {
   return effective.includes(key);
 }
 
+function formatDate(value) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('zh-TW', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
 const categoryLabel = {
   marketplace: '第三方商城',
   hosted_commerce: '品牌官網',
@@ -438,11 +451,9 @@ function Auth({ onAuth }) {
     taxId: '',
     lineContact: '',
     companyStage: '剛創業',
-    useCase: '',
     termsAccepted: false,
     companyAddress: '',
-    industry: 'beverage',
-    plan: 'pro'
+    industry: 'beverage'
   });
 
   async function submit(e) {
@@ -450,12 +461,31 @@ function Auth({ onAuth }) {
     setErr('');
 
     try {
+      const payload = mode === 'register'
+        ? {
+            name: form.name,
+            email: form.email,
+            password: form.password,
+            companyName: form.companyName,
+            contactName: form.contactName,
+            phone: form.phone,
+            taxId: form.taxId,
+            lineContact: form.lineContact,
+            companyStage: form.companyStage,
+            termsAccepted: form.termsAccepted,
+            companyAddress: form.companyAddress,
+            industry: form.industry,
+            useCase: '',
+            ...getTrackingPayload()
+          }
+        : {
+            email: form.email,
+            password: form.password,
+            ...getTrackingPayload()
+          };
       const data = await api(`/auth/${mode}`, {
         method: 'POST',
-        body: JSON.stringify({
-          ...form,
-          ...getTrackingPayload()
-        })
+        body: JSON.stringify(payload)
       });
       setToken(data.token);
       onAuth();
@@ -478,6 +508,7 @@ function Auth({ onAuth }) {
               <label>
                 <span>使用者姓名</span>
                 <input
+                  name="name"
                   placeholder="例：王小明"
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value, contactName: form.contactName || e.target.value })}
@@ -485,8 +516,20 @@ function Auth({ onAuth }) {
               </label>
 
               <label>
+                <span>聯絡電話</span>
+                <input
+                  name="phone"
+                  type="tel"
+                  placeholder="例：0912-345-678"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                />
+              </label>
+
+              <label>
                 <span>公司 / 商號 / 企業社名稱</span>
                 <input
+                  name="companyName"
                   placeholder="例：珍珠奶茶王國有限公司"
                   value={form.companyName}
                   onChange={(e) => setForm({ ...form, companyName: e.target.value })}
@@ -496,6 +539,7 @@ function Auth({ onAuth }) {
               <label>
                 <span>聯絡人姓名</span>
                 <input
+                  name="contactName"
                   placeholder="例：王小明"
                   value={form.contactName}
                   onChange={(e) => setForm({ ...form, contactName: e.target.value })}
@@ -503,17 +547,9 @@ function Auth({ onAuth }) {
               </label>
 
               <label>
-                <span>聯絡電話</span>
-                <input
-                  placeholder="例：0912-345-678"
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
-                />
-              </label>
-
-              <label>
                 <span>統一編號（選填）</span>
                 <input
+                  name="taxId"
                   placeholder="例：12345678，尚未設立可先空白"
                   value={form.taxId}
                   onChange={(e) => setForm({ ...form, taxId: e.target.value })}
@@ -577,32 +613,11 @@ function Auth({ onAuth }) {
               </label>
 
               <label>
-                <span>使用方案</span>
-                <select
-                  value={form.plan}
-                  onChange={(e) => setForm({ ...form, plan: e.target.value })}
-                >
-                  <option value="business">Business</option>
-                  <option value="pro">Pro</option>
-                  <option value="accountant">Accountant</option>
-                </select>
-              </label>
-
-              <label>
                 <span>官方 LINE / 聯絡方式（選填）</span>
                 <input
                   placeholder="可填 LINE ID 或方便聯繫方式"
                   value={form.lineContact}
                   onChange={(e) => setForm({ ...form, lineContact: e.target.value })}
-                />
-              </label>
-
-              <label>
-                <span>使用需求</span>
-                <textarea
-                  placeholder="請簡短說明你想用 BookAI 管理哪些流程，例如進貨、銷貨、庫存、工程案場或報表。"
-                  value={form.useCase}
-                  onChange={(e) => setForm({ ...form, useCase: e.target.value })}
                 />
               </label>
 
@@ -696,8 +711,8 @@ function PendingReviewPage({ user, company, onLogout, onNavigate }) {
 
 function accountNeedsReview(user, company) {
   if (!user || user.isAdmin || user.isFounder) return false;
-  const status = user.status || user.review_status || company?.review_status || 'pending_review';
-  return !['approved', 'founder', 'admin', 'demo'].includes(status) && company?.review_status !== 'approved';
+  const status = user.approval_status || user.status || user.review_status || company?.approval_status || company?.review_status || 'pending_review';
+  return !['approved', 'founder', 'admin', 'demo'].includes(status) && company?.approval_status !== 'approved' && company?.review_status !== 'approved';
 }
 
 function Shell({ onLogout }) {
@@ -6411,6 +6426,8 @@ function AdminConsole() {
   const [featureNote, setFeatureNote] = useState('');
   const [feedbackStatusFilter, setFeedbackStatusFilter] = useState('all');
   const [feedbackCategoryFilter, setFeedbackCategoryFilter] = useState('all');
+  const [memberStatusFilter, setMemberStatusFilter] = useState('pending_review');
+  const [memberPlanForm, setMemberPlanForm] = useState({});
   const [demoResult, setDemoResult] = useState(null);
   const [demoLoading, setDemoLoading] = useState(false);
   const [message, setMessage] = useState('');
@@ -6424,7 +6441,7 @@ function AdminConsole() {
         api('/admin/settings'),
         api('/admin/feedbacks'),
         api('/admin/features/catalog'),
-        api('/admin/review/users')
+        api(`/admin/members?status=${memberStatusFilter}`)
       ]);
       setCompanies(companyRows || []);
       setSettings(settingRows || {});
@@ -6432,9 +6449,16 @@ function AdminConsole() {
       setFeedbacks(feedbackRows || []);
       setFeatureCatalog(featureRows || []);
       setReviewUsers(reviewRows || []);
+      setMemberPlanForm((old) => {
+        const next = { ...old };
+        (reviewRows || []).forEach((row) => {
+          next[row.id] = next[row.id] || row.plan || 'trial';
+        });
+        return next;
+      });
       setSelectedId((old) => old || companyRows?.[0]?.id || null);
     } catch (err) {
-      setError(err.message || '讀取 BookAI 營運後台失敗');
+      setError(err.message || '會員審核資料讀取失敗，請稍後再試或聯繫系統管理員。');
     }
   }
 
@@ -6442,9 +6466,20 @@ function AdminConsole() {
     try {
       setError('');
       setMessage('');
-      await api(`/admin/review/users/${userId}/${action}`, {
-        method: 'POST',
-        body: JSON.stringify({ reviewNote: note })
+      const statusMap = {
+        approve: 'approved',
+        reject: 'rejected',
+        suspend: 'suspended',
+        restore: 'approved',
+        demo: 'demo'
+      };
+      await api(`/admin/members/${userId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          approval_status: statusMap[action] || action,
+          plan: memberPlanForm[userId] || 'trial',
+          reviewNote: note
+        })
       });
       setMessage('會員審核狀態已更新');
       await loadAdmin();
@@ -6455,7 +6490,7 @@ function AdminConsole() {
 
   useEffect(() => {
     loadAdmin();
-  }, []);
+  }, [memberStatusFilter]);
 
   const selected = companies.find((c) => c.id === selectedId) || null;
 
@@ -6521,7 +6556,7 @@ function AdminConsole() {
       return expires >= now && expires <= soonLimit;
     }).length,
     testers: companies.filter((c) => Number(c.is_tester || 0) === 1).length,
-    pendingReview: reviewUsers.filter((u) => (u.status || u.review_status) === 'pending_review').length,
+    pendingReview: reviewUsers.filter((u) => (u.approval_status || u.status || u.review_status) === 'pending_review').length,
     newFeedbacks: feedbacks.filter((f) => f.status === 'new').length,
     mrr: companies.reduce((sum, c) => {
       if (!c.is_paid_customer || c.billing_status !== 'active') return sum;
@@ -6696,21 +6731,34 @@ function AdminConsole() {
               <h2>會員審核中心</h2>
               <p>審核新申請的企業使用者，控管測試期准入品質與資料安全。</p>
             </div>
-            <button type="button" onClick={loadAdmin}>重新整理</button>
+            <div className="inline-actions">
+              <select value={memberStatusFilter} onChange={(e) => setMemberStatusFilter(e.target.value)}>
+                <option value="pending_review">等待審核</option>
+                <option value="approved">已通過</option>
+                <option value="rejected">已拒絕</option>
+                <option value="suspended">已暫停</option>
+                <option value="demo">Demo</option>
+                <option value="all">全部</option>
+              </select>
+              <button type="button" onClick={loadAdmin}>重新整理</button>
+            </div>
           </div>
           <div className="table-scroll">
             <table className="admin-customer-table">
               <thead>
                 <tr>
+                  <th>申請時間</th>
                   <th>Email</th>
                   <th>公司 / 品牌</th>
                   <th>聯絡人</th>
                   <th>電話</th>
+                  <th>LINE</th>
                   <th>統編</th>
                   <th>階段</th>
                   <th>行業</th>
-                  <th>需求</th>
                   <th>狀態</th>
+                  <th>目前方案</th>
+                  <th>設定方案</th>
                   <th>條款</th>
                   <th>操作</th>
                 </tr>
@@ -6718,19 +6766,33 @@ function AdminConsole() {
               <tbody>
                 {reviewUsers.slice(0, 40).map((row) => (
                   <tr key={row.id}>
+                    <td>{formatDate(row.created_at)}</td>
                     <td>{row.email}</td>
                     <td>{row.company_name || '-'}</td>
-                    <td>{row.contact_name || row.name || '-'}</td>
+                    <td>{row.company_contact_name || row.contact_name || row.name || '-'}</td>
                     <td>{row.company_phone || row.phone || '-'}</td>
-                    <td>{row.tax_id || '未提供'}</td>
+                    <td>{row.company_line_contact || row.line_contact || '-'}</td>
+                    <td>{row.tax_id || row.user_tax_id || '未提供'}</td>
                     <td>{row.company_company_stage || row.company_stage || '-'}</td>
                     <td>{getIndustryName(row.industry)}</td>
-                    <td>{row.company_use_case || row.use_case || '-'}</td>
-                    <td><span className="admin-pill">{row.status || row.review_status || 'pending_review'}</span></td>
+                    <td><span className="admin-pill">{row.approval_status || row.status || row.review_status || 'pending_review'}</span></td>
+                    <td>{row.plan || 'trial'}</td>
+                    <td>
+                      <select
+                        value={memberPlanForm[row.id] || row.plan || 'trial'}
+                        onChange={(e) => setMemberPlanForm({ ...memberPlanForm, [row.id]: e.target.value })}
+                      >
+                        <option value="trial">trial</option>
+                        <option value="starter">starter</option>
+                        <option value="pro">pro</option>
+                        <option value="enterprise">enterprise</option>
+                        <option value="custom">custom</option>
+                      </select>
+                    </td>
                     <td>{row.terms_version || '-'}</td>
                     <td>
                       <div className="inline-actions">
-                        <button type="button" onClick={() => reviewUser(row.id, 'approve')}>通過</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'approve')}>通過審核 / 啟用帳號</button>
                         <button type="button" onClick={() => reviewUser(row.id, 'reject', '未通過審核')}>拒絕</button>
                         <button type="button" onClick={() => reviewUser(row.id, 'suspend', '暫停使用')}>停權</button>
                         <button type="button" onClick={() => reviewUser(row.id, 'restore')}>恢復</button>
@@ -6740,7 +6802,7 @@ function AdminConsole() {
                   </tr>
                 ))}
                 {!reviewUsers.length && (
-                  <tr><td colSpan="11">目前沒有會員申請資料。</td></tr>
+                  <tr><td colSpan="14">目前沒有會員申請資料。</td></tr>
                 )}
               </tbody>
             </table>
