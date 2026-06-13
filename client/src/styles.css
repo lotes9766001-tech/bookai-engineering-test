@@ -2446,6 +2446,172 @@ tr:hover td {
   }
 }
 
+/* Admin Console readability polish */
+.admin-console {
+  color: #1f2937;
+}
+
+.admin-cockpit {
+  gap: 16px;
+}
+
+.admin-hero {
+  padding: 24px 28px;
+  border-radius: 20px;
+}
+
+.admin-hero h1 {
+  color: #0f172a;
+  font-size: clamp(40px, 4vw, 48px);
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.admin-hero p {
+  color: #334155;
+  font-size: 17px;
+  line-height: 1.6;
+}
+
+.admin-control-panel {
+  padding: 20px;
+  border-radius: 18px;
+  border-color: #e5e7eb;
+  background: #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
+}
+
+.admin-panel-head {
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.admin-panel-head h2,
+.admin-control-panel h2 {
+  color: #111827;
+  font-size: clamp(28px, 2.4vw, 32px);
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.admin-panel-head p {
+  color: #334155;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.admin-console input,
+.admin-console select {
+  min-height: 38px;
+  border-color: #d1d5db;
+  background: #ffffff;
+  color: #1f2937;
+  font-size: 14px;
+}
+
+.admin-console button {
+  min-height: 38px;
+  padding: 9px 14px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.admin-customer-table {
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.admin-customer-table table {
+  min-width: 1180px;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.admin-customer-table th {
+  padding: 14px 16px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+  white-space: nowrap;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.admin-customer-table td {
+  padding: 14px 16px;
+  color: #1f2937;
+  font-size: 14px;
+  line-height: 1.5;
+  vertical-align: middle;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.admin-customer-table tr {
+  cursor: default;
+}
+
+.admin-customer-table tbody tr:hover,
+.admin-customer-table tr.selected {
+  background: #f8fafc;
+}
+
+.admin-customer-table th:nth-child(2),
+.admin-customer-table td:nth-child(2) {
+  min-width: 220px;
+}
+
+.admin-customer-table th:nth-child(3),
+.admin-customer-table td:nth-child(3) {
+  min-width: 180px;
+}
+
+.admin-customer-table th:nth-child(4),
+.admin-customer-table td:nth-child(4),
+.admin-customer-table th:nth-child(5),
+.admin-customer-table td:nth-child(5) {
+  min-width: 140px;
+}
+
+.admin-customer-table td .admin-pill {
+  margin-bottom: 0;
+}
+
+.admin-pill {
+  padding: 6px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.admin-detail-list span,
+.admin-customer-table small {
+  color: #64748b;
+}
+
+@media (max-width: 820px) {
+  .admin-hero h1 {
+    font-size: 36px;
+  }
+
+  .admin-panel-head h2,
+  .admin-control-panel h2 {
+    font-size: 26px;
+  }
+
+  .admin-panel-head p,
+  .admin-hero p {
+    font-size: 15px;
+  }
+}
+
 /* ============================================================
    BookAI v5.1.2 UI Polish / CMS Polish / Sidebar Hotfix
    ============================================================ */
