@@ -2338,7 +2338,13 @@ app.get('/api/admin/review/users', auth, requireAdmin, async (req, res) => {
   try {
     res.json(await listAdminMembers(req.query.status || 'all'));
   } catch (err) {
-    console.error('admin review users failed', { userId: req.user?.id, code: err.code, message: err.message });
+    console.error('[admin review users] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
     res.status(500).json({ error: '資料讀取失敗', code: 'DATABASE_ERROR' });
   }
 });
@@ -2347,7 +2353,13 @@ app.get('/api/admin/members', auth, requireAdmin, async (req, res) => {
   try {
     res.json(await listAdminMembers(req.query.status || 'all'));
   } catch (err) {
-    console.error('admin members list failed', { userId: req.user?.id, code: err.code, message: err.message });
+    console.error('[admin members] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
     res.status(500).json({ error: '會員審核資料讀取失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
   }
 });
@@ -2636,41 +2648,75 @@ app.get('/api/admin/features/catalog', auth, requireAdmin, (req, res) => {
   res.json(FEATURE_CATALOG);
 });
 
-app.get('/api/admin/companies/:companyId/features', auth, requireAdmin, (req, res) => {
+app.get('/api/admin/companies/:companyId/features', auth, requireAdmin, async (req, res) => {
   const companyId = Number(req.params.companyId);
 
   if (!companyId) {
     return res.status(400).json({ error: '缺少 companyId' });
   }
 
-  const companyRow = db.prepare(`
-    SELECT *
-    FROM companies
-    WHERE id = ?
-  `).get(companyId);
+  try {
+    const companyRow = PG_ENABLED
+      ? await pgOne('SELECT * FROM companies WHERE id = $1', [companyId])
+      : db.prepare(`
+        SELECT *
+        FROM companies
+        WHERE id = ?
+      `).get(companyId);
 
-  if (!companyRow) {
-    return res.status(404).json({ error: '找不到公司' });
+    if (!companyRow) {
+      return res.status(404).json({ error: '找不到公司' });
+    }
+
+    const overrideRows = PG_ENABLED
+      ? await pgAll(`
+        SELECT feature_key, enabled, note, updated_at
+        FROM company_feature_overrides
+        WHERE company_id = $1
+      `, [companyId])
+      : getCompanyFeatureOverrides(companyId);
+
+    const overrides = overrideRows.reduce((acc, row) => {
+      acc[row.feature_key] = {
+        enabled: Number(row.enabled) === 1,
+        note: row.note || '',
+        updatedAt: row.updated_at || ''
+      };
+      return acc;
+    }, {});
+
+    const effectiveFeatures = getEffectiveFeatures(companyRow);
+    if (PG_ENABLED) {
+      overrideRows.forEach((row) => {
+        if (!FEATURE_KEYS.has(row.feature_key)) return;
+        const hasFeature = effectiveFeatures.includes(row.feature_key);
+        if (Number(row.enabled) === 1 && !hasFeature) effectiveFeatures.push(row.feature_key);
+        if (Number(row.enabled) !== 1 && hasFeature) {
+          effectiveFeatures.splice(effectiveFeatures.indexOf(row.feature_key), 1);
+        }
+      });
+    }
+
+    res.json({
+      companyId,
+      plan: companyRow.plan,
+      effectiveFeatures,
+      overrides
+    });
+  } catch (err) {
+    console.error('[admin company features] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      companyId,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: '功能授權資料讀取失敗', code: 'DATABASE_ERROR' });
   }
-
-  const overrides = getCompanyFeatureOverrides(companyId).reduce((acc, row) => {
-    acc[row.feature_key] = {
-      enabled: Number(row.enabled) === 1,
-      note: row.note || '',
-      updatedAt: row.updated_at || ''
-    };
-    return acc;
-  }, {});
-
-  res.json({
-    companyId,
-    plan: companyRow.plan,
-    effectiveFeatures: getEffectiveFeatures(companyRow),
-    overrides
-  });
 });
 
-app.put('/api/admin/companies/:companyId/features', auth, requireAdmin, (req, res) => {
+app.put('/api/admin/companies/:companyId/features', auth, requireAdmin, async (req, res) => {
   const companyId = Number(req.params.companyId);
   const { features = {}, note = '' } = req.body || {};
 
@@ -2678,58 +2724,96 @@ app.put('/api/admin/companies/:companyId/features', auth, requireAdmin, (req, re
     return res.status(400).json({ error: '缺少 companyId' });
   }
 
-  const companyRow = db.prepare(`
-    SELECT id
-    FROM companies
-    WHERE id = ?
-  `).get(companyId);
+  try {
+    const companyRow = PG_ENABLED
+      ? await pgOne('SELECT id FROM companies WHERE id = $1', [companyId])
+      : db.prepare(`
+        SELECT id
+        FROM companies
+        WHERE id = ?
+      `).get(companyId);
 
-  if (!companyRow) {
-    return res.status(404).json({ error: '找不到公司' });
-  }
+    if (!companyRow) {
+      return res.status(404).json({ error: '找不到公司' });
+    }
 
-  const entries = Object.entries(features).filter(([key]) => FEATURE_KEYS.has(key));
+    const entries = Object.entries(features).filter(([key]) => FEATURE_KEYS.has(key));
 
-  if (!entries.length) {
-    return res.status(400).json({ error: '沒有可更新的功能權限' });
-  }
+    if (!entries.length) {
+      return res.status(400).json({ error: '沒有可更新的功能權限' });
+    }
 
-  const stmt = db.prepare(`
-    INSERT INTO company_feature_overrides (
-      company_id,
-      feature_key,
-      enabled,
-      note,
-      updated_at
-    )
-    VALUES (?,?,?,?,CURRENT_TIMESTAMP)
-    ON CONFLICT(company_id, feature_key)
-    DO UPDATE SET
-      enabled = excluded.enabled,
-      note = excluded.note,
-      updated_at = CURRENT_TIMESTAMP
-  `);
+    if (PG_ENABLED) {
+      for (const [key, enabled] of entries) {
+        await pgQuery(`
+          INSERT INTO company_feature_overrides (
+            company_id,
+            feature_key,
+            enabled,
+            note,
+            updated_at
+          )
+          VALUES ($1,$2,$3,$4,CURRENT_TIMESTAMP)
+          ON CONFLICT(company_id, feature_key)
+          DO UPDATE SET
+            enabled = EXCLUDED.enabled,
+            note = EXCLUDED.note,
+            updated_at = CURRENT_TIMESTAMP
+        `, [companyId, key, toAdminBoolean(enabled), String(note || '系統管理員調整')]);
+      }
+    } else {
+      const stmt = db.prepare(`
+        INSERT INTO company_feature_overrides (
+          company_id,
+          feature_key,
+          enabled,
+          note,
+          updated_at
+        )
+        VALUES (?,?,?,?,CURRENT_TIMESTAMP)
+        ON CONFLICT(company_id, feature_key)
+        DO UPDATE SET
+          enabled = excluded.enabled,
+          note = excluded.note,
+          updated_at = CURRENT_TIMESTAMP
+      `);
 
-  const trx = db.transaction(() => {
-    entries.forEach(([key, enabled]) => {
-      stmt.run(companyId, key, toAdminBoolean(enabled), String(note || '系統管理員調整'));
+      const trx = db.transaction(() => {
+        entries.forEach(([key, enabled]) => {
+          stmt.run(companyId, key, toAdminBoolean(enabled), String(note || '系統管理員調整'));
+        });
+      });
+
+      trx();
+    }
+
+    audit(companyId, req.user.id, 'admin_feature_access_updated', JSON.stringify(
+      Object.fromEntries(entries.map(([key, enabled]) => [key, Boolean(Number(enabled) || enabled === true)]))
+    ));
+
+    const overrideRows = PG_ENABLED
+      ? await pgAll('SELECT feature_key, enabled FROM company_feature_overrides WHERE company_id = $1', [companyId])
+      : getCompanyFeatureOverrides(companyId);
+
+    res.json({
+      ok: true,
+      companyId,
+      overrides: overrideRows.reduce((acc, row) => {
+        acc[row.feature_key] = Number(row.enabled) === 1;
+        return acc;
+      }, {})
     });
-  });
-
-  trx();
-
-  audit(companyId, req.user.id, 'admin_feature_access_updated', JSON.stringify(
-    Object.fromEntries(entries.map(([key, enabled]) => [key, Boolean(Number(enabled) || enabled === true)]))
-  ));
-
-  res.json({
-    ok: true,
-    companyId,
-    overrides: getCompanyFeatureOverrides(companyId).reduce((acc, row) => {
-      acc[row.feature_key] = Number(row.enabled) === 1;
-      return acc;
-    }, {})
-  });
+  } catch (err) {
+    console.error('[admin company features update] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      companyId,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: '功能授權資料更新失敗', code: 'DATABASE_ERROR' });
+  }
 });
 
 app.patch('/api/admin/companies/:companyId/billing', auth, requireAdmin, async (req, res) => {
@@ -3094,39 +3178,81 @@ app.post('/api/feedbacks/create', auth, company, (req, res) => {
   res.json(feedbackRow(created));
 });
 
-app.get('/api/admin/feedbacks', auth, requireAdmin, (req, res) => {
-  const status = String(req.query.status || '').trim();
-  const category = String(req.query.category || '').trim();
-  const where = [];
-  const params = [];
+app.get('/api/admin/feedbacks', auth, requireAdmin, async (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const category = String(req.query.category || '').trim();
 
-  if (status && feedbackStatuses.has(status)) {
-    where.push('f.status = ?');
-    params.push(status);
+    if (PG_ENABLED) {
+      const where = [];
+      const params = [];
+
+      if (status && feedbackStatuses.has(status)) {
+        params.push(status);
+        where.push(`f.status = $${params.length}`);
+      }
+
+      if (category && feedbackCategories.has(category)) {
+        params.push(category);
+        where.push(`f.category = $${params.length}`);
+      }
+
+      const rows = await pgAll(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY f.created_at DESC, f.id DESC
+      `, params);
+
+      return res.json(rows.map(feedbackRow));
+    }
+
+    const where = [];
+    const params = [];
+
+    if (status && feedbackStatuses.has(status)) {
+      where.push('f.status = ?');
+      params.push(status);
+    }
+
+    if (category && feedbackCategories.has(category)) {
+      where.push('f.category = ?');
+      params.push(category);
+    }
+
+    const rows = db.prepare(`
+      SELECT
+        f.*,
+        c.name AS company_name,
+        u.name AS user_name,
+        u.email AS user_email
+      FROM feedbacks f
+      LEFT JOIN companies c ON c.id = f.company_id
+      LEFT JOIN users u ON u.id = f.user_id
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY f.created_at DESC, f.id DESC
+    `).all(...params);
+
+    res.json(rows.map(feedbackRow));
+  } catch (err) {
+    console.error('[admin feedbacks] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: '產品回饋資料讀取失敗', code: 'DATABASE_ERROR' });
   }
-
-  if (category && feedbackCategories.has(category)) {
-    where.push('f.category = ?');
-    params.push(category);
-  }
-
-  const rows = db.prepare(`
-    SELECT
-      f.*,
-      c.name AS company_name,
-      u.name AS user_name,
-      u.email AS user_email
-    FROM feedbacks f
-    LEFT JOIN companies c ON c.id = f.company_id
-    LEFT JOIN users u ON u.id = f.user_id
-    ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-    ORDER BY f.created_at DESC, f.id DESC
-  `).all(...params);
-
-  res.json(rows.map(feedbackRow));
 });
 
-app.put('/api/admin/feedbacks/:id', auth, requireAdmin, (req, res) => {
+app.put('/api/admin/feedbacks/:id', auth, requireAdmin, async (req, res) => {
   const feedbackId = Number(req.params.id);
   const body = req.body || {};
   const status = feedbackStatuses.has(body.status) ? body.status : null;
@@ -3134,36 +3260,73 @@ app.put('/api/admin/feedbacks/:id', auth, requireAdmin, (req, res) => {
   if (!feedbackId) return res.status(400).json({ error: '缺少 feedback id' });
   if (!status) return res.status(400).json({ error: '不支援的回饋狀態' });
 
-  const existing = db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(feedbackId);
-  if (!existing) return res.status(404).json({ error: '找不到回饋' });
+  try {
+    const existing = PG_ENABLED
+      ? await pgOne('SELECT * FROM feedbacks WHERE id = $1', [feedbackId])
+      : db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(feedbackId);
+    if (!existing) return res.status(404).json({ error: '找不到回饋' });
 
-  db.prepare(`
-    UPDATE feedbacks
-    SET
-      status = ?,
-      admin_note = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(status, body.admin_note || body.adminNote || '', feedbackId);
+    if (PG_ENABLED) {
+      await pgQuery(`
+        UPDATE feedbacks
+        SET
+          status = $1,
+          admin_note = $2,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = $3
+      `, [status, body.admin_note || body.adminNote || '', feedbackId]);
+    } else {
+      db.prepare(`
+        UPDATE feedbacks
+        SET
+          status = ?,
+          admin_note = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(status, body.admin_note || body.adminNote || '', feedbackId);
+    }
 
-  audit(existing.company_id, req.user.id, 'admin_feedback_updated', JSON.stringify({
-    feedbackId,
-    status
-  }));
+    audit(existing.company_id, req.user.id, 'admin_feedback_updated', JSON.stringify({
+      feedbackId,
+      status
+    }));
 
-  const updated = db.prepare(`
-    SELECT
-      f.*,
-      c.name AS company_name,
-      u.name AS user_name,
-      u.email AS user_email
-    FROM feedbacks f
-    LEFT JOIN companies c ON c.id = f.company_id
-    LEFT JOIN users u ON u.id = f.user_id
-    WHERE f.id = ?
-  `).get(feedbackId);
+    const updated = PG_ENABLED
+      ? await pgOne(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.id = $1
+      `, [feedbackId])
+      : db.prepare(`
+        SELECT
+          f.*,
+          c.name AS company_name,
+          u.name AS user_name,
+          u.email AS user_email
+        FROM feedbacks f
+        LEFT JOIN companies c ON c.id = f.company_id
+        LEFT JOIN users u ON u.id = f.user_id
+        WHERE f.id = ?
+      `).get(feedbackId);
 
-  res.json(feedbackRow(updated));
+    res.json(feedbackRow(updated));
+  } catch (err) {
+    console.error('[admin feedback update] failed', {
+      route: req.path,
+      userId: req.user?.id,
+      feedbackId,
+      code: err.code,
+      message: err.message,
+      stack: err.stack
+    });
+    res.status(500).json({ error: '產品回饋資料更新失敗', code: 'DATABASE_ERROR' });
+  }
 });
 
 const commerceIndustries = new Set([
