@@ -22,6 +22,7 @@ import { api, setToken, clearToken, getToken } from './lib/api';
 import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
+import WebsiteCmsPage from './pages/WebsiteCmsPage.jsx';
 
 const planNames = {
   business: 'Business',
@@ -37,6 +38,7 @@ const featureByPage = {
 
 function getPageFeatureKey(page) {
   if (page === 'founder') return null;
+  if (page === 'website') return 'commerce_site';
   return featureByPage[page] || page;
 }
 
@@ -843,7 +845,14 @@ function Shell({ onLogout }) {
         ...planNav.slice(5)
       ]
     : planNav;
-  const allowedCompanyNav = commerceNav.filter(([id]) => hasCompanyFeature(company, id));
+  const websiteNav = commerceNav.some(([id]) => id === 'website')
+    ? commerceNav
+    : [
+        ...commerceNav.slice(0, Math.max(1, commerceNav.length - 1)),
+        ['website', '品牌官網', Building2],
+        ...commerceNav.slice(Math.max(1, commerceNav.length - 1))
+      ];
+  const allowedCompanyNav = websiteNav.filter(([id]) => hasCompanyFeature(company, id));
   const visibleNav = userIsAdmin
     ? [...allowedCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
     : allowedCompanyNav;
@@ -1011,6 +1020,7 @@ if (!me || !company) {
         {!needsReview && page === 'accountant' && <Accountant companyId={companyId} />}
         {!needsReview && page === 'reports' && <Reports companyId={companyId} company={company} />}
         {!needsReview && page === 'settings' && <Settings company={company} />}
+        {!needsReview && page === 'website' && <WebsiteCmsPage />}
         {!needsReview && page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
         {!needsReview && page === 'admin' && userIsAdmin && <AdminConsole />}
         {!needsReview && page === 'founder' && userIsFounder && <FounderDashboard />}
