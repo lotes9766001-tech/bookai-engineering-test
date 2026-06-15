@@ -530,7 +530,6 @@ export async function initPostgresDb() {
     );
 
     ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending_review';
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'member';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'pending_review';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending_review';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS approved_at TEXT;
@@ -548,8 +547,6 @@ export async function initPostgresDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_name TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tax_id TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS use_case TEXT;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TEXT;
-    ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TEXT;
 
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'pending_review';
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending_review';

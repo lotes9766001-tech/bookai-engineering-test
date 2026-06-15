@@ -789,7 +789,6 @@ export function initDb() {
   safeAddColumn('companies', 'industry_type', 'TEXT');
   safeAddColumn('companies', 'beta_approved_at', 'TEXT');
   safeAddColumn('users', 'last_login_at', 'TEXT');
-  safeAddColumn('users', 'role', "TEXT DEFAULT 'member'");
   safeAddColumn('users', 'created_source', 'TEXT');
   safeAddColumn('users', 'created_utm_source', 'TEXT');
   safeAddColumn('users', 'login_count', 'INTEGER DEFAULT 0');
@@ -811,8 +810,6 @@ export function initDb() {
   safeAddColumn('users', 'contact_name', 'TEXT');
   safeAddColumn('users', 'tax_id', 'TEXT');
   safeAddColumn('users', 'use_case', 'TEXT');
-  safeAddColumn('users', 'deleted_at', 'TEXT');
-  safeAddColumn('users', 'updated_at', 'TEXT');
 
   const defaultSettings = {
     official_site_url: 'https://bookai-engineering-official.onrender.com',
