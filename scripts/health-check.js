@@ -61,6 +61,32 @@ if (serverIndexSource.includes('postgresReady') && serverIndexSource.includes('p
   fail('/api/health 缺少 PostgreSQL 診斷欄位');
 }
 
+if (
+  serverIndexSource.includes("app.get('/api/admin/members/pending-count'") &&
+  serverIndexSource.includes("app.get('/api/admin/members/summary'") &&
+  serverIndexSource.includes("app.delete('/api/admin/members/:id'") &&
+  serverIndexSource.includes("app.patch('/api/admin/members/:id/status'") &&
+  serverIndexSource.includes("app.patch('/api/admin/members/:id/role'")
+) {
+  ok('Admin / Founder 會員管理 API 已包含 pending-count、summary、soft delete、status、role');
+} else {
+  hasError = true;
+  fail('Admin / Founder 會員管理 API 缺少 Package 1A 必要端點');
+}
+
+if (
+  serverIndexSource.includes('function isFounderUser') &&
+  serverIndexSource.includes('function isAdminUser') &&
+  serverIndexSource.includes('return Boolean(user?.isAdmin || isAdminEmail(user?.email)') &&
+  serverIndexSource.includes('Admin 不可刪除、停用或降權 Founder') &&
+  serverIndexSource.includes('不可移除最後一個 Founder')
+) {
+  ok('Admin / Founder 權限 helper 與 Founder 保護規則已存在');
+} else {
+  hasError = true;
+  fail('Admin / Founder 權限 helper 或 Founder 保護規則不完整');
+}
+
 if (serverPgDbSource.includes('process.env.DATABASE_URL') && serverPgDbSource.includes('rejectUnauthorized: false')) {
   ok('server/pg-db.js 使用 DATABASE_URL 並支援 Render/Supabase SSL');
 } else {
@@ -114,7 +140,7 @@ const pgCoreTables = [
 ];
 
 const pgCoreColumns = {
-  users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'approval_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'phone', 'line_contact', 'contact_name', 'company_stage', 'tax_id', 'created_at'],
+  users: ['id', 'name', 'email', 'password_hash', 'role', 'status', 'review_status', 'approval_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'phone', 'line_contact', 'contact_name', 'company_stage', 'tax_id', 'deleted_at', 'updated_at', 'created_at'],
   companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'approval_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'contact_name', 'phone', 'line_contact', 'company_stage', 'is_tester', 'tester_feedback_status', 'beta_status', 'is_free_beta', 'beta_group', 'beta_limit_group', 'product_line', 'industry_type', 'beta_approved_at', 'created_at'],
   company_users: ['id', 'company_id', 'user_id', 'role', 'created_at'],
   job_sites: ['id', 'company_id', 'name', 'site_name', 'client_name', 'quote_amount', 'received_amount', 'status', 'created_at', 'updated_at'],

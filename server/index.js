@@ -519,6 +519,15 @@ function isFounderEmail(email) {
   return normalizeEmail(email) === FOUNDER_EMAIL;
 }
 
+function isFounderUser(user) {
+  return Boolean(user?.isFounder || isFounderEmail(user?.email) || String(user?.role || '').toLowerCase() === 'founder');
+}
+
+function isAdminUser(user) {
+  const role = String(user?.role || '').toLowerCase();
+  return Boolean(user?.isAdmin || isAdminEmail(user?.email) || role === 'admin' || isFounderUser(user));
+}
+
 function privilegedStatusForEmail(email) {
   const normalized = normalizeEmail(email);
   if (isFounderEmail(normalized)) return 'founder';
@@ -577,14 +586,14 @@ async function hasFounderDebugAccess(req) {
 
 async function requireAdmin(req, res, next) {
   const user = PG_ENABLED
-    ? await pgOne(`SELECT email FROM users WHERE id = $1`, [req.user?.id])
+    ? await pgOne(`SELECT id, email, role, status, approval_status FROM users WHERE id = $1`, [req.user?.id])
     : db.prepare(`
-      SELECT email
+      SELECT id, email, role, status, approval_status
       FROM users
       WHERE id = ?
     `).get(req.user?.id);
 
-  if (user && isAdminEmail(user.email)) {
+  if (user && isAdminUser(user)) {
     return next();
   }
 
@@ -593,14 +602,14 @@ async function requireAdmin(req, res, next) {
 
 async function requireFounder(req, res, next) {
   const user = PG_ENABLED
-    ? await pgOne(`SELECT email FROM users WHERE id = $1`, [req.user?.id])
+    ? await pgOne(`SELECT id, email, role, status, approval_status FROM users WHERE id = $1`, [req.user?.id])
     : db.prepare(`
-      SELECT email
+      SELECT id, email, role, status, approval_status
       FROM users
       WHERE id = ?
     `).get(req.user?.id);
 
-  if (user && isFounderEmail(user.email)) {
+  if (user && isFounderUser(user)) {
     return next();
   }
 
@@ -1842,8 +1851,9 @@ app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), as
     id: user.id,
     name: user.name,
     email: user.email,
-    isAdmin: isAdminEmail(user.email),
-    isFounder: isFounderEmail(user.email)
+    role: user.role || privilegedStatusForEmail(user.email) || 'member',
+    isAdmin: isAdminUser(user),
+    isFounder: isFounderUser(user)
   };
 
   res.json({
@@ -1859,6 +1869,7 @@ app.get('/api/me', auth, async (req, res) => {
         id,
         name,
         email,
+        COALESCE(role, 'member') AS role,
         COALESCE(status, 'pending_review') AS status,
         COALESCE(review_status, 'pending_review') AS review_status,
         COALESCE(approval_status, review_status, status, 'pending_review') AS approval_status,
@@ -1873,6 +1884,7 @@ app.get('/api/me', auth, async (req, res) => {
         id,
         name,
         email,
+        COALESCE(role, 'member') AS role,
         COALESCE(status, 'pending_review') AS status,
         COALESCE(review_status, 'pending_review') AS review_status,
         COALESCE(approval_status, review_status, status, 'pending_review') AS approval_status,
@@ -1884,8 +1896,8 @@ app.get('/api/me', auth, async (req, res) => {
   `).get(req.user.id);
 
   if (user) {
-    user.isAdmin = isAdminEmail(user.email);
-    user.isFounder = isFounderEmail(user.email);
+    user.isAdmin = isAdminUser(user);
+    user.isFounder = isFounderUser(user);
     if (user.isFounder) {
       user.status = 'founder';
       user.review_status = 'approved';
@@ -2295,7 +2307,7 @@ const adminWebsiteStatuses = new Set(['none', 'planning', 'building', 'live', 'p
 const testerFeedbackStatuses = new Set(['尚未回饋', '已回饋', '需追蹤', '已完成測試']);
 const feedbackCategories = new Set(['操作問題', '介面建議', '功能需求', '錯誤回報', '其他']);
 const feedbackStatuses = new Set(['new', 'reviewing', 'resolved', 'ignored']);
-const reviewStatuses = new Set(['pending_review', 'approved', 'rejected', 'suspended', 'founder', 'admin', 'demo']);
+const reviewStatuses = new Set(['pending_review', 'approved', 'rejected', 'suspended', 'founder', 'admin', 'demo', 'deleted']);
 const memberPlans = new Set(['trial', 'starter', 'pro', 'enterprise', 'custom']);
 const productLines = new Set(['engineering', 'commerce', 'restaurant', 'beverage', 'retail', 'studio', 'accountant', 'general']);
 const betaStatuses = new Set(['not_started', 'pending_review', 'approved', 'rejected', 'suspended', 'demo']);
@@ -2310,23 +2322,144 @@ const adminSettingKeys = new Set([
   'system_announcement'
 ]);
 
+const memberStatusAliases = {
+  active: 'approved',
+  disabled: 'suspended'
+};
+const memberWritableStatuses = new Set(['pending_review', 'approved', 'active', 'rejected', 'suspended', 'disabled', 'deleted']);
+const memberWritableRoles = new Set(['founder', 'admin', 'owner', 'staff', 'member', 'tester']);
+
+function adminActionError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function normalizeMemberStatus(status) {
+  const raw = String(status || '').trim().toLowerCase();
+  return memberStatusAliases[raw] || raw;
+}
+
+async function getTargetUserById(id) {
+  const userId = Number(id);
+  if (!Number.isInteger(userId) || userId <= 0) return null;
+
+  const sql = `
+    SELECT
+      id,
+      name,
+      email,
+      role,
+      status,
+      review_status,
+      approval_status,
+      deleted_at,
+      updated_at,
+      last_login_at,
+      created_at
+    FROM users
+    WHERE id = ${PG_ENABLED ? '$1' : '?'}
+  `;
+
+  return PG_ENABLED ? pgOne(sql, [userId]) : db.prepare(sql).get(userId);
+}
+
+function assertNotSelfAction(actor, target, action = 'manage') {
+  if (Number(actor?.id) === Number(target?.id)) {
+    const messages = {
+      delete: '不允許刪除自己',
+      suspend: '不允許停用自己',
+      role: '不允許降權自己'
+    };
+    throw adminActionError(400, messages[action] || '不允許對自己執行此操作');
+  }
+}
+
+function assertFounderProtected(actor, target, action = 'manage') {
+  const actorIsFounder = isFounderUser(actor);
+  const targetIsFounder = isFounderUser(target);
+  const targetIsAdmin = isAdminUser(target);
+  const targetEmail = normalizeEmail(target?.email);
+
+  if (targetEmail === FOUNDER_EMAIL && ['delete', 'suspend', 'reject'].includes(action)) {
+    throw adminActionError(400, 'Founder 帳號不可刪除、停用或降權');
+  }
+
+  if (!actorIsFounder && targetIsFounder && ['delete', 'suspend', 'role', 'reject'].includes(action)) {
+    throw adminActionError(403, 'Admin 不可刪除、停用或降權 Founder');
+  }
+
+  if (!actorIsFounder && targetIsAdmin && ['delete', 'suspend', 'role', 'reject'].includes(action)) {
+    throw adminActionError(403, 'Admin 不可刪除、停用或調整 Admin');
+  }
+}
+
+async function countFounderUsers() {
+  const sql = `
+    SELECT COUNT(*) AS count
+    FROM users
+    WHERE (
+      LOWER(email) = ${PG_ENABLED ? '$1' : '?'}
+      OR LOWER(COALESCE(role, '')) = 'founder'
+    )
+      AND COALESCE(status, '') NOT IN ('deleted', 'suspended', 'rejected')
+      AND deleted_at IS NULL
+  `;
+  const row = PG_ENABLED ? await pgOne(sql, [FOUNDER_EMAIL]) : db.prepare(sql).get(FOUNDER_EMAIL);
+  return Number(row?.count || 0);
+}
+
+async function assertLastFounderSafe(target, nextRoleOrStatus = '') {
+  const next = String(nextRoleOrStatus || '').trim().toLowerCase();
+  if (!isFounderUser(target)) return;
+  if (normalizeEmail(target?.email) === FOUNDER_EMAIL && next === 'founder') return;
+
+  if (normalizeEmail(target?.email) === FOUNDER_EMAIL) {
+    throw adminActionError(400, 'Founder 帳號不可刪除、停用或降權');
+  }
+
+  if (['deleted', 'suspended', 'disabled', 'rejected', 'admin', 'owner', 'staff', 'member', 'tester'].includes(next)) {
+    const founderCount = await countFounderUsers();
+    if (founderCount <= 1) {
+      throw adminActionError(400, '不可移除最後一個 Founder');
+    }
+  }
+}
+
+function memberResponse(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    isAdmin: isAdminUser(row),
+    isFounder: isFounderUser(row)
+  };
+}
+
 async function listAdminMembers(status = 'all') {
   const normalizedStatus = String(status || 'all').trim();
-  const hasStatusFilter = normalizedStatus !== 'all' && reviewStatuses.has(normalizedStatus);
-  const where = hasStatusFilter
-    ? PG_ENABLED
-      ? 'WHERE COALESCE(u.approval_status, u.status, u.review_status, $1) = $1'
-      : 'WHERE COALESCE(u.approval_status, u.status, u.review_status, ?) = ?'
-    : '';
-  const params = hasStatusFilter
-    ? PG_ENABLED ? [normalizedStatus] : [normalizedStatus, normalizedStatus]
-    : [];
+  const statusFilter = normalizeMemberStatus(normalizedStatus);
+  const hasStatusFilter = normalizedStatus !== 'all' && reviewStatuses.has(statusFilter);
+  const deletedPredicate = "COALESCE(u.status, '') = 'deleted' OR u.deleted_at IS NOT NULL";
+  let where = `WHERE NOT (${deletedPredicate})`;
+  let params = [];
+
+  if (hasStatusFilter) {
+    if (statusFilter === 'deleted') {
+      where = `WHERE (${deletedPredicate})`;
+    } else {
+      where = PG_ENABLED
+        ? `WHERE COALESCE(u.approval_status, u.status, u.review_status, $1) = $1 AND NOT (${deletedPredicate})`
+        : `WHERE COALESCE(u.approval_status, u.status, u.review_status, ?) = ? AND NOT (${deletedPredicate})`;
+      params = PG_ENABLED ? [statusFilter] : [statusFilter, statusFilter];
+    }
+  }
 
   const sql = `
     SELECT
       u.id,
       u.email,
       u.name,
+      COALESCE(u.role, 'member') AS role,
       u.phone,
       u.contact_name,
       u.tax_id AS user_tax_id,
@@ -2340,6 +2473,8 @@ async function listAdminMembers(status = 'all') {
       u.terms_accepted_at,
       u.terms_version,
       u.last_login_at,
+      u.deleted_at,
+      u.updated_at,
       COALESCE(u.login_count, 0) AS login_count,
       u.created_at,
       c.id AS company_id,
@@ -2404,16 +2539,104 @@ app.get('/api/admin/members', auth, requireAdmin, async (req, res) => {
   }
 });
 
+async function getAdminMemberSummary() {
+  const rows = PG_ENABLED
+    ? await pgAll(`
+      SELECT
+        COALESCE(status, approval_status, review_status, 'pending_review') AS status,
+        COALESCE(role, 'member') AS role,
+        email,
+        deleted_at
+      FROM users
+    `)
+    : db.prepare(`
+      SELECT
+        COALESCE(status, approval_status, review_status, 'pending_review') AS status,
+        COALESCE(role, 'member') AS role,
+        email,
+        deleted_at
+      FROM users
+    `).all();
+
+  const summary = {
+    total: 0,
+    pending_review: 0,
+    approved: 0,
+    active: 0,
+    suspended: 0,
+    disabled: 0,
+    rejected: 0,
+    deleted: 0,
+    admin: 0,
+    founder: 0
+  };
+
+  for (const row of rows) {
+    const status = normalizeMemberStatus(row.status || 'pending_review');
+    const deleted = status === 'deleted' || row.deleted_at;
+
+    summary.total += 1;
+    if (deleted) {
+      summary.deleted += 1;
+    } else if (status === 'approved') {
+      summary.approved += 1;
+      summary.active += 1;
+    } else if (status === 'suspended') {
+      summary.suspended += 1;
+      summary.disabled += 1;
+    } else if (Object.prototype.hasOwnProperty.call(summary, status)) {
+      summary[status] += 1;
+    }
+
+    if (isFounderUser(row)) summary.founder += 1;
+    else if (isAdminUser(row)) summary.admin += 1;
+  }
+
+  return summary;
+}
+
+app.get('/api/admin/members/pending-count', auth, requireAdmin, async (req, res) => {
+  try {
+    const row = PG_ENABLED
+      ? await pgOne(`
+        SELECT COUNT(*) AS count
+        FROM users
+        WHERE COALESCE(approval_status, status, review_status, 'pending_review') = 'pending_review'
+          AND COALESCE(status, '') <> 'deleted'
+          AND deleted_at IS NULL
+      `)
+      : db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM users
+        WHERE COALESCE(approval_status, status, review_status, 'pending_review') = 'pending_review'
+          AND COALESCE(status, '') <> 'deleted'
+          AND deleted_at IS NULL
+      `).get();
+
+    res.json({ ok: true, count: Number(row?.count || 0) });
+  } catch (err) {
+    console.error('[admin members pending-count] failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '會員統計資料讀取失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
+  }
+});
+
+app.get('/api/admin/members/summary', auth, requireAdmin, async (req, res) => {
+  try {
+    res.json({ ok: true, summary: await getAdminMemberSummary() });
+  } catch (err) {
+    console.error('[admin members summary] failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '會員統計資料讀取失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
+  }
+});
+
 async function updateMemberReview(userId, adminId, status, note = '', plan = 'trial', productLine = '') {
   const now = new Date().toISOString();
   const nextPlan = memberPlans.has(String(plan || '').trim()) ? String(plan).trim() : 'trial';
   const nextProductLine = productLines.has(String(productLine || '').trim()) ? String(productLine).trim() : '';
-  const existing = PG_ENABLED
-    ? await pgOne('SELECT id, email FROM users WHERE id = $1', [userId])
-    : db.prepare('SELECT id, email FROM users WHERE id = ?').get(userId);
+  const existing = await getTargetUserById(userId);
 
   if (!existing) return null;
-  if (isPrivilegedEmail(existing.email)) {
+  if (isAdminUser(existing)) {
     return { protected: true };
   }
 
@@ -2603,6 +2826,253 @@ app.patch('/api/admin/members/:id', auth, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error('admin member patch failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
     res.status(500).json({ error: '會員審核資料更新失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
+  }
+});
+
+app.patch('/api/admin/members/:id/status', auth, requireAdmin, async (req, res) => {
+  try {
+    const actor = await getTargetUserById(req.user.id);
+    const target = await getTargetUserById(req.params.id);
+    const rawStatus = String(req.body?.status || '').trim().toLowerCase();
+    const status = normalizeMemberStatus(rawStatus);
+
+    if (!target) return res.status(404).json({ error: '找不到使用者' });
+    if (!memberWritableStatuses.has(rawStatus)) {
+      return res.status(400).json({ error: '會員狀態不正確' });
+    }
+
+    const action = status === 'deleted'
+      ? 'delete'
+      : status === 'suspended'
+        ? 'suspend'
+        : status === 'rejected'
+          ? 'reject'
+          : 'manage';
+
+    if (['deleted', 'suspended'].includes(status)) {
+      assertNotSelfAction(actor, target, action === 'deleted' ? 'delete' : 'suspend');
+    }
+    assertFounderProtected(actor, target, action);
+    await assertLastFounderSafe(target, status);
+
+    const now = new Date().toISOString();
+    const reviewStatus = status === 'deleted' ? 'deleted' : status;
+    const approvalStatus = status === 'deleted' ? 'deleted' : status;
+
+    if (PG_ENABLED) {
+      await pgQuery(`
+        UPDATE users
+        SET status = $1,
+            review_status = $2,
+            approval_status = $3,
+            suspended_at = CASE WHEN $1 = 'suspended' THEN $4 ELSE suspended_at END,
+            suspended_by = CASE WHEN $1 = 'suspended' THEN $5 ELSE suspended_by END,
+            rejected_at = CASE WHEN $1 = 'rejected' THEN $4 ELSE rejected_at END,
+            rejected_by = CASE WHEN $1 = 'rejected' THEN $5 ELSE rejected_by END,
+            approved_at = CASE WHEN $1 = 'approved' THEN $4 ELSE approved_at END,
+            approved_by = CASE WHEN $1 = 'approved' THEN $5 ELSE approved_by END,
+            deleted_at = CASE WHEN $1 = 'deleted' THEN $4 ELSE NULL END,
+            updated_at = $4
+        WHERE id = $6
+      `, [status, reviewStatus, approvalStatus, now, req.user.id, target.id]);
+      await pgQuery(`
+        UPDATE companies
+        SET review_status = $1,
+            approval_status = $2,
+            is_active = CASE WHEN $1 = 'approved' THEN 1 ELSE 0 END,
+            beta_status = CASE WHEN $1 IN ('approved', 'rejected', 'suspended') THEN $1 ELSE beta_status END,
+            suspended_at = CASE WHEN $1 = 'suspended' THEN $3 ELSE suspended_at END,
+            suspended_by = CASE WHEN $1 = 'suspended' THEN $4 ELSE suspended_by END,
+            rejected_at = CASE WHEN $1 = 'rejected' THEN $3 ELSE rejected_at END,
+            rejected_by = CASE WHEN $1 = 'rejected' THEN $4 ELSE rejected_by END,
+            approved_at = CASE WHEN $1 = 'approved' THEN $3 ELSE approved_at END,
+            approved_by = CASE WHEN $1 = 'approved' THEN $4 ELSE approved_by END
+        WHERE owner_id = $5
+      `, [status === 'deleted' ? 'suspended' : status, status === 'deleted' ? 'suspended' : status, now, req.user.id, target.id]);
+    } else {
+      db.prepare(`
+        UPDATE users
+        SET status = ?,
+            review_status = ?,
+            approval_status = ?,
+            suspended_at = CASE WHEN ? = 'suspended' THEN ? ELSE suspended_at END,
+            suspended_by = CASE WHEN ? = 'suspended' THEN ? ELSE suspended_by END,
+            rejected_at = CASE WHEN ? = 'rejected' THEN ? ELSE rejected_at END,
+            rejected_by = CASE WHEN ? = 'rejected' THEN ? ELSE rejected_by END,
+            approved_at = CASE WHEN ? = 'approved' THEN ? ELSE approved_at END,
+            approved_by = CASE WHEN ? = 'approved' THEN ? ELSE approved_by END,
+            deleted_at = CASE WHEN ? = 'deleted' THEN ? ELSE NULL END,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        status,
+        reviewStatus,
+        approvalStatus,
+        status, now,
+        status, req.user.id,
+        status, now,
+        status, req.user.id,
+        status, now,
+        status, req.user.id,
+        status, now,
+        now,
+        target.id
+      );
+      const companyStatus = status === 'deleted' ? 'suspended' : status;
+      db.prepare(`
+        UPDATE companies
+        SET review_status = ?,
+            approval_status = ?,
+            is_active = CASE WHEN ? = 'approved' THEN 1 ELSE 0 END,
+            beta_status = CASE WHEN ? IN ('approved', 'rejected', 'suspended') THEN ? ELSE beta_status END,
+            suspended_at = CASE WHEN ? = 'suspended' THEN ? ELSE suspended_at END,
+            suspended_by = CASE WHEN ? = 'suspended' THEN ? ELSE suspended_by END,
+            rejected_at = CASE WHEN ? = 'rejected' THEN ? ELSE rejected_at END,
+            rejected_by = CASE WHEN ? = 'rejected' THEN ? ELSE rejected_by END,
+            approved_at = CASE WHEN ? = 'approved' THEN ? ELSE approved_at END,
+            approved_by = CASE WHEN ? = 'approved' THEN ? ELSE approved_by END
+        WHERE owner_id = ?
+      `).run(
+        companyStatus,
+        companyStatus,
+        companyStatus,
+        companyStatus, companyStatus,
+        companyStatus, now,
+        companyStatus, req.user.id,
+        companyStatus, now,
+        companyStatus, req.user.id,
+        companyStatus, now,
+        companyStatus, req.user.id,
+        target.id
+      );
+    }
+
+    audit(null, req.user.id, 'admin_member_status_updated', JSON.stringify({ userId: target.id, status }));
+    res.json({ ok: true, message: '會員狀態已更新', member: memberResponse(await getTargetUserById(target.id)) });
+  } catch (err) {
+    console.error('[admin member status] failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+    res.status(err.status || 500).json(err.status ? { error: err.message } : { error: '會員狀態更新失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
+  }
+});
+
+app.patch('/api/admin/members/:id/role', auth, requireAdmin, async (req, res) => {
+  try {
+    const actor = await getTargetUserById(req.user.id);
+    const target = await getTargetUserById(req.params.id);
+    const role = String(req.body?.role || '').trim().toLowerCase();
+
+    if (!target) return res.status(404).json({ error: '找不到使用者' });
+    if (!memberWritableRoles.has(role)) {
+      return res.status(400).json({ error: '會員角色不正確' });
+    }
+
+    assertFounderProtected(actor, target, 'role');
+
+    if (!isFounderUser(actor) && ['founder', 'admin'].includes(role)) {
+      throw adminActionError(403, '只有 Founder 可以指派 Founder / Admin');
+    }
+
+    if (Number(actor?.id) === Number(target?.id)) {
+      const actorRole = isFounderUser(actor) ? 'founder' : isAdminUser(actor) ? 'admin' : String(actor?.role || 'member');
+      if (role !== actorRole) {
+        assertNotSelfAction(actor, target, 'role');
+      }
+    }
+
+    await assertLastFounderSafe(target, role);
+
+    if (normalizeEmail(target.email) === FOUNDER_EMAIL && role !== 'founder') {
+      throw adminActionError(400, 'Founder 帳號必須保持 Founder 角色');
+    }
+
+    const now = new Date().toISOString();
+    if (PG_ENABLED) {
+      await pgQuery(`
+        UPDATE users
+        SET role = $1,
+            status = CASE WHEN $1 IN ('founder', 'admin') THEN $1 ELSE status END,
+            review_status = CASE WHEN $1 IN ('founder', 'admin') THEN 'approved' ELSE review_status END,
+            approval_status = CASE WHEN $1 IN ('founder', 'admin') THEN 'approved' ELSE approval_status END,
+            updated_at = $2
+        WHERE id = $3
+      `, [role, now, target.id]);
+    } else {
+      db.prepare(`
+        UPDATE users
+        SET role = ?,
+            status = CASE WHEN ? IN ('founder', 'admin') THEN ? ELSE status END,
+            review_status = CASE WHEN ? IN ('founder', 'admin') THEN 'approved' ELSE review_status END,
+            approval_status = CASE WHEN ? IN ('founder', 'admin') THEN 'approved' ELSE approval_status END,
+            updated_at = ?
+        WHERE id = ?
+      `).run(role, role, role, role, role, now, target.id);
+    }
+
+    audit(null, req.user.id, 'admin_member_role_updated', JSON.stringify({ userId: target.id, role }));
+    res.json({ ok: true, message: '會員角色已更新', member: memberResponse(await getTargetUserById(target.id)) });
+  } catch (err) {
+    console.error('[admin member role] failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+    res.status(err.status || 500).json(err.status ? { error: err.message } : { error: '會員角色更新失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
+  }
+});
+
+app.delete('/api/admin/members/:id', auth, requireAdmin, async (req, res) => {
+  try {
+    const actor = await getTargetUserById(req.user.id);
+    const target = await getTargetUserById(req.params.id);
+
+    if (!target) return res.status(404).json({ error: '找不到使用者' });
+
+    assertNotSelfAction(actor, target, 'delete');
+    assertFounderProtected(actor, target, 'delete');
+    await assertLastFounderSafe(target, 'deleted');
+
+    const now = new Date().toISOString();
+    if (PG_ENABLED) {
+      await pgQuery(`
+        UPDATE users
+        SET status = 'deleted',
+            review_status = 'deleted',
+            approval_status = 'deleted',
+            deleted_at = $1,
+            updated_at = $1
+        WHERE id = $2
+      `, [now, target.id]);
+      await pgQuery(`
+        UPDATE companies
+        SET review_status = 'suspended',
+            approval_status = 'suspended',
+            is_active = 0,
+            suspended_at = $1,
+            suspended_by = $2
+        WHERE owner_id = $3
+      `, [now, req.user.id, target.id]);
+    } else {
+      db.prepare(`
+        UPDATE users
+        SET status = 'deleted',
+            review_status = 'deleted',
+            approval_status = 'deleted',
+            deleted_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(now, now, target.id);
+      db.prepare(`
+        UPDATE companies
+        SET review_status = 'suspended',
+            approval_status = 'suspended',
+            is_active = 0,
+            suspended_at = ?,
+            suspended_by = ?
+        WHERE owner_id = ?
+      `).run(now, req.user.id, target.id);
+    }
+
+    audit(null, req.user.id, 'admin_member_deleted', JSON.stringify({ userId: target.id }));
+    res.json({ ok: true, message: '會員已刪除' });
+  } catch (err) {
+    console.error('[admin member delete] failed', { route: req.path, userId: req.user?.id, code: err.code, message: err.message });
+    res.status(err.status || 500).json(err.status ? { error: err.message } : { error: '會員刪除失敗，請稍後再試或聯繫系統管理員。', code: 'DATABASE_ERROR' });
   }
 });
 

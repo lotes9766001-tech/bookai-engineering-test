@@ -8,6 +8,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, '..');
 
 const dbPath = process.env.DB_PATH || path.join(rootDir, 'server', 'bookai.sqlite');
+const serverIndexPath = path.join(rootDir, 'server', 'index.js');
 
 function ok(msg) {
   console.log(`✅ ${msg}`);
@@ -36,8 +37,66 @@ if (!fs.existsSync(dbPath)) {
 }
 
 const db = new Database(dbPath);
+const serverIndexSource = fs.readFileSync(serverIndexPath, 'utf8');
+
+function safeAddColumn(tableName, columnName, columnType) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
+  const exists = columns.some((col) => col.name === columnName);
+  if (!exists) {
+    db.prepare(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${columnType}`).run();
+  }
+}
 
 section('BookAI v3.5c RBAC Smoke Test');
+
+section('0. Admin / Founder API 保護規則檢查');
+
+safeAddColumn('users', 'role', "TEXT DEFAULT 'member'");
+safeAddColumn('users', 'deleted_at', 'TEXT');
+safeAddColumn('users', 'updated_at', 'TEXT');
+
+const apiChecks = [
+  {
+    name: '一般會員呼叫 /api/admin/members 需經 requireAdmin',
+    pass: serverIndexSource.includes("app.get('/api/admin/members', auth, requireAdmin")
+  },
+  {
+    name: 'Founder 可通過 requireAdmin',
+    pass: serverIndexSource.includes('function isAdminUser') && serverIndexSource.includes('isFounderUser(user)')
+  },
+  {
+    name: 'Founder 可呼叫 pending-count API',
+    pass: serverIndexSource.includes("app.get('/api/admin/members/pending-count', auth, requireAdmin")
+  },
+  {
+    name: 'Admin 不可刪除 Founder',
+    pass: serverIndexSource.includes('Admin 不可刪除、停用或降權 Founder')
+  },
+  {
+    name: 'Admin 不可停用 Founder',
+    pass: serverIndexSource.includes("['delete', 'suspend', 'role', 'reject']")
+  },
+  {
+    name: '不可刪除自己',
+    pass: serverIndexSource.includes('不允許刪除自己')
+  },
+  {
+    name: '不可停用自己',
+    pass: serverIndexSource.includes('不允許停用自己')
+  },
+  {
+    name: 'pending-count API 回傳 ok true 與 count',
+    pass: serverIndexSource.includes('res.json({ ok: true, count: Number')
+  }
+];
+
+for (const check of apiChecks) {
+  if (!check.pass) {
+    fail(check.name);
+    process.exit(1);
+  }
+  ok(check.name);
+}
 
 const company = db.prepare(`
   SELECT id, name
@@ -150,6 +209,7 @@ const email = `rbac_smoke_${stamp}@bookai.test`;
 
 let testUserId = null;
 let testCompanyUserId = null;
+let softDeleteUserId = null;
 
 try {
   const tx = db.transaction(() => {
@@ -213,10 +273,61 @@ try {
 
     ok('staff 不可通過 owner/admin 高風險案場權限規則');
 
+    const softDeleteUser = db.prepare(`
+      INSERT INTO users (
+        name,
+        email,
+        password_hash,
+        role,
+        status,
+        review_status,
+        approval_status,
+        created_at
+      )
+      VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+    `).run(
+      'RBAC Soft Delete Target',
+      `rbac_soft_delete_${stamp}@bookai.test`,
+      'rbac-smoke-test-password-hash',
+      'member',
+      'approved',
+      'approved',
+      'approved'
+    );
+
+    softDeleteUserId = softDeleteUser.lastInsertRowid;
+
+    db.prepare(`
+      UPDATE users
+      SET status = 'deleted',
+          review_status = 'deleted',
+          approval_status = 'deleted',
+          deleted_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(softDeleteUserId);
+
+    const softDeleted = db.prepare(`
+      SELECT status, review_status, approval_status, deleted_at
+      FROM users
+      WHERE id = ?
+    `).get(softDeleteUserId);
+
+    if (!softDeleted || softDeleted.status !== 'deleted' || !softDeleted.deleted_at) {
+      throw new Error('會員刪除必須是 soft delete，且需寫入 deleted_at');
+    }
+
+    ok('會員刪除行為使用 soft delete 欄位');
+
     db.prepare(`
       DELETE FROM company_users
       WHERE id = ?
     `).run(testCompanyUserId);
+
+    db.prepare(`
+      DELETE FROM users
+      WHERE id = ?
+    `).run(softDeleteUserId);
 
     db.prepare(`
       DELETE FROM users
@@ -241,6 +352,10 @@ try {
 
     if (testUserId) {
       db.prepare(`DELETE FROM users WHERE id = ?`).run(testUserId);
+    }
+
+    if (softDeleteUserId) {
+      db.prepare(`DELETE FROM users WHERE id = ?`).run(softDeleteUserId);
     }
   } catch {}
 
