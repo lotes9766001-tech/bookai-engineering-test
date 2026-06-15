@@ -27,10 +27,8 @@ import {
   YAxis
 } from 'recharts';
 import { api, setToken, clearToken, getToken } from './lib/api';
-import { getAdminPendingCount } from './lib/adminApi';
 import './styles.css';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
-import AdminMembersPage from './pages/AdminMembersPage.jsx';
 const planNames = {
   business: 'Business',
   pro: 'Pro',
@@ -460,18 +458,12 @@ function Shell({ onLogout }) {
   const [page, setPage] = useState('dashboard');
   const [companyId, setCompanyId] = useState(null);
   const [refresh, setRefresh] = useState(0);
-  const [adminPendingCount, setAdminPendingCount] = useState(0);
 
   useEffect(() => {
     api('/me')
       .then((d) => {
         setMe(d);
         setCompanyId(d.companies[0]?.id);
-        if (d.user?.isAdmin || d.user?.isFounder) {
-          getAdminPendingCount()
-            .then((result) => setAdminPendingCount(Number(result?.count || 0)))
-            .catch(() => setAdminPendingCount(0));
-        }
       })
       .catch(onLogout);
   }, [onLogout]);
@@ -492,7 +484,6 @@ function Shell({ onLogout }) {
   const planNav = isConstructionIndustry(company?.industry)
     ? constructionNav
     : baseNav;
-  const canUseAdminConsole = Boolean(me?.user?.isAdmin || me?.user?.isFounder);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -538,17 +529,6 @@ if (!me || !company) {
               {label}
             </button>
           ))}
-          {canUseAdminConsole && (
-            <button
-              key="admin-members"
-              className={page === 'admin-members' ? 'active' : ''}
-              onClick={() => setPage('admin-members')}
-            >
-              <ShieldCheck size={18} />
-              系統管理中心
-              {adminPendingCount > 0 && <span className="nav-badge">{adminPendingCount}</span>}
-            </button>
-          )}
         </nav>
 
         <button className="logout" onClick={onLogout}>
@@ -586,7 +566,6 @@ if (!me || !company) {
         {page === 'accountant' && <Accountant companyId={companyId} />}
         {page === 'reports' && <Reports companyId={companyId} company={company} />}
         {page === 'settings' && <Settings company={company} />}
-        {page === 'admin-members' && <AdminMembersPage me={me} />}
       </main>
     </div>
   );
