@@ -2637,6 +2637,702 @@ function feedbackRow(row) {
   };
 }
 
+function jsonOk(res, data = null, extra = {}) {
+  return res.json({ ok: true, data, ...extra });
+}
+
+function jsonError(res, status, error) {
+  return res.status(status).json({ ok: false, error });
+}
+
+function cmsBool(value, fallback = 0) {
+  if (value === undefined || value === null || value === '') return fallback;
+  if (value === true || value === 1) return 1;
+  const text = String(value).trim().toLowerCase();
+  return ['1', 'true', 'yes', '是', 'on'].includes(text) ? 1 : 0;
+}
+
+function cmsNumber(value, fallback = 0) {
+  const n = Number(value ?? fallback);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function cmsText(value, fallback = '') {
+  if (value === undefined || value === null) return fallback;
+  return String(value).trim();
+}
+
+function slugify(value, fallback = 'site') {
+  const slug = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80);
+  return slug || fallback;
+}
+
+async function getUserCmsCompany(userId, requestedCompanyId = 0) {
+  const candidateId = Number(requestedCompanyId || 0);
+
+  if (PG_ENABLED) {
+    if (candidateId) {
+      return pgOne(`
+        SELECT c.*, cu.role
+        FROM companies c
+        JOIN company_users cu ON cu.company_id = c.id
+        WHERE c.id = $1
+          AND cu.user_id = $2
+      `, [candidateId, userId]);
+    }
+    return pgOne(`
+      SELECT c.*, cu.role
+      FROM companies c
+      JOIN company_users cu ON cu.company_id = c.id
+      WHERE cu.user_id = $1
+      ORDER BY
+        CASE cu.role
+          WHEN 'owner' THEN 1
+          WHEN 'admin' THEN 2
+          WHEN 'staff' THEN 3
+          ELSE 4
+        END,
+        cu.id ASC
+      LIMIT 1
+    `, [userId]);
+  }
+
+  if (candidateId) {
+    return db.prepare(`
+      SELECT c.*, cu.role
+      FROM companies c
+      JOIN company_users cu ON cu.company_id = c.id
+      WHERE c.id = ?
+        AND cu.user_id = ?
+    `).get(candidateId, userId);
+  }
+
+  return db.prepare(`
+    SELECT c.*, cu.role
+    FROM companies c
+    JOIN company_users cu ON cu.company_id = c.id
+    WHERE cu.user_id = ?
+    ORDER BY
+      CASE cu.role
+        WHEN 'owner' THEN 1
+        WHEN 'admin' THEN 2
+        WHEN 'staff' THEN 3
+        ELSE 4
+      END,
+      cu.id ASC
+    LIMIT 1
+  `).get(userId);
+}
+
+async function cmsCompany(req, res, next) {
+  const requestedCompanyId = req.user?.company_id || req.user?.companyId || 0;
+  const row = await getUserCmsCompany(req.user?.id, requestedCompanyId);
+
+  if (!row) {
+    return jsonError(res, 403, '找不到可管理的公司');
+  }
+
+  req.company = row;
+  req.cmsCompany = row;
+  return requireApproved(req, res, next);
+}
+
+function requireCmsRole(...allowedRoles) {
+  return (req, res, next) => {
+    const role = req.cmsCompany?.role || req.company?.role || 'viewer';
+    if (allowedRoles.includes(role)) return next();
+    return jsonError(res, 403, '你的角色沒有權限管理網站內容');
+  };
+}
+
+function cmsSettingsRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    siteSlug: row.site_slug,
+    siteName: row.site_name || '',
+    brandName: row.brand_name || '',
+    logoUrl: row.logo_url || '',
+    faviconUrl: row.favicon_url || '',
+    primaryColor: row.primary_color || '#2563eb',
+    secondaryColor: row.secondary_color || '#0f172a',
+    contactEmail: row.contact_email || '',
+    contactPhone: row.contact_phone || '',
+    lineUrl: row.line_url || '',
+    facebookUrl: row.facebook_url || '',
+    instagramUrl: row.instagram_url || '',
+    address: row.address || '',
+    seoTitle: row.seo_title || '',
+    seoDescription: row.seo_description || '',
+    isPublished: Boolean(row.is_published),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function cmsGenericRow(row) {
+  if (!row) return null;
+  return Object.fromEntries(Object.entries(row).map(([key, value]) => [
+    key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()),
+    ['is_active', 'is_featured', 'is_published'].includes(key) ? Boolean(value) : value
+  ]));
+}
+
+function publicSettingsRow(row) {
+  const settings = cmsSettingsRow(row);
+  if (!settings) return null;
+  const { id, companyId, ...publicSettings } = settings;
+  return publicSettings;
+}
+
+function publicCmsRow(row) {
+  const item = cmsGenericRow(row);
+  if (!item) return null;
+  const { companyId, ...publicItem } = item;
+  return publicItem;
+}
+
+async function ensureWebsiteSettings(companyRow) {
+  const existing = PG_ENABLED
+    ? await pgOne('SELECT * FROM website_settings WHERE company_id = $1', [companyRow.id])
+    : db.prepare('SELECT * FROM website_settings WHERE company_id = ?').get(companyRow.id);
+
+  if (existing) return existing;
+
+  const slug = slugify(companyRow.name, `company-${companyRow.id}`);
+  const defaultSlug = `${slug}-${companyRow.id}`;
+  const siteName = companyRow.name || `BookAI Site ${companyRow.id}`;
+
+  if (PG_ENABLED) {
+    return pgOne(`
+      INSERT INTO website_settings (
+        company_id, site_slug, site_name, brand_name, primary_color, secondary_color,
+        is_published, created_at, updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      ON CONFLICT (company_id) DO UPDATE SET company_id = EXCLUDED.company_id
+      RETURNING *
+    `, [companyRow.id, defaultSlug, siteName, siteName, '#2563eb', '#0f172a']);
+  }
+
+  db.prepare(`
+    INSERT OR IGNORE INTO website_settings (
+      company_id, site_slug, site_name, brand_name, primary_color, secondary_color,
+      is_published, created_at, updated_at
+    )
+    VALUES (?,?,?,?,?,?,0,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+  `).run(companyRow.id, defaultSlug, siteName, siteName, '#2563eb', '#0f172a');
+
+  return db.prepare('SELECT * FROM website_settings WHERE company_id = ?').get(companyRow.id);
+}
+
+async function assertSiteSlugAvailable(companyId, siteSlug) {
+  const row = PG_ENABLED
+    ? await pgOne('SELECT id FROM website_settings WHERE site_slug = $1 AND company_id <> $2', [siteSlug, companyId])
+    : db.prepare('SELECT id FROM website_settings WHERE site_slug = ? AND company_id <> ?').get(siteSlug, companyId);
+  if (row) {
+    const error = new Error('site_slug 已被使用');
+    error.status = 400;
+    throw error;
+  }
+}
+
+async function getPublicSite(slug) {
+  const siteSlug = slugify(slug, '');
+  if (!siteSlug) return null;
+  const sql = `
+    SELECT *
+    FROM website_settings
+    WHERE site_slug = ${PG_ENABLED ? '$1' : '?'}
+      AND is_published = 1
+  `;
+  return PG_ENABLED ? pgOne(sql, [siteSlug]) : db.prepare(sql).get(siteSlug);
+}
+
+const cmsSectionTypes = new Set(['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom']);
+const cmsContentStatuses = new Set(['draft', 'published', 'hidden']);
+const cmsInquiryStatuses = new Set(['new', 'read', 'replied', 'archived']);
+
+const cmsResources = {
+  banners: {
+    table: 'website_banners',
+    listOrder: 'sort_order ASC, id DESC',
+    writable: ['title', 'subtitle', 'image_url', 'button_text', 'button_url', 'sort_order', 'is_active'],
+    body(body = {}, existing = {}) {
+      return {
+        title: cmsText(body.title, existing.title || ''),
+        subtitle: cmsText(body.subtitle, existing.subtitle || ''),
+        image_url: cmsText(body.imageUrl ?? body.image_url, existing.image_url || ''),
+        button_text: cmsText(body.buttonText ?? body.button_text, existing.button_text || ''),
+        button_url: cmsText(body.buttonUrl ?? body.button_url, existing.button_url || ''),
+        sort_order: cmsNumber(body.sortOrder ?? body.sort_order, existing.sort_order || 0),
+        is_active: cmsBool(body.isActive ?? body.is_active, existing.is_active ?? 1)
+      };
+    }
+  },
+  'home-sections': {
+    table: 'website_home_sections',
+    listOrder: 'sort_order ASC, id DESC',
+    writable: ['section_type', 'title', 'subtitle', 'content', 'image_url', 'button_text', 'button_url', 'sort_order', 'is_active'],
+    body(body = {}, existing = {}) {
+      const sectionType = cmsText(body.sectionType ?? body.section_type, existing.section_type || 'custom');
+      return {
+        section_type: cmsSectionTypes.has(sectionType) ? sectionType : 'custom',
+        title: cmsText(body.title, existing.title || ''),
+        subtitle: cmsText(body.subtitle, existing.subtitle || ''),
+        content: cmsText(body.content, existing.content || ''),
+        image_url: cmsText(body.imageUrl ?? body.image_url, existing.image_url || ''),
+        button_text: cmsText(body.buttonText ?? body.button_text, existing.button_text || ''),
+        button_url: cmsText(body.buttonUrl ?? body.button_url, existing.button_url || ''),
+        sort_order: cmsNumber(body.sortOrder ?? body.sort_order, existing.sort_order || 0),
+        is_active: cmsBool(body.isActive ?? body.is_active, existing.is_active ?? 1)
+      };
+    }
+  },
+  products: {
+    table: 'website_products',
+    listOrder: 'sort_order ASC, id DESC',
+    required: 'name',
+    writable: ['name', 'slug', 'description', 'short_description', 'price', 'compare_at_price', 'image_url', 'category', 'status', 'sort_order', 'is_featured'],
+    body(body = {}, existing = {}) {
+      const name = cmsText(body.name, existing.name || '');
+      const status = cmsText(body.status, existing.status || 'draft');
+      return {
+        name,
+        slug: slugify(body.slug || name || existing.slug, `product-${Date.now()}`),
+        description: cmsText(body.description, existing.description || ''),
+        short_description: cmsText(body.shortDescription ?? body.short_description, existing.short_description || ''),
+        price: cmsNumber(body.price, existing.price || 0),
+        compare_at_price: cmsNumber(body.compareAtPrice ?? body.compare_at_price, existing.compare_at_price || 0),
+        image_url: cmsText(body.imageUrl ?? body.image_url, existing.image_url || ''),
+        category: cmsText(body.category, existing.category || ''),
+        status: cmsContentStatuses.has(status) ? status : 'draft',
+        sort_order: cmsNumber(body.sortOrder ?? body.sort_order, existing.sort_order || 0),
+        is_featured: cmsBool(body.isFeatured ?? body.is_featured, existing.is_featured || 0)
+      };
+    }
+  },
+  posts: {
+    table: 'website_posts',
+    listOrder: 'created_at DESC, id DESC',
+    required: 'title',
+    writable: ['title', 'slug', 'summary', 'content', 'cover_image_url', 'category', 'status', 'published_at'],
+    body(body = {}, existing = {}) {
+      const title = cmsText(body.title, existing.title || '');
+      const status = cmsText(body.status, existing.status || 'draft');
+      return {
+        title,
+        slug: slugify(body.slug || title || existing.slug, `post-${Date.now()}`),
+        summary: cmsText(body.summary, existing.summary || ''),
+        content: cmsText(body.content, existing.content || ''),
+        cover_image_url: cmsText(body.coverImageUrl ?? body.cover_image_url, existing.cover_image_url || ''),
+        category: cmsText(body.category, existing.category || ''),
+        status: cmsContentStatuses.has(status) ? status : 'draft',
+        published_at: cmsText(body.publishedAt ?? body.published_at, existing.published_at || '')
+      };
+    }
+  },
+  faqs: {
+    table: 'website_faqs',
+    listOrder: 'sort_order ASC, id DESC',
+    required: 'question',
+    writable: ['question', 'answer', 'category', 'sort_order', 'is_active'],
+    body(body = {}, existing = {}) {
+      return {
+        question: cmsText(body.question, existing.question || ''),
+        answer: cmsText(body.answer, existing.answer || ''),
+        category: cmsText(body.category, existing.category || ''),
+        sort_order: cmsNumber(body.sortOrder ?? body.sort_order, existing.sort_order || 0),
+        is_active: cmsBool(body.isActive ?? body.is_active, existing.is_active ?? 1)
+      };
+    }
+  }
+};
+
+async function cmsList(resource, companyId) {
+  const config = cmsResources[resource];
+  const sql = `
+    SELECT *
+    FROM ${config.table}
+    WHERE company_id = ${PG_ENABLED ? '$1' : '?'}
+    ORDER BY ${config.listOrder}
+  `;
+  return PG_ENABLED ? pgAll(sql, [companyId]) : db.prepare(sql).all(companyId);
+}
+
+async function cmsGet(resource, companyId, id) {
+  const config = cmsResources[resource];
+  const sql = `
+    SELECT *
+    FROM ${config.table}
+    WHERE id = ${PG_ENABLED ? '$1' : '?'}
+      AND company_id = ${PG_ENABLED ? '$2' : '?'}
+  `;
+  return PG_ENABLED ? pgOne(sql, [id, companyId]) : db.prepare(sql).get(id, companyId);
+}
+
+async function cmsCreate(resource, companyId, body) {
+  const config = cmsResources[resource];
+  const data = config.body(body);
+  if (config.required && !data[config.required]) {
+    const error = new Error('缺少必要欄位');
+    error.status = 400;
+    throw error;
+  }
+  const columns = ['company_id', ...config.writable];
+  const values = columns.map((column) => column === 'company_id' ? companyId : data[column]);
+
+  if (PG_ENABLED) {
+    const placeholders = columns.map((_, i) => `$${i + 1}`).join(',');
+    return pgOne(`
+      INSERT INTO ${config.table} (${columns.join(',')}, created_at, updated_at)
+      VALUES (${placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      RETURNING *
+    `, values);
+  }
+
+  const placeholders = columns.map(() => '?').join(',');
+  const result = db.prepare(`
+    INSERT INTO ${config.table} (${columns.join(',')}, created_at, updated_at)
+    VALUES (${placeholders}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+  `).run(...values);
+  return cmsGet(resource, companyId, result.lastInsertRowid);
+}
+
+async function cmsUpdate(resource, companyId, id, body) {
+  const config = cmsResources[resource];
+  const existing = await cmsGet(resource, companyId, id);
+  if (!existing) return null;
+  const data = config.body(body, existing);
+  if (config.required && !data[config.required]) {
+    const error = new Error('缺少必要欄位');
+    error.status = 400;
+    throw error;
+  }
+  const assignments = config.writable.map((column, i) => `${column} = ${PG_ENABLED ? `$${i + 1}` : '?'}`);
+  const values = config.writable.map((column) => data[column]);
+
+  if (PG_ENABLED) {
+    await pgQuery(`
+      UPDATE ${config.table}
+      SET ${assignments.join(', ')}, updated_at = CURRENT_TIMESTAMP
+      WHERE id = $${values.length + 1}
+        AND company_id = $${values.length + 2}
+    `, [...values, id, companyId]);
+    return cmsGet(resource, companyId, id);
+  }
+
+  db.prepare(`
+    UPDATE ${config.table}
+    SET ${assignments.join(', ')}, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+      AND company_id = ?
+  `).run(...values, id, companyId);
+  return cmsGet(resource, companyId, id);
+}
+
+async function cmsDelete(resource, companyId, id) {
+  const config = cmsResources[resource];
+  const result = PG_ENABLED
+    ? await pgQuery(`DELETE FROM ${config.table} WHERE id = $1 AND company_id = $2`, [id, companyId])
+    : db.prepare(`DELETE FROM ${config.table} WHERE id = ? AND company_id = ?`).run(id, companyId);
+  return PG_ENABLED ? result.rowCount : result.changes;
+}
+
+async function handleCmsCreate(req, res, resource) {
+  try {
+    const row = await cmsCreate(resource, req.cmsCompany.id, req.body || {});
+    audit(req.cmsCompany.id, req.user.id, `website_${resource}_created`, String(row.id));
+    return jsonOk(res, cmsGenericRow(row));
+  } catch (err) {
+    console.error(`[website ${resource} create] failed`, { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, err.status || 500, err.status ? err.message : '網站內容新增失敗');
+  }
+}
+
+async function handleCmsUpdate(req, res, resource) {
+  try {
+    const row = await cmsUpdate(resource, req.cmsCompany.id, Number(req.params.id), req.body || {});
+    if (!row) return jsonError(res, 404, '找不到資料');
+    audit(req.cmsCompany.id, req.user.id, `website_${resource}_updated`, String(row.id));
+    return jsonOk(res, cmsGenericRow(row));
+  } catch (err) {
+    console.error(`[website ${resource} update] failed`, { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, err.status || 500, err.status ? err.message : '網站內容更新失敗');
+  }
+}
+
+async function handleCmsDelete(req, res, resource) {
+  try {
+    const changes = await cmsDelete(resource, req.cmsCompany.id, Number(req.params.id));
+    if (!changes) return jsonError(res, 404, '找不到資料');
+    audit(req.cmsCompany.id, req.user.id, `website_${resource}_deleted`, String(req.params.id));
+    return jsonOk(res, { deleted: true });
+  } catch (err) {
+    console.error(`[website ${resource} delete] failed`, { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '網站內容刪除失敗');
+  }
+}
+
+app.get('/api/website/settings', auth, cmsCompany, async (req, res) => {
+  try {
+    const row = await ensureWebsiteSettings(req.cmsCompany);
+    return jsonOk(res, cmsSettingsRow(row));
+  } catch (err) {
+    console.error('[website settings] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '網站設定讀取失敗');
+  }
+});
+
+app.put('/api/website/settings', auth, cmsCompany, requireCmsRole('owner', 'admin'), async (req, res) => {
+  try {
+    await ensureWebsiteSettings(req.cmsCompany);
+    const b = req.body || {};
+    const siteSlug = slugify(b.siteSlug ?? b.site_slug ?? req.cmsCompany.name, `company-${req.cmsCompany.id}`);
+    await assertSiteSlugAvailable(req.cmsCompany.id, siteSlug);
+    const values = [
+      siteSlug,
+      cmsText(b.siteName ?? b.site_name, req.cmsCompany.name || ''),
+      cmsText(b.brandName ?? b.brand_name, req.cmsCompany.name || ''),
+      cmsText(b.logoUrl ?? b.logo_url),
+      cmsText(b.faviconUrl ?? b.favicon_url),
+      cmsText(b.primaryColor ?? b.primary_color, '#2563eb'),
+      cmsText(b.secondaryColor ?? b.secondary_color, '#0f172a'),
+      cmsText(b.contactEmail ?? b.contact_email),
+      cmsText(b.contactPhone ?? b.contact_phone),
+      cmsText(b.lineUrl ?? b.line_url),
+      cmsText(b.facebookUrl ?? b.facebook_url),
+      cmsText(b.instagramUrl ?? b.instagram_url),
+      cmsText(b.address),
+      cmsText(b.seoTitle ?? b.seo_title),
+      cmsText(b.seoDescription ?? b.seo_description),
+      cmsBool(b.isPublished ?? b.is_published, 0)
+    ];
+
+    if (PG_ENABLED) {
+      await pgQuery(`
+        UPDATE website_settings
+        SET site_slug = $1, site_name = $2, brand_name = $3, logo_url = $4,
+            favicon_url = $5, primary_color = $6, secondary_color = $7,
+            contact_email = $8, contact_phone = $9, line_url = $10,
+            facebook_url = $11, instagram_url = $12, address = $13,
+            seo_title = $14, seo_description = $15, is_published = $16,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = $17
+      `, [...values, req.cmsCompany.id]);
+    } else {
+      db.prepare(`
+        UPDATE website_settings
+        SET site_slug = ?, site_name = ?, brand_name = ?, logo_url = ?,
+            favicon_url = ?, primary_color = ?, secondary_color = ?,
+            contact_email = ?, contact_phone = ?, line_url = ?,
+            facebook_url = ?, instagram_url = ?, address = ?,
+            seo_title = ?, seo_description = ?, is_published = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE company_id = ?
+      `).run(...values, req.cmsCompany.id);
+    }
+
+    const row = await ensureWebsiteSettings(req.cmsCompany);
+    audit(req.cmsCompany.id, req.user.id, 'website_settings_updated', siteSlug);
+    return jsonOk(res, cmsSettingsRow(row));
+  } catch (err) {
+    console.error('[website settings update] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, err.status || 500, err.status ? err.message : '網站設定更新失敗');
+  }
+});
+
+for (const resource of ['banners', 'home-sections', 'products', 'posts', 'faqs']) {
+  app.get(`/api/website/${resource}`, auth, cmsCompany, async (req, res) => {
+    try {
+      const rows = await cmsList(resource, req.cmsCompany.id);
+      return jsonOk(res, rows.map(cmsGenericRow));
+    } catch (err) {
+      console.error(`[website ${resource} list] failed`, { userId: req.user?.id, code: err.code, message: err.message });
+      return jsonError(res, 500, '網站內容讀取失敗');
+    }
+  });
+  app.post(`/api/website/${resource}`, auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), (req, res) => handleCmsCreate(req, res, resource));
+  app.put(`/api/website/${resource}/:id`, auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), (req, res) => handleCmsUpdate(req, res, resource));
+  app.delete(`/api/website/${resource}/:id`, auth, cmsCompany, requireCmsRole('owner', 'admin'), (req, res) => handleCmsDelete(req, res, resource));
+}
+
+app.get('/api/website/inquiries', auth, cmsCompany, async (req, res) => {
+  try {
+    const sql = `
+      SELECT *
+      FROM website_inquiries
+      WHERE company_id = ${PG_ENABLED ? '$1' : '?'}
+      ORDER BY id DESC
+    `;
+    const rows = PG_ENABLED ? await pgAll(sql, [req.cmsCompany.id]) : db.prepare(sql).all(req.cmsCompany.id);
+    return jsonOk(res, rows.map(cmsGenericRow));
+  } catch (err) {
+    console.error('[website inquiries list] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '詢問資料讀取失敗');
+  }
+});
+
+app.put('/api/website/inquiries/:id/status', auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), async (req, res) => {
+  try {
+    const status = cmsText(req.body?.status, 'read');
+    if (!cmsInquiryStatuses.has(status)) return jsonError(res, 400, '詢問狀態不正確');
+    const id = Number(req.params.id);
+    const result = PG_ENABLED
+      ? await pgQuery(`
+        UPDATE website_inquiries
+        SET status = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2 AND company_id = $3
+      `, [status, id, req.cmsCompany.id])
+      : db.prepare(`
+        UPDATE website_inquiries
+        SET status = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND company_id = ?
+      `).run(status, id, req.cmsCompany.id);
+    const changes = PG_ENABLED ? result.rowCount : result.changes;
+    if (!changes) return jsonError(res, 404, '找不到資料');
+    const row = PG_ENABLED
+      ? await pgOne('SELECT * FROM website_inquiries WHERE id = $1 AND company_id = $2', [id, req.cmsCompany.id])
+      : db.prepare('SELECT * FROM website_inquiries WHERE id = ? AND company_id = ?').get(id, req.cmsCompany.id);
+    return jsonOk(res, cmsGenericRow(row));
+  } catch (err) {
+    console.error('[website inquiry status] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '詢問狀態更新失敗');
+  }
+});
+
+app.get('/api/public/sites/:slug', async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const [banners, sections, faqs] = await Promise.all([
+      PG_ENABLED
+        ? pgAll('SELECT * FROM website_banners WHERE company_id = $1 AND is_active = 1 ORDER BY sort_order ASC, id DESC', [site.company_id])
+        : db.prepare('SELECT * FROM website_banners WHERE company_id = ? AND is_active = 1 ORDER BY sort_order ASC, id DESC').all(site.company_id),
+      PG_ENABLED
+        ? pgAll('SELECT * FROM website_home_sections WHERE company_id = $1 AND is_active = 1 ORDER BY sort_order ASC, id DESC', [site.company_id])
+        : db.prepare('SELECT * FROM website_home_sections WHERE company_id = ? AND is_active = 1 ORDER BY sort_order ASC, id DESC').all(site.company_id),
+      PG_ENABLED
+        ? pgAll('SELECT * FROM website_faqs WHERE company_id = $1 AND is_active = 1 ORDER BY sort_order ASC, id DESC', [site.company_id])
+        : db.prepare('SELECT * FROM website_faqs WHERE company_id = ? AND is_active = 1 ORDER BY sort_order ASC, id DESC').all(site.company_id)
+    ]);
+    return jsonOk(res, {
+      settings: publicSettingsRow(site),
+      banners: banners.map(publicCmsRow),
+      homeSections: sections.map(publicCmsRow),
+      faqs: faqs.map(publicCmsRow)
+    });
+  } catch (err) {
+    console.error('[public site] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, '網站資料讀取失敗');
+  }
+});
+
+app.get('/api/public/sites/:slug/products', async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const rows = PG_ENABLED
+      ? await pgAll("SELECT * FROM website_products WHERE company_id = $1 AND status = 'published' ORDER BY sort_order ASC, id DESC", [site.company_id])
+      : db.prepare("SELECT * FROM website_products WHERE company_id = ? AND status = 'published' ORDER BY sort_order ASC, id DESC").all(site.company_id);
+    return jsonOk(res, rows.map(publicCmsRow));
+  } catch (err) {
+    console.error('[public products] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, '商品資料讀取失敗');
+  }
+});
+
+app.get('/api/public/sites/:slug/products/:productSlug', async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const productSlug = slugify(req.params.productSlug, '');
+    const row = PG_ENABLED
+      ? await pgOne("SELECT * FROM website_products WHERE company_id = $1 AND slug = $2 AND status = 'published'", [site.company_id, productSlug])
+      : db.prepare("SELECT * FROM website_products WHERE company_id = ? AND slug = ? AND status = 'published'").get(site.company_id, productSlug);
+    if (!row) return jsonError(res, 404, '找不到商品');
+    return jsonOk(res, publicCmsRow(row));
+  } catch (err) {
+    console.error('[public product detail] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, '商品資料讀取失敗');
+  }
+});
+
+app.get('/api/public/sites/:slug/posts', async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const rows = PG_ENABLED
+      ? await pgAll("SELECT * FROM website_posts WHERE company_id = $1 AND status = 'published' ORDER BY COALESCE(published_at, created_at) DESC, id DESC", [site.company_id])
+      : db.prepare("SELECT * FROM website_posts WHERE company_id = ? AND status = 'published' ORDER BY COALESCE(published_at, created_at) DESC, id DESC").all(site.company_id);
+    return jsonOk(res, rows.map(publicCmsRow));
+  } catch (err) {
+    console.error('[public posts] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, '文章資料讀取失敗');
+  }
+});
+
+app.get('/api/public/sites/:slug/posts/:postSlug', async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const postSlug = slugify(req.params.postSlug, '');
+    const row = PG_ENABLED
+      ? await pgOne("SELECT * FROM website_posts WHERE company_id = $1 AND slug = $2 AND status = 'published'", [site.company_id, postSlug])
+      : db.prepare("SELECT * FROM website_posts WHERE company_id = ? AND slug = ? AND status = 'published'").get(site.company_id, postSlug);
+    if (!row) return jsonError(res, 404, '找不到文章');
+    return jsonOk(res, publicCmsRow(row));
+  } catch (err) {
+    console.error('[public post detail] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, '文章資料讀取失敗');
+  }
+});
+
+app.get('/api/public/sites/:slug/faqs', async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const rows = PG_ENABLED
+      ? await pgAll('SELECT * FROM website_faqs WHERE company_id = $1 AND is_active = 1 ORDER BY sort_order ASC, id DESC', [site.company_id])
+      : db.prepare('SELECT * FROM website_faqs WHERE company_id = ? AND is_active = 1 ORDER BY sort_order ASC, id DESC').all(site.company_id);
+    return jsonOk(res, rows.map(publicCmsRow));
+  } catch (err) {
+    console.error('[public faqs] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, 'FAQ 資料讀取失敗');
+  }
+});
+
+app.post('/api/public/sites/:slug/inquiries', rateLimit({ windowMs: 60 * 1000, max: 20 }), async (req, res) => {
+  try {
+    const site = await getPublicSite(req.params.slug);
+    if (!site) return jsonError(res, 404, '找不到網站');
+    const b = req.body || {};
+    const message = cmsText(b.message);
+    if (!message) return jsonError(res, 400, '請輸入詢問內容');
+    if (PG_ENABLED) {
+      await pgQuery(`
+        INSERT INTO website_inquiries (company_id, name, email, phone, message, source_page, status, created_at, updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,'new',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      `, [site.company_id, cmsText(b.name), cmsText(b.email), cmsText(b.phone), message, cmsText(b.sourcePage ?? b.source_page)]);
+    } else {
+      db.prepare(`
+        INSERT INTO website_inquiries (company_id, name, email, phone, message, source_page, status, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,'new',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      `).run(site.company_id, cmsText(b.name), cmsText(b.email), cmsText(b.phone), message, cmsText(b.sourcePage ?? b.source_page));
+    }
+    return jsonOk(res, { received: true });
+  } catch (err) {
+    console.error('[public inquiry] failed', { slug: req.params.slug, code: err.code, message: err.message });
+    return jsonError(res, 500, '詢問送出失敗');
+  }
+});
+
 app.get('/api/admin/companies', auth, requireAdmin, async (req, res) => {
   if (PG_ENABLED) {
     const companies = await pgAll(`

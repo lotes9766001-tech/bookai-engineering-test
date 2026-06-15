@@ -110,7 +110,15 @@ const pgCoreTables = [
   'tenders',
   'tender_sync_runs',
   'tender_keywords',
-  'tender_matches'
+  'tender_matches',
+  'website_settings',
+  'website_banners',
+  'website_home_sections',
+  'website_products',
+  'website_posts',
+  'website_faqs',
+  'website_inquiries',
+  'website_assets'
 ];
 
 const pgCoreColumns = {
@@ -142,7 +150,15 @@ const pgCoreColumns = {
   tenders: ['id', 'source', 'source_tender_id', 'tender_no', 'tender_name', 'agency_name', 'agency_level', 'region', 'category', 'budget_amount', 'publish_date', 'deadline_date', 'status', 'url', 'created_at', 'updated_at', 'last_seen_at'],
   tender_sync_runs: ['id', 'source', 'started_at', 'finished_at', 'status', 'fetched_count', 'inserted_count', 'updated_count', 'error_count', 'error_message', 'created_at'],
   tender_keywords: ['id', 'keyword', 'category', 'product_line', 'enabled', 'created_at'],
-  tender_matches: ['id', 'tender_id', 'company_id', 'keyword', 'score', 'matched_reason', 'created_at']
+  tender_matches: ['id', 'tender_id', 'company_id', 'keyword', 'score', 'matched_reason', 'created_at'],
+  website_settings: ['id', 'company_id', 'site_slug', 'site_name', 'brand_name', 'is_published', 'created_at', 'updated_at'],
+  website_banners: ['id', 'company_id', 'title', 'image_url', 'sort_order', 'is_active', 'created_at', 'updated_at'],
+  website_home_sections: ['id', 'company_id', 'section_type', 'title', 'sort_order', 'is_active', 'created_at', 'updated_at'],
+  website_products: ['id', 'company_id', 'name', 'slug', 'status', 'is_featured', 'created_at', 'updated_at'],
+  website_posts: ['id', 'company_id', 'title', 'slug', 'status', 'published_at', 'created_at', 'updated_at'],
+  website_faqs: ['id', 'company_id', 'question', 'answer', 'is_active', 'created_at', 'updated_at'],
+  website_inquiries: ['id', 'company_id', 'name', 'email', 'message', 'status', 'created_at', 'updated_at'],
+  website_assets: ['id', 'company_id', 'file_url', 'file_name', 'file_type', 'module', 'created_by', 'created_at']
 };
 
 if (databaseUrl) {
@@ -297,6 +313,14 @@ const requiredTables = [
   'tender_sync_runs',
   'tender_keywords',
   'tender_matches',
+  'website_settings',
+  'website_banners',
+  'website_home_sections',
+  'website_products',
+  'website_posts',
+  'website_faqs',
+  'website_inquiries',
+  'website_assets',
   'audit_logs'
 ];
 
@@ -641,6 +665,85 @@ const requiredColumns = {
     'keyword',
     'score',
     'matched_reason',
+    'created_at'
+  ],
+  website_settings: [
+    'id',
+    'company_id',
+    'site_slug',
+    'site_name',
+    'brand_name',
+    'is_published',
+    'created_at',
+    'updated_at'
+  ],
+  website_banners: [
+    'id',
+    'company_id',
+    'title',
+    'image_url',
+    'sort_order',
+    'is_active',
+    'created_at',
+    'updated_at'
+  ],
+  website_home_sections: [
+    'id',
+    'company_id',
+    'section_type',
+    'title',
+    'sort_order',
+    'is_active',
+    'created_at',
+    'updated_at'
+  ],
+  website_products: [
+    'id',
+    'company_id',
+    'name',
+    'slug',
+    'status',
+    'is_featured',
+    'created_at',
+    'updated_at'
+  ],
+  website_posts: [
+    'id',
+    'company_id',
+    'title',
+    'slug',
+    'status',
+    'published_at',
+    'created_at',
+    'updated_at'
+  ],
+  website_faqs: [
+    'id',
+    'company_id',
+    'question',
+    'answer',
+    'is_active',
+    'created_at',
+    'updated_at'
+  ],
+  website_inquiries: [
+    'id',
+    'company_id',
+    'name',
+    'email',
+    'message',
+    'status',
+    'created_at',
+    'updated_at'
+  ],
+  website_assets: [
+    'id',
+    'company_id',
+    'file_url',
+    'file_name',
+    'file_type',
+    'module',
+    'created_by',
     'created_at'
   ],
   feedbacks: [

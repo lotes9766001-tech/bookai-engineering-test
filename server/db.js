@@ -537,6 +537,172 @@ export function initDb() {
   CREATE INDEX IF NOT EXISTS commerce_site_promotions_active_idx
   ON commerce_site_promotions(company_id, is_active);
 
+  CREATE TABLE IF NOT EXISTS website_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL UNIQUE,
+    site_slug TEXT NOT NULL UNIQUE,
+    site_name TEXT,
+    brand_name TEXT,
+    logo_url TEXT,
+    favicon_url TEXT,
+    primary_color TEXT,
+    secondary_color TEXT,
+    contact_email TEXT,
+    contact_phone TEXT,
+    line_url TEXT,
+    facebook_url TEXT,
+    instagram_url TEXT,
+    address TEXT,
+    seo_title TEXT,
+    seo_description TEXT,
+    is_published INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_settings_company_idx
+  ON website_settings(company_id);
+
+  CREATE INDEX IF NOT EXISTS website_settings_slug_idx
+  ON website_settings(site_slug);
+
+  CREATE TABLE IF NOT EXISTS website_banners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    title TEXT,
+    subtitle TEXT,
+    image_url TEXT,
+    button_text TEXT,
+    button_url TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_banners_company_idx
+  ON website_banners(company_id);
+
+  CREATE TABLE IF NOT EXISTS website_home_sections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    section_type TEXT DEFAULT 'custom',
+    title TEXT,
+    subtitle TEXT,
+    content TEXT,
+    image_url TEXT,
+    button_text TEXT,
+    button_url TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_home_sections_company_idx
+  ON website_home_sections(company_id);
+
+  CREATE TABLE IF NOT EXISTS website_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    description TEXT,
+    short_description TEXT,
+    price REAL DEFAULT 0,
+    compare_at_price REAL DEFAULT 0,
+    image_url TEXT,
+    category TEXT,
+    status TEXT DEFAULT 'draft',
+    sort_order INTEGER DEFAULT 0,
+    is_featured INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    UNIQUE(company_id, slug)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_products_company_idx
+  ON website_products(company_id);
+
+  CREATE INDEX IF NOT EXISTS website_products_slug_idx
+  ON website_products(company_id, slug);
+
+  CREATE TABLE IF NOT EXISTS website_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    summary TEXT,
+    content TEXT,
+    cover_image_url TEXT,
+    category TEXT,
+    status TEXT DEFAULT 'draft',
+    published_at TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id),
+    UNIQUE(company_id, slug)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_posts_company_idx
+  ON website_posts(company_id);
+
+  CREATE INDEX IF NOT EXISTS website_posts_slug_idx
+  ON website_posts(company_id, slug);
+
+  CREATE TABLE IF NOT EXISTS website_faqs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    question TEXT NOT NULL,
+    answer TEXT,
+    category TEXT,
+    sort_order INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_faqs_company_idx
+  ON website_faqs(company_id);
+
+  CREATE TABLE IF NOT EXISTS website_inquiries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    name TEXT,
+    email TEXT,
+    phone TEXT,
+    message TEXT NOT NULL,
+    source_page TEXT,
+    status TEXT DEFAULT 'new',
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_inquiries_company_idx
+  ON website_inquiries(company_id);
+
+  CREATE TABLE IF NOT EXISTS website_assets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    file_url TEXT NOT NULL,
+    file_name TEXT,
+    file_type TEXT,
+    file_size INTEGER DEFAULT 0,
+    module TEXT,
+    created_by INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE INDEX IF NOT EXISTS website_assets_company_idx
+  ON website_assets(company_id);
+
   CREATE TABLE IF NOT EXISTS suppliers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     company_id INTEGER NOT NULL,
