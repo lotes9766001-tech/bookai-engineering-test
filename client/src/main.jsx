@@ -7,22 +7,28 @@ import {
   FileText,
   Layers,
   LogOut,
-  Menu,
   Package,
-  PanelLeftClose,
-  PanelLeftOpen,
   PlugZap,
   ReceiptText,
   ShieldCheck,
   Users,
-  WalletCards,
-  X
+  WalletCards
 } from 'lucide-react';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  LineChart,
+  Line,
+  CartesianGrid,
+  XAxis,
+  YAxis
+} from 'recharts';
 import { api, setToken, clearToken, getToken } from './lib/api';
-import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
-
 const planNames = {
   business: 'Business',
   pro: 'Pro',
@@ -34,32 +40,6 @@ const featureByPage = {
   tax: 'tax_center',
   accountant: 'accountant_console'
 };
-
-function getPageFeatureKey(page) {
-  if (page === 'founder') return null;
-  return featureByPage[page] || page;
-}
-
-function hasCompanyFeature(company, page) {
-  const key = getPageFeatureKey(page);
-  if (!key || key === 'admin') return true;
-  const effective = company?.effectiveFeatures;
-  if (!Array.isArray(effective) || !effective.length) return true;
-  return effective.includes(key);
-}
-
-function formatDate(value) {
-  if (!value) return '-';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('zh-TW', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-}
 
 const categoryLabel = {
   marketplace: '第三方商城',
@@ -138,52 +118,27 @@ const industryLabel = {
   other: '其他行業'
 };
 
-const productLineLabels = {
-  engineering: '工程版',
-  commerce: '電商版',
-  restaurant: '餐飲版',
-  beverage: '手搖飲版',
-  retail: '零售版',
-  studio: '工作室 / 個人品牌版',
-  accountant: '記帳士 / 事務所版',
-  general: '一般中小企業版'
-};
-
 const navs = {
   business: [
-    ['dashboard', '經營總覽', BarChart3],
-    ['purchases', '進貨管理', WalletCards],
-    ['sales', '銷貨管理', WalletCards],
-    ['receivables', '應收帳款', WalletCards],
-    ['payables', '應付帳款', WalletCards],
-    ['suppliers', '供應商管理', Users],
-    ['customers', '客戶管理', Users],
-    ['transactions', '收支管理', WalletCards],
+    ['dashboard', '老闆總覽', BarChart3],
+    ['transactions', '交易中心', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
-    ['reports', '經營報表', BarChart3],
-    ['feedbacks', '產品回饋', FileText],
+    ['reports', '月報表', BarChart3],
     ['settings', '公司設定', Building2]
   ],
   pro: [
-    ['dashboard', '經營總覽', BarChart3],
-    ['purchases', '進貨管理', WalletCards],
-    ['sales', '銷貨管理', WalletCards],
-    ['receivables', '應收帳款', WalletCards],
-    ['payables', '應付帳款', WalletCards],
-    ['suppliers', '供應商管理', Users],
-    ['customers', '客戶管理', Users],
-    ['transactions', '收支管理', WalletCards],
+    ['dashboard', '老闆總覽', BarChart3],
+    ['transactions', '交易中心', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['accounting', '會計中心', Layers],
     ['tax', '稅務中心', ShieldCheck],
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
-    ['reports', '經營報表', BarChart3],
-    ['feedbacks', '產品回饋', FileText],
+    ['reports', '進階報表', BarChart3],
     ['settings', '公司設定', Building2]
   ],
   accountant: [
@@ -193,7 +148,6 @@ const navs = {
     ['invoices', '發票整理', FileText],
     ['reports', '批次報表', BarChart3],
     ['tax', '稅務準備', ShieldCheck],
-    ['feedbacks', '產品回饋', FileText],
     ['settings', '事務所設定', Building2]
   ]
 };
@@ -234,19 +188,6 @@ function isFoodIndustry(industry) {
 
 function isEcommerceIndustry(industry) {
   return ['ecommerce'].includes(industry);
-}
-
-function isCommerceIndustry(industry) {
-  return [
-    'ecommerce',
-    'hosted_commerce',
-    'marketplace',
-    'social_commerce',
-    'food',
-    'restaurant',
-    'beverage',
-    'retail'
-  ].includes(industry);
 }
 
 function isConstructionIndustry(industry) {
@@ -317,155 +258,6 @@ function getIndustryInsight(industry) {
   return map[industry] || '請先設定行業別，BookAI 會逐步提供專屬分析。';
 }
 
-function getBillingStatusLabel(status) {
-  const map = {
-    trial: '試用中',
-    active: '正式使用中',
-    expired: '已到期',
-    paused: '暫停使用',
-    free_beta: '免費封閉測試',
-    internal: '內部管理',
-    unpaid: '未付款',
-    paid: '已付款',
-    cancelled: '已取消'
-  };
-
-  return map[status] || '未設定';
-}
-
-function getSubscriptionPlanLabel(plan) {
-  const map = {
-    engineering_trial: '工程業試用版',
-    engineering_starter: '工程業入門版',
-    engineering_pro: '工程業專業版',
-    engineering_premium: '工程業進階版',
-    commerce_starter: '電商入門版',
-    commerce_pro: '電商專業版',
-    accountant_starter: '事務所入門版',
-    accountant_pro: '事務所專業版'
-  };
-
-  return map[plan] || plan || '未設定';
-}
-
-function yesNoPaid(value) {
-  return value === 1 || value === true ? '是' : '否';
-}
-
-function getOfficialSiteStatusLabel(status) {
-  const map = {
-    none: '未建立',
-    planning: '規劃中',
-    building: '製作中',
-    live: '已上線',
-    paused: '暫停'
-  };
-
-  return map[status] || '未設定';
-}
-
-function getFeedbackStatusLabel(status) {
-  const map = {
-    new: '新回饋',
-    reviewing: '處理中',
-    resolved: '已處理',
-    ignored: '暫不處理'
-  };
-
-  return map[status] || '未設定';
-}
-
-function getReviewStatusLabel(status) {
-  const map = {
-    pending_review: '等待審核',
-    approved: '已通過',
-    rejected: '已拒絕',
-    suspended: '已停權',
-    demo: 'Demo 測試',
-    waitlist: '候補名單',
-    active: '使用中',
-    inactive: '未啟用',
-    closed_beta: '封閉測試',
-    free_beta: '免費測試',
-    pending: '待處理',
-    failed: '失敗',
-    success: '成功',
-    error: '錯誤'
-  };
-
-  return map[status] || status || '未設定';
-}
-
-function getBetaStatusLabel(status) {
-  const map = {
-    pending_review: '等待審核',
-    active: '測試中',
-    approved: '測試中',
-    demo: 'Demo 測試',
-    waitlist: '候補',
-    suspended: '已停權',
-    rejected: '已拒絕',
-    ended: '已結束',
-    not_started: '尚未開始'
-  };
-
-  return map[status] || status || '未設定';
-}
-
-function getAdminBillingStatusLabel(status) {
-  const map = {
-    free_beta: '免費封閉測試',
-    internal: '內部管理',
-    unpaid: '未付款',
-    paid: '已付款',
-    trial: '試用中',
-    active: '使用中',
-    expired: '已到期',
-    paused: '暫停使用',
-    cancelled: '已取消'
-  };
-
-  return map[status] || status || '未設定';
-}
-
-function getPlanDisplayLabel(plan) {
-  const map = {
-    closed_beta: '封閉測試',
-    trial: '封閉測試',
-    starter: '入門版',
-    pro: '專業版',
-    business: '商務版',
-    enterprise: '企業版',
-    custom: '客製方案'
-  };
-
-  return map[plan] || plan || '未設定';
-}
-
-function isAdminUser(user) {
-  return user?.isAdmin === true;
-}
-
-function isFounderUser(user) {
-  return user?.isFounder === true;
-}
-
-function BrandLogo({ compact = false, subtitle = '智慧 ERP 系統' }) {
-  return (
-    <div className={`brand-logo ${compact ? 'compact' : ''}`}>
-      <div className="brand-symbol" aria-hidden="true">
-        <span>B</span>
-      </div>
-      {!compact && (
-        <div className="brand-wordmark">
-          <strong>BookAI</strong>
-          <small>{subtitle}</small>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function fieldLabel(industry, type) {
   const construction = isConstructionIndustry(industry);
   const food = isFoodIndustry(industry);
@@ -491,10 +283,6 @@ function fieldLabel(industry, type) {
 function App() {
   const [tokenReady, setTokenReady] = useState(Boolean(getToken()));
 
-  useEffect(() => {
-    trackVisit();
-  }, []);
-
   if (!tokenReady) {
     return <Auth onAuth={() => setTokenReady(true)} />;
   }
@@ -514,17 +302,13 @@ function Auth({ onAuth }) {
   const [err, setErr] = useState('');
   const [form, setForm] = useState({
     name: '',
-    email: '',
-    password: '',
+    email: 'demo@bookai.com.tw',
+    password: 'demo123456',
     companyName: '珍珠奶茶王國有限公司',
-    contactName: '',
-    phone: '',
     taxId: '',
-    lineContact: '',
-    companyStage: '剛創業',
-    termsAccepted: false,
     companyAddress: '',
-    industry: 'beverage'
+    industry: 'beverage',
+    plan: 'pro'
   });
 
   async function submit(e) {
@@ -532,31 +316,9 @@ function Auth({ onAuth }) {
     setErr('');
 
     try {
-      const payload = mode === 'register'
-        ? {
-            name: form.name,
-            email: form.email,
-            password: form.password,
-            companyName: form.companyName,
-            contactName: form.contactName,
-            phone: form.phone,
-            taxId: form.taxId,
-            lineContact: form.lineContact,
-            companyStage: form.companyStage,
-            termsAccepted: form.termsAccepted,
-            companyAddress: form.companyAddress,
-            industry: form.industry,
-            useCase: '',
-            ...getTrackingPayload()
-          }
-        : {
-            email: form.email,
-            password: form.password,
-            ...getTrackingPayload()
-          };
       const data = await api(`/auth/${mode}`, {
         method: 'POST',
-        body: JSON.stringify(payload)
+        body: JSON.stringify(form)
       });
       setToken(data.token);
       onAuth();
@@ -567,11 +329,10 @@ function Auth({ onAuth }) {
 
   return (
     <div className="auth-page">
-      <div className="auth-ambient" aria-hidden="true" />
       <div className="auth-card">
-        <BrandLogo subtitle="企業 AI 經營系統" />
+        <div className="logo">BookAI</div>
         <h1>{mode === 'login' ? '登入 BookAI' : '建立 BookAI 帳號'}</h1>
-        <p>正式公司帳號入口。登入後會進入你自己的公司系統。</p>
+        <p>台灣中小企業 Commerce ERP OS</p>
 
         <form onSubmit={submit}>
           {mode === 'register' && (
@@ -579,28 +340,15 @@ function Auth({ onAuth }) {
               <label>
                 <span>使用者姓名</span>
                 <input
-                  name="name"
                   placeholder="例：王小明"
                   value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value, contactName: form.contactName || e.target.value })}
-                />
-              </label>
-
-              <label>
-                <span>聯絡電話</span>
-                <input
-                  name="phone"
-                  type="tel"
-                  placeholder="例：0912-345-678"
-                  value={form.phone}
-                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
                 />
               </label>
 
               <label>
                 <span>公司 / 商號 / 企業社名稱</span>
                 <input
-                  name="companyName"
                   placeholder="例：珍珠奶茶王國有限公司"
                   value={form.companyName}
                   onChange={(e) => setForm({ ...form, companyName: e.target.value })}
@@ -608,41 +356,12 @@ function Auth({ onAuth }) {
               </label>
 
               <label>
-                <span>聯絡人姓名</span>
+                <span>統一編號</span>
                 <input
-                  name="contactName"
-                  placeholder="例：王小明"
-                  value={form.contactName}
-                  onChange={(e) => setForm({ ...form, contactName: e.target.value })}
-                />
-              </label>
-
-              <label>
-                <span>統一編號（選填）</span>
-                <input
-                  name="taxId"
                   placeholder="例：12345678，尚未設立可先空白"
                   value={form.taxId}
                   onChange={(e) => setForm({ ...form, taxId: e.target.value })}
                 />
-                <small>若已有公司 / 行號可填寫統一編號；若尚未成立，可先留空，BookAI 將透過官方客服人工審核。</small>
-              </label>
-
-              <label>
-                <span>公司階段</span>
-                <select
-                  value={form.companyStage}
-                  onChange={(e) => setForm({ ...form, companyStage: e.target.value })}
-                >
-                  <option value="已成立公司">已成立公司</option>
-                  <option value="已成立行號">已成立行號</option>
-                  <option value="工作室">工作室</option>
-                  <option value="剛創業">剛創業</option>
-                  <option value="尚未成立">尚未成立</option>
-                  <option value="個人接案">個人接案</option>
-                  <option value="情侶 / 夥伴共同創業">情侶 / 夥伴共同創業</option>
-                  <option value="其他">其他</option>
-                </select>
               </label>
 
               <label>
@@ -684,36 +403,30 @@ function Auth({ onAuth }) {
               </label>
 
               <label>
-                <span>官方 LINE / 聯絡方式（選填）</span>
-                <input
-                  placeholder="可填 LINE ID 或方便聯繫方式"
-                  value={form.lineContact}
-                  onChange={(e) => setForm({ ...form, lineContact: e.target.value })}
-                />
-              </label>
-
-              <label className="check-line">
-                <input
-                  type="checkbox"
-                  checked={form.termsAccepted}
-                  onChange={(e) => setForm({ ...form, termsAccepted: e.target.checked })}
-                />
-                <span>我已閱讀並同意 BookAI 測試會員服務條款，並理解目前服務仍處於測試階段，功能可能調整、中斷或發生錯誤。</span>
+                <span>使用方案</span>
+                <select
+                  value={form.plan}
+                  onChange={(e) => setForm({ ...form, plan: e.target.value })}
+                >
+                  <option value="business">Business 封閉測試</option>
+                  <option value="pro">Pro 封閉測試</option>
+                  <option value="accountant">Accountant 封閉測試</option>
+                </select>
               </label>
             </>
           )}
 
           <label>
-            <span>電子信箱</span>
+            <span>Email</span>
             <input
-              placeholder="例：user@bookai.com.tw"
+              placeholder="例：demo@bookai.com.tw"
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
           </label>
 
           <label>
-            <span>密碼</span>
+            <span>Password</span>
             <input
               placeholder="請輸入密碼"
               type="password"
@@ -724,7 +437,7 @@ function Auth({ onAuth }) {
 
           {err && <div className="error">{err}</div>}
 
-          <button>{mode === 'login' ? '登入 BookAI' : '建立帳號'}</button>
+          <button>{mode === 'login' ? '登入' : '註冊'}</button>
         </form>
 
         <button
@@ -734,57 +447,10 @@ function Auth({ onAuth }) {
           {mode === 'login' ? '建立新帳號' : '已有帳號，返回登入'}
         </button>
 
-        <div className="hint">BookAI 營運後台僅限系統管理員使用。</div>
+        <div className="hint">Demo：demo@bookai.com.tw / demo123456</div>
       </div>
     </div>
   );
-}
-
-function TermsBeta() {
-  return (
-    <div className="panel">
-      <Title title="BookAI 測試會員服務條款" subtitle="版本：v1.0" />
-      <div className="legal-text">
-        <p>歡迎申請使用 BookAI 測試服務。BookAI 目前處於產品測試與功能驗證階段，為確保服務品質、資料安全、測試環境穩定與使用者權益，本服務採人工審核制。使用者完成註冊或申請，並不代表帳號已正式開通；BookAI 保留依內部審核標準准許、拒絕、限制、暫停或終止帳號使用權限之權利。</p>
-        <p>使用者理解並同意，測試期間之功能、介面、資料結構、服務範圍與系統穩定性可能因產品開發、維護、安全或營運需求而調整、中斷、暫停或變更。BookAI 將盡合理努力維持服務可用性，但不保證測試期間服務完全不中斷、無錯誤或符合所有特定商業目的。</p>
-        <p>使用者應確保其提交之申請資料、聯絡資訊、公司或品牌資料、營運資料及其他輸入內容為真實、合法且已取得必要授權。若使用者尚未成立公司或行號，得以品牌名稱、團隊名稱、工作室名稱或創業狀態進行申請，BookAI 將透過官方客服與人工審核程序確認使用需求。</p>
-        <p>BookAI 封閉測試期間不收取測試費用。免費測試資格僅限 BookAI 核准之測試期間與測試範圍內使用，不代表永久免費使用權、正式商用授權或未來付費方案承諾。BookAI 保留未來調整服務內容、功能範圍、測試資格、測試期限、正式方案與收費方式之權利。</p>
-        <p>使用者不得進行未授權測試、壓力測試、爬蟲、掃描、逆向工程、繞過權限、濫用 API、建立大量帳號、干擾服務運作或其他可能影響系統安全與服務穩定之行為。</p>
-        <p>BookAI 所提供之 AI 分析、營運建議、報表摘要、稅務提示、會計分類、工程評估、標案判斷或其他輔助資訊，均僅作為一般參考，不構成法律、稅務、會計、財務、工程、投資或其他專業意見。</p>
-        <p>測試期間，使用者應避免將不可替代、高度敏感或唯一正式營運資料作為測試資料輸入系統，並應自行保留重要資料備份。BookAI 將採取合理安全措施維護服務與資料安全，但不承諾任何資料永久不遺失、不中斷或完全無風險。</p>
-        <p>若使用者違反本條款，或 BookAI 認定使用者行為可能影響服務安全、測試秩序、品牌形象、其他使用者權益或 BookAI 營運發展，BookAI 得不經事前通知限制、暫停或終止其帳號及相關服務使用權限。</p>
-      </div>
-    </div>
-  );
-}
-
-function PendingReviewPage({ user, company, onLogout, onNavigate }) {
-  return (
-    <div className="stack">
-      <div className="panel hero-panel">
-        <Title title="帳號審核中" subtitle="BookAI 目前採人工審核制，以維持系統品質、資料安全與測試環境穩定。" />
-        <p className="muted">
-          感謝您申請 BookAI。請透過官方 LINE 聯繫客服，完成身份與使用需求確認。審核通過後，系統將為您開通對應功能權限。
-        </p>
-        <div className="metric-grid">
-          <div className="metric-card"><span>申請電子信箱</span><strong>{user?.email}</strong></div>
-          <div className="metric-card"><span>公司 / 品牌名稱</span><strong>{company?.name}</strong></div>
-          <div className="metric-card"><span>目前狀態</span><strong>等待官方審核</strong></div>
-        </div>
-        <div className="actions">
-          <a className="primary-btn" href="https://lin.ee/pU6X4oP" target="_blank" rel="noreferrer">聯繫官方 LINE</a>
-          <button type="button" onClick={() => onNavigate('terms_beta')}>測試會員服務條款</button>
-          <button type="button" className="ghost-btn" onClick={onLogout}>登出</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function accountNeedsReview(user, company) {
-  if (!user || user.isAdmin || user.isFounder) return false;
-  const status = user.approval_status || user.status || user.review_status || company?.approval_status || company?.review_status || 'pending_review';
-  return !['approved', 'founder', 'admin', 'demo'].includes(status) && company?.approval_status !== 'approved' && company?.review_status !== 'approved';
 }
 
 function Shell({ onLogout }) {
@@ -792,9 +458,6 @@ function Shell({ onLogout }) {
   const [page, setPage] = useState('dashboard');
   const [companyId, setCompanyId] = useState(null);
   const [refresh, setRefresh] = useState(0);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('bookai_sidebar_collapsed') === '1');
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [pendingMemberCount, setPendingMemberCount] = useState(0);
 
   useEffect(() => {
     api('/me')
@@ -805,215 +468,104 @@ function Shell({ onLogout }) {
       .catch(onLogout);
   }, [onLogout]);
 
-  useEffect(() => {
-    localStorage.setItem('bookai_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
-  }, [sidebarCollapsed]);
-
   const company = me?.companies?.find((c) => c.id === companyId);
-  const userIsAdmin = isAdminUser(me?.user);
-  const userIsFounder = isFounderUser(me?.user);
-  const needsReview = accountNeedsReview(me?.user, company);
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
-    ['dashboard', '經營總覽', BarChart3],
-    ['leads', '接案中心', FileText],
-    ['purchases', '進貨管理', WalletCards],
-    ['sales', '銷貨管理', WalletCards],
-    ['receivables', '應收帳款', WalletCards],
-    ['payables', '應付帳款', WalletCards],
-    ['suppliers', '供應商管理', Users],
-    ['customers', '客戶管理', Users],
-    ['transactions', '收支管理', WalletCards],
+    ['dashboard', '老闆總覽', BarChart3],
+    ['transactions', '交易中心', WalletCards],
     ['invoices', '發票中心', FileText],
     ['vouchers', '電子憑證', ReceiptText],
     ['inventory', '材料 / 工具庫存 ERP', Package],
-    ['jobsites', '案場中心', Building2],
-    ['reports', '經營報表', BarChart3],
-    ['feedbacks', '產品回饋', FileText],
+    ['jobsites', '案場工作台', Building2],
+    ['reports', '工程月報', BarChart3],
     ['settings', '公司設定', Building2]
   ];
   const planNav = isConstructionIndustry(company?.industry)
     ? constructionNav
     : baseNav;
-  const commerceNav = isCommerceIndustry(company?.industry) && !isConstructionIndustry(company?.industry)
-    ? [
-        ...planNav.slice(0, 5),
-        ['commerce_site', '官網後台', Building2],
-        ...planNav.slice(5)
-      ]
-    : planNav;
-  const allowedCompanyNav = commerceNav.filter(([id]) => hasCompanyFeature(company, id));
-  const visibleNav = userIsAdmin
-    ? [...allowedCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
-    : allowedCompanyNav;
-  const founderNav = userIsFounder
-    ? [...visibleNav, ['founder', '創辦人營運中心', ShieldCheck]]
-    : visibleNav;
-  const reviewNav = [
-    ['review_waiting', '帳號審核中', ShieldCheck],
-    ['support', '官方客服', Users],
-    ['terms_beta', '測試會員條款', FileText]
-  ];
-  const activeNav = needsReview ? reviewNav : founderNav;
-
-  useEffect(() => {
-    if (!me || !userIsAdmin || needsReview) {
-      setPendingMemberCount(0);
-      return;
-    }
-    api('/admin/members?status=pending_review')
-      .then((rows) => setPendingMemberCount(Array.isArray(rows) ? rows.length : 0))
-      .catch(() => setPendingMemberCount(0));
-  }, [me, userIsAdmin, needsReview]);
-
-  useEffect(() => {
-    if (me && needsReview && !['review_waiting', 'support', 'terms_beta'].includes(page)) {
-      setPage('review_waiting');
-      return;
-    }
-    if (me && !userIsAdmin && page === 'admin') {
-      setPage('dashboard');
-    }
-    if (me && !userIsFounder && page === 'founder') {
-      setPage('dashboard');
-    }
-    if (me && !needsReview && page !== 'admin' && !hasCompanyFeature(company, page)) {
-      setPage('dashboard');
-    }
-  }, [me, userIsAdmin, userIsFounder, page, company, needsReview]);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
   }
 
-  const lockedFeature = getPageFeatureKey(page);
+  const lockedFeature = featureByPage[page];
 
-  if (!needsReview && !['admin', 'founder'].includes(page) && !hasCompanyFeature(company, page)) {
-    return <Locked feature={lockedFeature} />;
-  }
-
-  if (!needsReview && featureByPage[page] && !company.effectiveFeatures?.includes(lockedFeature)) {
+  if (lockedFeature && !me.plans[plan].features.includes(lockedFeature)) {
     return <Locked feature={lockedFeature} />;
   }
 
   return (
-    <div className={`app ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${mobileNavOpen ? 'mobile-nav-open' : ''}`}>
-      <div className="mobile-app-bar">
-        <BrandLogo subtitle="智慧 ERP 系統" />
-        <button type="button" className="mobile-menu-btn" onClick={() => setMobileNavOpen(true)} aria-label="開啟選單">
-          <Menu size={20} />
-        </button>
-      </div>
-
-      {mobileNavOpen && <button type="button" className="mobile-nav-backdrop" aria-label="關閉選單" onClick={() => setMobileNavOpen(false)} />}
-
-      <aside className="app-sidebar">
+    <div className="app">
+      <aside>
         <div className="brand">
-          <BrandLogo compact={sidebarCollapsed} subtitle="智慧 ERP 系統" />
-          <button
-            type="button"
-            className="sidebar-toggle"
-            onClick={() => setSidebarCollapsed((value) => !value)}
-            aria-label={sidebarCollapsed ? '展開側邊欄' : '收合側邊欄'}
-          >
-            {sidebarCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </button>
-          <button type="button" className="mobile-close-btn" onClick={() => setMobileNavOpen(false)} aria-label="關閉選單">
-            <X size={18} />
-          </button>
+          <div className="mark">B</div>
+          <div>
+            <b>BookAI</b>
+            <span>封閉測試中</span>
+          </div>
         </div>
 
-        <div className="company-select-wrap">
-          <span>目前公司</span>
-          <select
-            className="company-select"
-            value={companyId}
-            onChange={(e) => {
-              setCompanyId(Number(e.target.value));
-              setMobileNavOpen(false);
-            }}
-          >
-            {me.companies.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          className="company-select"
+          value={companyId}
+          onChange={(e) => setCompanyId(Number(e.target.value))}
+        >
+          {me.companies.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
 
         <nav>
-          {activeNav.map(([id, label, Icon]) => (
+          {planNav.map(([id, label, Icon]) => (
             <button
               key={id}
               className={page === id ? 'active' : ''}
-              data-label={label}
-              title={sidebarCollapsed ? label : undefined}
-              onClick={() => {
-                setPage(id);
-                setMobileNavOpen(false);
-              }}
+              onClick={() => setPage(id)}
             >
               <Icon size={18} />
-              <span>{label}</span>
-              {id === 'admin' && pendingMemberCount > 0 && (
-                <b className="nav-badge">{pendingMemberCount}</b>
-              )}
+              {label}
             </button>
           ))}
         </nav>
 
-        <button className="logout" data-label="登出" title={sidebarCollapsed ? '登出' : undefined} onClick={onLogout}>
+        <button className="logout" onClick={onLogout}>
           <LogOut size={18} />
-          <span>登出</span>
+          登出
         </button>
       </aside>
 
-      <main className="app-main">
-        {page !== 'admin' && !needsReview && (
-          <Header
-            company={company}
-            onPlanChange={(p) => {
-              api(`/companies/${companyId}/plan`, {
-                method: 'PATCH',
-                body: JSON.stringify({ plan: p })
-              }).then(() => location.reload());
-            }}
-          />
-        )}
+      <main>
+        <Header
+          company={company}
+          onPlanChange={(p) => {
+            api(`/companies/${companyId}/plan`, {
+              method: 'PATCH',
+              body: JSON.stringify({ plan: p })
+            }).then(() => location.reload());
+          }}
+        />
 
-        {needsReview && page === 'review_waiting' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
-        {needsReview && page === 'support' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
-        {needsReview && page === 'terms_beta' && <TermsBeta />}
-        {!needsReview && page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
-        {!needsReview && page === 'leads' && <LeadCenterMock companyId={companyId} isAdmin={userIsAdmin} />}
-        {!needsReview && page === 'transactions' && <Transactions companyId={companyId} />}
-        {!needsReview && page === 'purchases' && <PurchasesManager companyId={companyId} onNavigate={setPage} />}
-        {!needsReview && page === 'sales' && <SalesManager companyId={companyId} onNavigate={setPage} />}
-        {!needsReview && page === 'receivables' && <ReceivablesManager companyId={companyId} />}
-        {!needsReview && page === 'payables' && <PayablesManager companyId={companyId} />}
-        {!needsReview && page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
-        {!needsReview && page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
-        {!needsReview && page === 'feedbacks' && <FeedbackCenter companyId={companyId} />}
-        {!needsReview && page === 'integrations' && (
+        {page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
+        {page === 'transactions' && <Transactions companyId={companyId} />}
+        {page === 'integrations' && (
           <Integrations
             companyId={companyId}
             company={company}
             onSync={() => setRefresh((x) => x + 1)}
           />
         )}
-        {!needsReview && page === 'invoices' && <Invoices companyId={companyId} />}
-        {!needsReview && page === 'inventory' && <Inventory companyId={companyId} company={company} />}
-        {!needsReview && page === 'jobsites' && <JobSites companyId={companyId} company={company} />}
-        {!needsReview && page === 'vouchers' && <Vouchers companyId={companyId} />}
-        {!needsReview && page === 'accounting' && <Accounting companyId={companyId} />}
-        {!needsReview && page === 'tax' && <Tax companyId={companyId} />}
-        {!needsReview && page === 'accountant' && <Accountant companyId={companyId} />}
-        {!needsReview && page === 'reports' && <Reports companyId={companyId} company={company} />}
-        {!needsReview && page === 'settings' && <Settings company={company} />}
-        {!needsReview && page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
-        {!needsReview && page === 'admin' && userIsAdmin && <AdminConsole />}
-        {!needsReview && page === 'founder' && userIsFounder && <FounderDashboard />}
+        {page === 'invoices' && <Invoices companyId={companyId} />}
+        {page === 'inventory' && <Inventory companyId={companyId} company={company} />}
+        {page === 'jobsites' && <JobSites companyId={companyId} company={company} />}
+        {page === 'vouchers' && <Vouchers companyId={companyId} />}
+        {page === 'accounting' && <Accounting companyId={companyId} />}
+        {page === 'tax' && <Tax companyId={companyId} />}
+        {page === 'accountant' && <Accountant companyId={companyId} />}
+        {page === 'reports' && <Reports companyId={companyId} company={company} />}
+        {page === 'settings' && <Settings company={company} />}
       </main>
     </div>
   );
@@ -1031,7 +583,11 @@ function Header({ company, onPlanChange }) {
         </p>
       </div>
 
-      <div className="plan-badge">{productLineLabels[company.product_line] || '早期體驗'}</div>
+      <select value={company.plan} onChange={(e) => onPlanChange(e.target.value)}>
+        <option value="business">Business 封閉測試</option>
+        <option value="pro">Pro 封閉測試</option>
+        <option value="accountant">Accountant 封閉測試</option>
+      </select>
     </div>
   );
 }
@@ -1046,102 +602,9 @@ function Card({ title, value, sub }) {
   );
 }
 
-const platformChartColors = ['#2563eb', '#0891b2', '#16a34a', '#b88a2e', '#7c3aed', '#dc2626', '#0f766e', '#475569'];
-
-function PlatformRevenueChart({ rows = [] }) {
-  const platformRows = (Array.isArray(rows) ? rows : [])
-    .map((row) => ({
-      name: getPlatformName(row.name),
-      rawName: row.name || 'unknown',
-      value: Number(row.value || 0)
-    }))
-    .filter((row) => row.value > 0)
-    .sort((a, b) => b.value - a.value);
-  const total = platformRows.reduce((sum, row) => sum + row.value, 0);
-  const top = platformRows[0] || null;
-  const average = platformRows.length ? total / platformRows.length : 0;
-
-  if (!platformRows.length || total <= 0) {
-    return (
-      <div className="bi-empty-state">
-        <strong>目前尚無平台營收資料</strong>
-        <p>完成平台串接或新增交易資料後，系統將自動整理各平台營收占比。</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="bi-platform-chart">
-      <div className="bi-kpi-row">
-        <div><span>總營收</span><strong>{money(total)}</strong></div>
-        <div><span>平台數</span><strong>{platformRows.length}</strong></div>
-        <div><span>最高營收平台</span><strong>{top.name}</strong></div>
-        <div><span>平均平台營收</span><strong>{money(average)}</strong></div>
-      </div>
-
-      <div className="bi-bars" role="list" aria-label="平台營收分布">
-        {platformRows.map((row, index) => {
-          const percent = total ? Math.round((row.value / total) * 1000) / 10 : 0;
-          const color = platformChartColors[index % platformChartColors.length];
-          return (
-            <div className={`bi-bar-item ${index === 0 ? 'top' : ''}`} key={`${row.rawName}-${index}`} role="listitem" title={`${row.name}：${money(row.value)}，占比 ${percent}%`}>
-              <div className="bi-bar-head">
-                <span><i style={{ background: color }} />{row.name}</span>
-                <strong>{money(row.value)}｜{percent}%</strong>
-              </div>
-              <div className="bi-bar-track">
-                <b style={{ width: `${Math.max(percent, 2)}%`, background: color }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="bi-legend">
-        {platformRows.map((row, index) => {
-          const percent = total ? Math.round((row.value / total) * 1000) / 10 : 0;
-          return (
-            <span key={`${row.rawName}-legend-${index}`}>
-              <i style={{ background: platformChartColors[index % platformChartColors.length] }} />
-              {row.name} {percent}%
-            </span>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function TesterGuideCard({ company, constructionMode, onNavigate }) {
-  const isTester = Number(company?.is_tester || 0) === 1;
-  const steps = constructionMode
-    ? ['查看經營總覽', '建立一筆進貨', '建立一筆銷貨', '查看商品 / 材料庫存是否變動', '使用接案中心與案場中心', '到產品回饋留下使用感受']
-    : ['查看經營總覽', '建立一筆進貨', '建立一筆銷貨', '查看商品 / 材料庫存是否變動', '檢查收款與報表資訊', '到產品回饋留下使用感受'];
-
-  return (
-    <div className={`tester-guide-card ${isTester ? 'tester' : ''}`}>
-      <div>
-        <p className="tester-guide-kicker">{isTester ? '早期體驗指南' : '開始使用 BookAI'}</p>
-        <h2>{isTester ? '建議先完成以下流程，協助你快速熟悉系統' : '建議先完成核心資料流程'}</h2>
-        <p>{isTester ? '請依序使用主要功能，並在產品回饋中留下你的操作感受。' : '先建立進貨、銷貨與庫存資料，經營總覽會更接近實際營運狀態。'}</p>
-      </div>
-      <ol>
-        {steps.map((step) => <li key={step}>{step}</li>)}
-      </ol>
-      <div className="tester-guide-actions">
-        <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
-        <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
-        <button type="button" onClick={() => onNavigate?.('inventory')}>查看庫存</button>
-        <button type="button" onClick={() => onNavigate?.('feedbacks')}>產品回饋</button>
-      </div>
-    </div>
-  );
-}
-
 function Dashboard({ companyId, refresh, company, onNavigate }) {
   const [s, setS] = useState(null);
   const [jobSites, setJobSites] = useState([]);
-  const [leads, setLeads] = useState([]);
   const industry = company?.industry;
   const constructionMode = isConstructionIndustry(industry);
 
@@ -1152,15 +615,11 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
       api(`/companies/${companyId}/summary`).catch(() => null),
       constructionMode
         ? api(`/companies/${companyId}/jobsites`).catch(() => [])
-        : Promise.resolve([]),
-      constructionMode
-        ? api(`/companies/${companyId}/leads`).catch(() => [])
         : Promise.resolve([])
-    ]).then(([summary, sites, leadRows]) => {
+    ]).then(([summary, sites]) => {
       if (!alive) return;
       setS(summary);
       setJobSites(Array.isArray(sites) ? sites : []);
-      setLeads(Array.isArray(leadRows) ? leadRows : []);
     });
 
     return () => {
@@ -1169,12 +628,6 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
   }, [companyId, refresh, constructionMode]);
 
   if (!s) return null;
-
-  const todayText = new Date().toLocaleDateString('zh-TW', {
-    month: 'long',
-    day: 'numeric',
-    weekday: 'short'
-  });
 
   const constructionStats = (() => {
     const sites = jobSites || [];
@@ -1206,7 +659,6 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
 
     return {
       sites,
-      leads,
       totalQuote,
       received,
       unpaid,
@@ -1219,9 +671,6 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
   })();
 
   if (constructionMode) {
-    const activeSites = constructionStats.sites.filter((site) => !['已結案', '結案'].includes(String(site.status || ''))).length;
-    const tenderLeads = leads.filter((lead) => String(lead.source || lead.tenderSource || '').includes('標案') || String(lead.agencyType || '').includes('機關')).length;
-    const priorityLeads = leads.filter((lead) => Number(lead.fitScore ?? lead.fit_score ?? 0) >= 75 && !['lost', 'converted'].includes(String(lead.status || ''))).length;
     const rows = constructionStats.sites.slice(0, 8).map((site) => {
       const quote = Number(site.quote_amount ?? site.quoteAmount ?? 0);
       const received = Number(site.received_amount ?? site.receivedAmount ?? 0);
@@ -1250,64 +699,61 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
     });
 
     return (
-      <section className="command-center">
-        <div className="command-hero">
-          <div>
-          <p className="command-kicker">{todayText}｜經營總覽</p>
-          <h1>{company.name}</h1>
-          <p>今日營運狀態：{constructionStats.unpaid > 0 ? `尚有 ${money(constructionStats.unpaid)} 未收款需要追蹤` : '收款狀況穩定'}。進貨、銷貨、庫存與帳款集中管理。</p>
-          </div>
-          <div className="command-hero-side">
-            <div className="command-signal">
-              <span />
-              <strong>資料已同步</strong>
-            </div>
-            <div className="command-quick-actions">
-              <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
-              <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
-              <button type="button" onClick={() => onNavigate?.('leads')}>新增案源</button>
-              <button type="button" onClick={() => onNavigate?.('jobsites')}>新增案場</button>
-              <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
-            </div>
+      <section>
+        <div className="grid">
+          <Card title="案場數量" value={constructionStats.sites.length} sub="目前建立的工程案場" />
+          <Card title="案場總報價" value={money(constructionStats.totalQuote)} sub="所有案場合計報價" />
+          <Card title="已收款" value={money(constructionStats.received)} sub={`收款率 ${constructionStats.collectionRate}%`} />
+          <Card title="未收款" value={money(constructionStats.unpaid)} sub="需持續追蹤請款" />
+        </div>
+
+        <div className="grid">
+          <Card title="核心成本" value={money(constructionStats.totalCost)} sub="材料、工資、外包與雜支" />
+          <Card title="案場毛利" value={money(constructionStats.profit)} sub={constructionStats.profit >= 0 ? '目前預估有利潤' : '目前預估虧損'} />
+          <Card title="平均毛利率" value={`${constructionStats.marginRate}%`} sub="毛利 / 報價" />
+          <Card title="風險案場" value={constructionStats.riskSites.length} sub="收款率低於 50% 且未結案" />
+        </div>
+
+        <div className="panel">
+          <h2>今天要處理什麼？</h2>
+          <div className="grid">
+            <button type="button" onClick={() => onNavigate?.('jobsites')}>
+              新增 / 管理案場
+            </button>
+            <button type="button" onClick={() => onNavigate?.('jobsites')}>
+              登記收款
+            </button>
+            <button type="button" onClick={() => onNavigate?.('reports')}>
+              查看工程月報
+            </button>
+            <button type="button" onClick={() => onNavigate?.('inventory')}>
+              檢查材料 / 工具庫存
+            </button>
           </div>
         </div>
 
-        <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
-
-        <div className="command-metrics">
-          <Card title="本月銷貨總額" value={money(s.monthlySales || constructionStats.received)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
-          <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} sub={`未付款 ${money(s.unpaidPurchases || 0)}`} />
-          <Card title="應收未收總額" value={money((s.unpaidSales || 0) + constructionStats.unpaid)} sub="需持續追蹤請款" />
-          <Card title="應付未付總額" value={money(s.unpaidPurchases || 0)} sub="待安排付款" />
-          <Card title="已收款金額" value={money(s.collectedSales || constructionStats.received || 0)} sub="銷貨與案場收款" />
-          <Card title="已付款金額" value={money(s.paidPurchases || 0)} sub="進貨付款累計" />
-          <Card title="進行中案場" value={activeSites} sub={`總案場 ${constructionStats.sites.length} 件`} />
-          <Card title="預估毛利" value={money(constructionStats.profit)} sub={`毛利率 ${constructionStats.marginRate}%`} />
-          <Card title="接案中心狀態" value={`${priorityLeads} 件`} sub={`案源總數 ${leads.length} 件`} />
-        </div>
-
-        <div className="command-layout">
-          <div className="panel command-ai-panel">
-            <h2>AI 經營提醒</h2>
+        <div className="panel-grid">
+          <div className="panel">
+            <h2>工程營運摘要</h2>
             <ul className="summary">
-              {constructionStats.sites.length === 0 && <li>目前尚無案場資料，請先到案場中心新增工程案場。</li>}
-              {constructionStats.unpaid > 0 && <li>尚有未收款 {money(constructionStats.unpaid)}，建議優先追蹤請款節點。</li>}
-              {(s.unpaidPurchases || 0) > 0 && <li>目前應付未付 {money(s.unpaidPurchases || 0)}，建議安排付款時程。</li>}
-              {constructionStats.riskSites.length > 0 && <li>{constructionStats.riskSites.length} 個案場收款率偏低，請檢查合約、驗收與請款進度。</li>}
-              {constructionStats.marginRate < 25 && constructionStats.totalQuote > 0 && <li>整體毛利率低於 25%，建議重新檢查材料、工資與外包成本。</li>}
-              {priorityLeads > 0 && <li>接案中心有 {priorityLeads} 件案源分數較高，適合今天優先追蹤。</li>}
-              {constructionStats.sites.length > 0 && constructionStats.unpaid === 0 && <li>目前未收款風險低，請維持案場成本紀錄完整。</li>}
+              <li>案場數量：{constructionStats.sites.length}</li>
+              <li>案場總報價：{money(constructionStats.totalQuote)}</li>
+              <li>已收款：{money(constructionStats.received)}</li>
+              <li>未收款：{money(constructionStats.unpaid)}</li>
+              <li>核心成本：{money(constructionStats.totalCost)}</li>
+              <li>案場毛利：{money(constructionStats.profit)}</li>
             </ul>
           </div>
 
-          <div className="panel command-actions">
-            <h2>快速操作</h2>
-            <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
-            <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
-            <button type="button" onClick={() => onNavigate?.('leads')}>檢查接案中心</button>
-            <button type="button" onClick={() => onNavigate?.('jobsites')}>管理案場中心</button>
-            <button type="button" onClick={() => onNavigate?.('jobsites')}>登記收款</button>
-            <button type="button" onClick={() => onNavigate?.('reports')}>查看經營報表</button>
+          <div className="panel">
+            <h2>請款風險提醒</h2>
+            <ul className="summary">
+              {constructionStats.sites.length === 0 && <li>目前尚無案場資料，請先到案場工作台新增工程案場。</li>}
+              {constructionStats.unpaid > 0 && <li>尚有未收款 {money(constructionStats.unpaid)}，建議持續追蹤請款進度。</li>}
+              {constructionStats.riskSites.length > 0 && <li>有 {constructionStats.riskSites.length} 個案場收款率偏低，請優先檢查。</li>}
+              {constructionStats.marginRate < 25 && constructionStats.totalQuote > 0 && <li>整體毛利率低於 25%，請檢查材料、工資與外包成本。</li>}
+              {constructionStats.sites.length > 0 && constructionStats.unpaid === 0 && <li>目前無未收款風險，收款狀況良好。</li>}
+            </ul>
           </div>
         </div>
 
@@ -1322,850 +768,44 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
     );
   }
 
+  const chart = s.revenueByPlatform?.length
+    ? s.revenueByPlatform
+    : [{ name: '尚無資料', value: 1 }];
+
   return (
-    <section className="command-center">
-      <div className="command-hero">
-        <div>
-          <p className="command-kicker">{todayText}｜經營總覽</p>
-          <h1>{company.name}</h1>
-          <p>今日營運狀態：目前累計營收 {money(s.revenue)}，淨利 {money(s.netProfit)}。進貨、銷貨、庫存與帳款集中管理。</p>
-        </div>
-        <div className="command-hero-side">
-          <div className="command-signal">
-            <span />
-            <strong>資料已同步</strong>
-          </div>
-          <div className="command-quick-actions">
-            <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
-            <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
-            <button type="button" onClick={() => onNavigate?.('inventory')}>檢查庫存</button>
-            <button type="button" onClick={() => onNavigate?.('invoices')}>處理發票</button>
-            <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
-          </div>
-        </div>
-      </div>
-
-      <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
-
-      <div className="command-metrics">
-        <Card title="本月銷貨總額" value={money(s.monthlySales || 0)} />
-        <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} />
-        <Card title="應收未收總額" value={money(s.unpaidSales || 0)} />
-        <Card title="應付未付總額" value={money(s.unpaidPurchases || 0)} />
-        <Card title="已收款金額" value={money(s.collectedSales || 0)} />
-        <Card title="已付款金額" value={money(s.paidPurchases || 0)} />
+    <section>
+      <div className="grid">
         <Card title="總營收" value={money(s.revenue)} />
+        <Card title="總支出" value={money(s.expenses)} />
         <Card title="淨利" value={money(s.netProfit)} />
         <Card title="低庫存警示" value={s.lowStock} />
       </div>
 
       <div className="panel-grid">
-        <div className="panel bi-panel">
+        <div className="panel">
           <h2>平台營收分布</h2>
-          <p className="panel-subtitle">依平台營收高低排序，協助判斷主要收入來源與平台集中度。</p>
-          <PlatformRevenueChart rows={s.revenueByPlatform || []} />
+          <ResponsiveContainer width="100%" height={260}>
+            <PieChart>
+              <Pie data={chart} dataKey="value" nameKey="name" outerRadius={90}>
+                {chart.map((_, i) => (
+                  <Cell key={i} />
+                ))}
+              </Pie>
+              <Tooltip />
+            </PieChart>
+          </ResponsiveContainer>
         </div>
 
         <div className="panel">
           <h2>營運摘要</h2>
           <ul className="summary">
-          <li>本月銷貨總額：{money(s.monthlySales || 0)}</li>
-          <li>本月進貨總額：{money(s.monthlyPurchases || 0)}</li>
-          <li>本月毛利：{money(s.grossProfit || 0)}</li>
-          <li>毛利率：{Number(s.grossMarginRate || 0)}%</li>
-          <li>庫存成本：{money(s.inventoryValue || 0)}</li>
-          <li>應收未收總額：{money(s.unpaidSales || 0)}</li>
-          <li>應付未付總額：{money(s.unpaidPurchases || 0)}</li>
-          <li>已收款金額：{money(s.collectedSales || 0)}</li>
-          <li>已付款金額：{money(s.paidPurchases || 0)}</li>
-          {(s.unpaidSales || 0) > 0 && <li>現金流提醒：仍有應收帳款待追蹤。</li>}
-          {(s.unpaidPurchases || 0) > 0 && <li>現金流提醒：仍有應付帳款待安排付款。</li>}
-          <li>交易筆數：{s.txCount}</li>
+            <li>交易筆數：{s.txCount}</li>
             <li>平台手續費：{money(s.fees)}</li>
             <li>商品成本：{money(s.cogs)}</li>
             <li>待處理發票：{s.invoicesPending}</li>
           </ul>
         </div>
       </div>
-
-      <div className="panel-grid">
-        <div className="panel bi-panel">
-          <h2>現金流提醒</h2>
-          <p className="panel-subtitle">依應收、應付與毛利率整理今日需關注事項。</p>
-          <ul className="bi-alert-list">
-            {(s.cashflowAlerts || []).map((item) => <li key={item}>{item}</li>)}
-            {!(s.cashflowAlerts || []).length && <li>目前沒有重大現金流提醒，請持續維持進貨、銷貨與收付款紀錄完整。</li>}
-          </ul>
-          <div className="bi-cashflow-grid">
-            <div><span>本週預估流入</span><strong>{money(s.unpaidSales || 0)}</strong></div>
-            <div><span>本週預估流出</span><strong>{money(s.unpaidPurchases || 0)}</strong></div>
-            <div><span>淨現金流提醒</span><strong>{money((s.unpaidSales || 0) - (s.unpaidPurchases || 0))}</strong></div>
-          </div>
-        </div>
-
-        <div className="panel bi-panel">
-          <h2>應收 / 應付趨勢</h2>
-          <p className="panel-subtitle">近 30 天未收與未付變化，資料不足時以最新紀錄呈現。</p>
-          <div className="bi-trend-list">
-            {(s.receivableTrend || []).slice(-6).map((row) => (
-              <div key={`r-${row.date}`}>
-                <span>{row.date}</span>
-                <strong>{money(row.value || 0)}</strong>
-                <i style={{ width: `${Math.min(100, Math.max(6, Number(row.value || 0) / Math.max(Number(s.unpaidSales || 1), 1) * 100))}%` }} />
-              </div>
-            ))}
-            {(s.receivableTrend || []).length === 0 && <p className="bi-empty">目前尚無應收趨勢資料。</p>}
-          </div>
-          <div className="bi-trend-list payable">
-            {(s.payableTrend || []).slice(-6).map((row) => (
-              <div key={`p-${row.date}`}>
-                <span>{row.date}</span>
-                <strong>{money(row.value || 0)}</strong>
-                <i style={{ width: `${Math.min(100, Math.max(6, Number(row.value || 0) / Math.max(Number(s.unpaidPurchases || 1), 1) * 100))}%` }} />
-              </div>
-            ))}
-            {(s.payableTrend || []).length === 0 && <p className="bi-empty">目前尚無應付趨勢資料。</p>}
-          </div>
-        </div>
-      </div>
-
-      <div className="panel-grid">
-        <div className="panel bi-panel">
-          <h2>低庫存排行</h2>
-          <p className="panel-subtitle">依目前庫存與安全庫存差距排序。</p>
-          <Table
-            cols={['商品 / 材料', '目前庫存', '安全庫存', '最近更新']}
-            rows={(s.lowStockItems || []).length
-              ? (s.lowStockItems || []).map((item) => [
-                  item.name || '未命名',
-                  `${item.stock || 0} ${item.unit || ''}`,
-                  `${item.safety_stock ?? item.safetyStock ?? 0} ${item.unit || ''}`,
-                  item.updated_at || item.updatedAt || '-'
-                ])
-              : [['目前尚無低庫存資料', '-', '-', '-']]}
-          />
-        </div>
-
-        <div className="panel bi-panel">
-          <h2>平台費率比較</h2>
-          <p className="panel-subtitle">比較各平台營收、手續費與費率，協助判斷平台成本。</p>
-          <Table
-            cols={['平台', '平台營收', '平台費用', '費率']}
-            rows={(s.platformFeeComparison || []).length
-              ? (s.platformFeeComparison || []).map((row) => [
-                  getPlatformName(row.name),
-                  money(row.revenue || 0),
-                  money(row.fee || 0),
-                  `${Number(row.fee_rate ?? row.feeRate ?? 0)}%`
-                ])
-              : [['目前尚無平台費率資料', money(0), money(0), '0%']]}
-          />
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function FeedbackCenter({ companyId }) {
-  const [rows, setRows] = useState([]);
-  const [form, setForm] = useState({
-    category: '操作問題',
-    rating: '5',
-    page: '',
-    message: ''
-  });
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function load() {
-    const data = await api(`/feedbacks/my?companyId=${companyId}`);
-    setRows(data || []);
-  }
-
-  useEffect(() => {
-    setMessage('');
-    setError('');
-    load().catch(() => setError('回饋資料讀取失敗，請稍後再試。'));
-  }, [companyId]);
-
-  async function submit(e) {
-    e.preventDefault();
-    try {
-      setMessage('');
-      setError('');
-      await api('/feedbacks/create', {
-        method: 'POST',
-        body: JSON.stringify({
-          companyId,
-          category: form.category,
-          rating: Number(form.rating),
-          page: form.page,
-          message: form.message
-        })
-      });
-      setForm({ category: '操作問題', rating: '5', page: '', message: '' });
-      setMessage('回饋已送出，BookAI 團隊會依狀態追蹤處理。');
-      await load();
-    } catch (err) {
-      setError('回饋送出失敗，請稍後再試。');
-    }
-  }
-
-  return (
-    <section>
-      <Title title="產品回饋" desc="提交使用問題、功能建議與使用回饋。你只能看到自己公司的回饋紀錄。" />
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-
-      <form className="form feedback-form" onSubmit={submit}>
-        <label>
-          <span>類別</span>
-          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-            <option>操作問題</option>
-            <option>介面建議</option>
-            <option>功能需求</option>
-            <option>錯誤回報</option>
-            <option>其他</option>
-          </select>
-        </label>
-        <label>
-          <span>評分</span>
-          <select value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })}>
-            <option value="5">5 分，非常順手</option>
-            <option value="4">4 分，大致順手</option>
-            <option value="3">3 分，普通</option>
-            <option value="2">2 分，需要改善</option>
-            <option value="1">1 分，明顯卡住</option>
-          </select>
-        </label>
-        <label>
-          <span>目前頁面 / 模組</span>
-          <input value={form.page} onChange={(e) => setForm({ ...form, page: e.target.value })} placeholder="例如：進貨管理、接案中心" />
-        </label>
-        <label className="feedback-message-field">
-          <span>回饋內容</span>
-          <textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required placeholder="請描述你遇到的問題、建議或測試感受。" />
-        </label>
-        <button>送出回饋</button>
-      </form>
-
-      <div className="panel">
-        <h2>我的回饋紀錄</h2>
-        <Table
-          cols={['時間', '類別', '評分', '頁面', '內容', '狀態', '回覆備註']}
-          rows={rows.map((row) => [
-            row.createdAt || '-',
-            row.category || '-',
-            `${row.rating || 3} / 5`,
-            row.page || '-',
-            row.message,
-            getFeedbackStatusLabel(row.status),
-            row.adminNote || '-'
-          ])}
-        />
-      </div>
-    </section>
-  );
-}
-
-function ReceivablesManager({ companyId }) {
-  const [rows, setRows] = useState([]);
-  const [activeId, setActiveId] = useState(null);
-  const [form, setForm] = useState({ amount: '', receiptDate: new Date().toISOString().slice(0, 10), method: '', note: '' });
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function load() {
-    const data = await api(`/receivables/list?companyId=${companyId}`);
-    setRows(data || []);
-  }
-
-  useEffect(() => {
-    load().catch((err) => setError(err.message || '讀取應收帳款失敗'));
-  }, [companyId]);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!activeId) return;
-    try {
-      setMessage('');
-      setError('');
-      await api(`/sales/${activeId}/receipts?companyId=${companyId}`, {
-        method: 'POST',
-        body: JSON.stringify(form)
-      });
-      setForm({ amount: '', receiptDate: new Date().toISOString().slice(0, 10), method: '', note: '' });
-      setActiveId(null);
-      setMessage('收款已新增，應收帳款已更新');
-      await load();
-    } catch (err) {
-      setError(err.message || '新增收款失敗');
-    }
-  }
-
-  const active = rows.find((row) => row.id === activeId);
-
-  return (
-    <section>
-      <Title title="應收帳款" desc="追蹤未收款與部分收款的銷貨單，並登記實際收款。" />
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-      {active && (
-        <form className="form receivable-form" onSubmit={submit}>
-          <label><span>單據</span><input value={`${active.documentNo || active.id}｜未收 ${money(active.remainingAmount)}`} readOnly /></label>
-          <label><span>收款金額</span><input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required /></label>
-          <label><span>收款日期</span><input type="date" value={form.receiptDate} onChange={(e) => setForm({ ...form, receiptDate: e.target.value })} /></label>
-          <label><span>方式</span><input value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })} placeholder="匯款、現金、支票" /></label>
-          <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-          <button>新增收款</button>
-          <button type="button" className="lead-soft-btn" onClick={() => setActiveId(null)}>取消</button>
-        </form>
-      )}
-      <Table
-        cols={['日期', '單號', '客戶', '總額', '已收', '未收', '狀態', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.date || '-',
-          row.documentNo || `#${row.id}`,
-          row.customerName || '-',
-          money(row.total),
-          money(row.receivedAmount),
-          money(row.remainingAmount),
-          row.collectionStatus,
-          row.note || '-',
-          <button type="button" className="lead-soft-btn" onClick={() => {
-            setActiveId(row.id);
-            setForm({ ...form, amount: row.remainingAmount || '', receiptDate: new Date().toISOString().slice(0, 10) });
-          }}>新增收款</button>
-        ])}
-      />
-    </section>
-  );
-}
-
-function PayablesManager({ companyId }) {
-  const [rows, setRows] = useState([]);
-  const [activeId, setActiveId] = useState(null);
-  const [form, setForm] = useState({ amount: '', paymentDate: new Date().toISOString().slice(0, 10), method: '', note: '' });
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function load() {
-    const data = await api(`/payables/list?companyId=${companyId}`);
-    setRows(data || []);
-  }
-
-  useEffect(() => {
-    load().catch((err) => setError(err.message || '讀取應付帳款失敗'));
-  }, [companyId]);
-
-  async function submit(e) {
-    e.preventDefault();
-    if (!activeId) return;
-    try {
-      setMessage('');
-      setError('');
-      await api(`/purchases/${activeId}/payments?companyId=${companyId}`, {
-        method: 'POST',
-        body: JSON.stringify(form)
-      });
-      setForm({ amount: '', paymentDate: new Date().toISOString().slice(0, 10), method: '', note: '' });
-      setActiveId(null);
-      setMessage('付款已新增，應付帳款已更新');
-      await load();
-    } catch (err) {
-      setError(err.message || '新增付款失敗');
-    }
-  }
-
-  const active = rows.find((row) => row.id === activeId);
-
-  return (
-    <section>
-      <Title title="應付帳款" desc="追蹤未付款與部分付款的進貨單，並登記實際付款。" />
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-      {active && (
-        <form className="form payable-form" onSubmit={submit}>
-          <label><span>單據</span><input value={`${active.documentNo || active.id}｜未付 ${money(active.remainingAmount)}`} readOnly /></label>
-          <label><span>付款金額</span><input type="number" min="0" step="0.01" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required /></label>
-          <label><span>付款日期</span><input type="date" value={form.paymentDate} onChange={(e) => setForm({ ...form, paymentDate: e.target.value })} /></label>
-          <label><span>方式</span><input value={form.method} onChange={(e) => setForm({ ...form, method: e.target.value })} placeholder="匯款、現金、支票" /></label>
-          <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-          <button>新增付款</button>
-          <button type="button" className="lead-soft-btn" onClick={() => setActiveId(null)}>取消</button>
-        </form>
-      )}
-      <Table
-        cols={['日期', '單號', '供應商', '總額', '已付', '未付', '狀態', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.date || '-',
-          row.documentNo || `#${row.id}`,
-          row.supplierName || '-',
-          money(row.total),
-          money(row.paidAmount),
-          money(row.remainingAmount),
-          row.paymentStatus,
-          row.note || '-',
-          <button type="button" className="lead-soft-btn" onClick={() => {
-            setActiveId(row.id);
-            setForm({ ...form, amount: row.remainingAmount || '', paymentDate: new Date().toISOString().slice(0, 10) });
-          }}>新增付款</button>
-        ])}
-      />
-    </section>
-  );
-}
-
-function ContactsManager({ companyId, type }) {
-  const isSupplier = type === 'suppliers';
-  const title = isSupplier ? '供應商管理' : '客戶管理';
-  const desc = isSupplier
-    ? '管理供應商資料，建立進貨單時可直接選用。'
-    : '管理客戶資料，建立銷貨單時可直接選用。';
-  const createEmptyForm = () => ({
-    name: '',
-    contactPerson: '',
-    phone: '',
-    email: '',
-    taxId: '',
-    address: '',
-    note: ''
-  });
-  const [rows, setRows] = useState([]);
-  const [form, setForm] = useState(createEmptyForm);
-  const [editingId, setEditingId] = useState(null);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function load() {
-    const data = await api(`/${type}/list?companyId=${companyId}`);
-    setRows(data || []);
-  }
-
-  useEffect(() => {
-    setForm(createEmptyForm());
-    setEditingId(null);
-    setMessage('');
-    setError('');
-    load().catch((err) => setError(err.message || `讀取${title}失敗`));
-  }, [companyId, type]);
-
-  function edit(row) {
-    setEditingId(row.id);
-    setForm({
-      name: row.name || '',
-      contactPerson: row.contactPerson || '',
-      phone: row.phone || '',
-      email: row.email || '',
-      taxId: row.taxId || '',
-      address: row.address || '',
-      note: row.note || ''
-    });
-    setMessage(`正在編輯：${row.name}`);
-    setError('');
-  }
-
-  function reset() {
-    setEditingId(null);
-    setForm(createEmptyForm());
-    setMessage('');
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    try {
-      setError('');
-      setMessage('');
-      const path = editingId
-        ? `/${type}/${editingId}?companyId=${companyId}`
-        : `/${type}/create?companyId=${companyId}`;
-      await api(path, {
-        method: editingId ? 'PUT' : 'POST',
-        body: JSON.stringify(form)
-      });
-      setMessage(editingId ? `${title}已更新` : `${title}已新增`);
-      reset();
-      await load();
-    } catch (err) {
-      setError(err.message || `${title}儲存失敗`);
-    }
-  }
-
-  async function remove(row) {
-    if (!confirm(`確定刪除「${row.name}」？`)) return;
-    try {
-      setError('');
-      setMessage('');
-      await api(`/${type}/${row.id}?companyId=${companyId}`, { method: 'DELETE' });
-      setMessage(`${title}已刪除`);
-      await load();
-    } catch (err) {
-      setError(err.message || `${title}刪除失敗`);
-    }
-  }
-
-  return (
-    <section>
-      <Title title={title} desc={desc} />
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-
-      <form className="form erp-form erp-contact-form" onSubmit={submit}>
-        <label><span>名稱</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
-        <label><span>聯絡人</span><input value={form.contactPerson} onChange={(e) => setForm({ ...form, contactPerson: e.target.value })} /></label>
-        <label><span>電話</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></label>
-        <label><span>電子信箱</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></label>
-        <label><span>統編</span><input value={form.taxId} onChange={(e) => setForm({ ...form, taxId: e.target.value })} /></label>
-        <label><span>地址</span><input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} /></label>
-        <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-        <button>{editingId ? '儲存修改' : '新增資料'}</button>
-        {editingId && <button type="button" className="lead-soft-btn" onClick={reset}>取消編輯</button>}
-      </form>
-
-      <Table
-        cols={['名稱', '聯絡人', '電話', '電子信箱', '統編', '地址', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.name,
-          row.contactPerson || '-',
-          row.phone || '-',
-          row.email || '-',
-          row.taxId || '-',
-          row.address || '-',
-          row.note || '-',
-          <div className="lead-actions">
-            <button type="button" className="lead-soft-btn" onClick={() => edit(row)}>編輯</button>
-            <button type="button" className="lead-danger-btn" onClick={() => remove(row)}>刪除</button>
-          </div>
-        ])}
-      />
-    </section>
-  );
-}
-
-function PurchasesManager({ companyId, onNavigate }) {
-  const [rows, setRows] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [suppliers, setSuppliers] = useState([]);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [form, setForm] = useState({
-    supplierName: '',
-    supplierId: '',
-    purchaseDate: new Date().toISOString().slice(0, 10),
-    category: '商品',
-    itemName: '',
-    productId: '',
-    quantity: 1,
-    unit: '',
-    unitCost: 0,
-    tax: '',
-    paymentStatus: '未付款',
-    paidAmount: 0,
-    note: ''
-  });
-
-  async function load() {
-    const [purchaseRows, productRows, supplierRows] = await Promise.all([
-      api(`/purchases/list?companyId=${companyId}`),
-      api(`/companies/${companyId}/products`),
-      api(`/suppliers/list?companyId=${companyId}`)
-    ]);
-    setRows(purchaseRows || []);
-    setProducts(productRows || []);
-    setSuppliers(supplierRows || []);
-  }
-
-  useEffect(() => {
-    load().catch((err) => setError(err.message || '讀取進貨資料失敗'));
-  }, [companyId]);
-
-  function selectProduct(productId) {
-    const product = products.find((p) => String(p.id) === String(productId));
-    setForm({
-      ...form,
-      productId,
-      itemName: product?.name || form.itemName,
-      unit: product?.unit || form.unit,
-      unitCost: product?.cost || form.unitCost
-    });
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    try {
-      setMessage('');
-      setError('');
-      const supplier = suppliers.find((s) => String(s.id) === String(form.supplierId));
-      await api(`/purchases/create?companyId=${companyId}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          supplierId: form.supplierId || null,
-          supplierName: supplier?.name || form.supplierName,
-          purchaseDate: form.purchaseDate,
-          category: form.category,
-          tax: form.tax === '' ? undefined : Number(form.tax),
-          paymentStatus: form.paymentStatus,
-          paidAmount: Number(form.paidAmount || 0),
-          note: form.note,
-          items: [{
-            productId: form.productId || null,
-            itemName: form.itemName,
-            quantity: Number(form.quantity || 0),
-            unit: form.unit,
-            unitCost: Number(form.unitCost || 0)
-          }]
-        })
-      });
-      setMessage('進貨單已建立，庫存已同步更新');
-      setForm({ ...form, itemName: '', productId: '', quantity: 1, unitCost: 0, note: '' });
-      await load();
-    } catch (err) {
-      setError(err.message || '建立進貨單失敗');
-    }
-  }
-
-  async function voidPurchase(row) {
-    if (!confirm(`確定作廢進貨單「${row.purchaseNo || row.id}」？作廢後會回滾庫存。`)) return;
-    try {
-      setMessage('');
-      setError('');
-      await api(`/purchases/${row.id}/void?companyId=${companyId}`, { method: 'POST' });
-      setMessage('進貨單已作廢，庫存已回滾');
-      await load();
-    } catch (err) {
-      setError(err.message || '作廢進貨單失敗');
-    }
-  }
-
-  async function quickPayment(row) {
-    const amount = prompt(`請輸入付款金額，未付 ${money(row.remainingAmount || 0)}`, row.remainingAmount || '');
-    if (!amount) return;
-    try {
-      setMessage('');
-      setError('');
-      await api(`/purchases/${row.id}/payments?companyId=${companyId}`, {
-        method: 'POST',
-        body: JSON.stringify({ amount: Number(amount), paymentDate: new Date().toISOString().slice(0, 10) })
-      });
-      setMessage('付款已新增');
-      await load();
-    } catch (err) {
-      setError(err.message || '新增付款失敗');
-    }
-  }
-
-  const subtotal = Number(form.quantity || 0) * Number(form.unitCost || 0);
-
-  return (
-    <section>
-      <Title title="進貨管理" desc="建立進貨單、同步庫存、追蹤付款狀態。" />
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-
-      <form className="form erp-form" onSubmit={submit}>
-        <label><span>供應商</span><select value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value })}><option value="">手動填寫</option>{suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
-        <label><span>供應商名稱</span><input value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} /></label>
-        <label><span>進貨日期</span><input type="date" value={form.purchaseDate} onChange={(e) => setForm({ ...form, purchaseDate: e.target.value })} /></label>
-        <label><span>類別</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>商品</option><option>材料</option><option>食材</option><option>耗材</option><option>其他</option></select></label>
-        <label><span>連動庫存品項</span><select value={form.productId} onChange={(e) => selectProduct(e.target.value)}><option value="">不連動庫存</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}｜庫存 {p.stock}</option>)}</select></label>
-        <label><span>品項名稱</span><input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} required /></label>
-        <label><span>數量</span><input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
-        <label><span>單位</span><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></label>
-        <label><span>單價</span><input type="number" min="0" step="0.01" value={form.unitCost} onChange={(e) => setForm({ ...form, unitCost: e.target.value })} /></label>
-        <label><span>稅額</span><input type="number" min="0" step="0.01" placeholder={`預設 ${Math.round(subtotal * 0.05)}`} value={form.tax} onChange={(e) => setForm({ ...form, tax: e.target.value })} /></label>
-        <label><span>付款狀態</span><select value={form.paymentStatus} onChange={(e) => setForm({ ...form, paymentStatus: e.target.value })}><option>未付款</option><option>部分付款</option><option>已付款</option></select></label>
-        <label><span>已付款金額</span><input type="number" min="0" step="0.01" value={form.paidAmount} onChange={(e) => setForm({ ...form, paidAmount: e.target.value })} /></label>
-        <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-        <div className="erp-form-total"><span>小計</span><strong>{money(subtotal)}</strong></div>
-        <button>建立進貨單</button>
-      </form>
-
-      <Table
-        cols={['日期', '單號', '供應商', '類別', '總額', '已付', '未付', '付款狀態', '狀態', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.purchaseDate,
-          row.purchaseNo,
-          row.supplierName || '-',
-          row.category || '-',
-          money(row.total),
-          money(row.paidAmount),
-          money(row.remainingAmount),
-          row.paymentStatus,
-          row.status === 'void' ? '作廢' : '已確認',
-          row.note || '-',
-          row.status === 'void'
-            ? '-'
-            : <div className="lead-actions">
-                <button type="button" className="lead-soft-btn" onClick={() => quickPayment(row)}>新增付款</button>
-                <button type="button" className="lead-soft-btn" onClick={() => onNavigate?.('payables')}>應付帳款</button>
-                <button type="button" className="lead-danger-btn" onClick={() => voidPurchase(row)}>作廢</button>
-              </div>
-        ])}
-      />
-    </section>
-  );
-}
-
-function SalesManager({ companyId, onNavigate }) {
-  const [rows, setRows] = useState([]);
-  const [products, setProducts] = useState([]);
-  const [customers, setCustomers] = useState([]);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-  const [form, setForm] = useState({
-    customerName: '',
-    customerId: '',
-    saleDate: new Date().toISOString().slice(0, 10),
-    category: '商品銷售',
-    itemName: '',
-    productId: '',
-    quantity: 1,
-    unit: '',
-    unitPrice: 0,
-    tax: '',
-    collectionStatus: '未收款',
-    receivedAmount: 0,
-    note: ''
-  });
-
-  async function load() {
-    const [saleRows, productRows, customerRows] = await Promise.all([
-      api(`/sales/list?companyId=${companyId}`),
-      api(`/companies/${companyId}/products`),
-      api(`/customers/list?companyId=${companyId}`)
-    ]);
-    setRows(saleRows || []);
-    setProducts(productRows || []);
-    setCustomers(customerRows || []);
-  }
-
-  useEffect(() => {
-    load().catch((err) => setError(err.message || '讀取銷貨資料失敗'));
-  }, [companyId]);
-
-  function selectProduct(productId) {
-    const product = products.find((p) => String(p.id) === String(productId));
-    setForm({
-      ...form,
-      productId,
-      itemName: product?.name || form.itemName,
-      unit: product?.unit || form.unit,
-      unitPrice: product?.price || form.unitPrice
-    });
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    try {
-      setMessage('');
-      setError('');
-      const customer = customers.find((c) => String(c.id) === String(form.customerId));
-      await api(`/sales/create?companyId=${companyId}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          customerId: form.customerId || null,
-          customerName: customer?.name || form.customerName,
-          saleDate: form.saleDate,
-          category: form.category,
-          tax: form.tax === '' ? undefined : Number(form.tax),
-          collectionStatus: form.collectionStatus,
-          receivedAmount: Number(form.receivedAmount || 0),
-          note: form.note,
-          items: [{
-            productId: form.productId || null,
-            itemName: form.itemName,
-            quantity: Number(form.quantity || 0),
-            unit: form.unit,
-            unitPrice: Number(form.unitPrice || 0)
-          }]
-        })
-      });
-      setMessage('銷貨單已建立，庫存已同步扣減');
-      setForm({ ...form, itemName: '', productId: '', quantity: 1, unitPrice: 0, note: '' });
-      await load();
-    } catch (err) {
-      setError(err.message || '建立銷貨單失敗');
-    }
-  }
-
-  async function voidSale(row) {
-    if (!confirm(`確定作廢銷貨單「${row.saleNo || row.id}」？作廢後會回滾庫存。`)) return;
-    try {
-      setMessage('');
-      setError('');
-      await api(`/sales/${row.id}/void?companyId=${companyId}`, { method: 'POST' });
-      setMessage('銷貨單已作廢，庫存已回滾');
-      await load();
-    } catch (err) {
-      setError(err.message || '作廢銷貨單失敗');
-    }
-  }
-
-  async function quickReceipt(row) {
-    const amount = prompt(`請輸入收款金額，未收 ${money(row.remainingAmount || 0)}`, row.remainingAmount || '');
-    if (!amount) return;
-    try {
-      setMessage('');
-      setError('');
-      await api(`/sales/${row.id}/receipts?companyId=${companyId}`, {
-        method: 'POST',
-        body: JSON.stringify({ amount: Number(amount), receiptDate: new Date().toISOString().slice(0, 10) })
-      });
-      setMessage('收款已新增');
-      await load();
-    } catch (err) {
-      setError(err.message || '新增收款失敗');
-    }
-  }
-
-  const subtotal = Number(form.quantity || 0) * Number(form.unitPrice || 0);
-
-  return (
-    <section>
-      <Title title="銷貨管理" desc="建立銷貨單、同步扣減庫存、追蹤收款狀態。" />
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-
-      <form className="form erp-form" onSubmit={submit}>
-        <label><span>客戶</span><select value={form.customerId} onChange={(e) => setForm({ ...form, customerId: e.target.value })}><option value="">手動填寫</option>{customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
-        <label><span>客戶名稱</span><input value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} /></label>
-        <label><span>銷貨日期</span><input type="date" value={form.saleDate} onChange={(e) => setForm({ ...form, saleDate: e.target.value })} /></label>
-        <label><span>類別</span><select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}><option>商品銷售</option><option>工程服務</option><option>餐飲營收</option><option>其他</option></select></label>
-        <label><span>連動庫存品項</span><select value={form.productId} onChange={(e) => selectProduct(e.target.value)}><option value="">不連動庫存</option>{products.map((p) => <option key={p.id} value={p.id}>{p.name}｜庫存 {p.stock}</option>)}</select></label>
-        <label><span>品項名稱</span><input value={form.itemName} onChange={(e) => setForm({ ...form, itemName: e.target.value })} required /></label>
-        <label><span>數量</span><input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: e.target.value })} /></label>
-        <label><span>單位</span><input value={form.unit} onChange={(e) => setForm({ ...form, unit: e.target.value })} /></label>
-        <label><span>單價</span><input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => setForm({ ...form, unitPrice: e.target.value })} /></label>
-        <label><span>稅額</span><input type="number" min="0" step="0.01" placeholder={`預設 ${Math.round(subtotal * 0.05)}`} value={form.tax} onChange={(e) => setForm({ ...form, tax: e.target.value })} /></label>
-        <label><span>收款狀態</span><select value={form.collectionStatus} onChange={(e) => setForm({ ...form, collectionStatus: e.target.value })}><option>未收款</option><option>部分收款</option><option>已收款</option></select></label>
-        <label><span>已收款金額</span><input type="number" min="0" step="0.01" value={form.receivedAmount} onChange={(e) => setForm({ ...form, receivedAmount: e.target.value })} /></label>
-        <label><span>備註</span><input value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} /></label>
-        <div className="erp-form-total"><span>小計</span><strong>{money(subtotal)}</strong></div>
-        <button>建立銷貨單</button>
-      </form>
-
-      <Table
-        cols={['日期', '單號', '客戶', '類別', '總額', '已收', '未收', '收款狀態', '狀態', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.saleDate,
-          row.saleNo,
-          row.customerName || '-',
-          row.category || '-',
-          money(row.total),
-          money(row.receivedAmount),
-          money(row.remainingAmount),
-          row.collectionStatus,
-          row.status === 'void' ? '作廢' : '已確認',
-          row.note || '-',
-          row.status === 'void'
-            ? '-'
-            : <div className="lead-actions">
-                <button type="button" className="lead-soft-btn" onClick={() => quickReceipt(row)}>新增收款</button>
-                <button type="button" className="lead-soft-btn" onClick={() => onNavigate?.('receivables')}>應收帳款</button>
-                <button type="button" className="lead-danger-btn" onClick={() => voidSale(row)}>作廢</button>
-              </div>
-        ])}
-      />
     </section>
   );
 }
@@ -2183,7 +823,7 @@ function Transactions({ companyId }) {
 
   return (
     <section>
-      <Title title="收支管理" desc="整理手動交易、平台訂單與其他收入支出紀錄。" />
+      <Title title="交易中心" desc="所有平台訂單統一轉成財務交易。" />
 
       <label>
         <span>平台篩選</span>
@@ -4427,8 +3067,8 @@ function JobSites({ companyId, company }) {
             extraMiscCost;
 
           const freshTotalAmount = numberValue(
-            copyCalc.totalAmount ??
-            copyCalc.quoteAmount ??
+            copyCalcopyCalc.totalAmount ??
+            copyCalcopyCalc.quoteAmount ??
             site.quoteAmount ??
             site.quote_amount ??
             freshSubtotalAmount
@@ -4442,8 +3082,8 @@ function JobSites({ companyId, company }) {
 
           copyCalc = {
             ...copyCalc,
-            subtotalAmount: freshSubtotalAmount || copyCalc.subtotalAmount,
-            estimateSubtotalAmount: freshSubtotalAmount || copyCalc.estimateSubtotalAmount,
+            subtotalAmount: freshSubtotalAmount || copyCalcopyCalc.subtotalAmount,
+            estimateSubtotalAmount: freshSubtotalAmount || copyCalcopyCalc.estimateSubtotalAmount,
             estimateCostTotal: freshEstimateCostTotal,
             totalCost: freshCoreCost,
             profit: freshProfit,
@@ -6029,1452 +4669,16 @@ function Reports({ companyId, company }) {
   );
 }
 
-const emptyCommerceProduct = {
-  name: '',
-  category: '',
-  price: '',
-  originalPrice: '',
-  imageUrl: '',
-  description: '',
-  isFeatured: '0',
-  isVisible: '1',
-  sortOrder: 0
-};
-
-const emptyCommercePromotion = {
-  title: '',
-  description: '',
-  promoType: 'banner',
-  startDate: '',
-  endDate: '',
-  isActive: '1',
-  sortOrder: 0
-};
-
-function CommerceSiteManager({ companyId, company }) {
-  const [settings, setSettings] = useState(null);
-  const [products, setProducts] = useState([]);
-  const [promotions, setPromotions] = useState([]);
-  const [productForm, setProductForm] = useState(emptyCommerceProduct);
-  const [promotionForm, setPromotionForm] = useState(emptyCommercePromotion);
-  const [editingProductId, setEditingProductId] = useState(null);
-  const [editingPromotionId, setEditingPromotionId] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function loadCommerceSite() {
-    try {
-      setLoading(true);
-      setError('');
-      const [settingsRow, productRows, promotionRows] = await Promise.all([
-        api(`/companies/${companyId}/commerce-site/settings`),
-        api(`/companies/${companyId}/commerce-site/products`),
-        api(`/companies/${companyId}/commerce-site/promotions`)
-      ]);
-      setSettings(settingsRow);
-      setProducts(productRows || []);
-      setPromotions(promotionRows || []);
-    } catch (err) {
-      setError(err.message || '讀取官網後台資料失敗');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    loadCommerceSite();
-  }, [companyId]);
-
-  async function saveSettings(e) {
-    e.preventDefault();
-    try {
-      setSaving(true);
-      setMessage('');
-      setError('');
-      const updated = await api(`/companies/${companyId}/commerce-site/settings`, {
-        method: 'PATCH',
-        body: JSON.stringify(settings)
-      });
-      setSettings(updated);
-      setMessage('已儲存');
-    } catch (err) {
-      setError(err.message || '儲存官網設定失敗');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function publishSettings() {
-    try {
-      setSaving(true);
-      setMessage('');
-      setError('');
-      const updated = await api(`/companies/${companyId}/commerce-site/settings`, {
-        method: 'PATCH',
-        body: JSON.stringify({ ...settings, siteStatus: 'live' })
-      });
-      setSettings(updated);
-      setMessage('網站狀態已更新為已上線');
-    } catch (err) {
-      setError(err.message || '發布更新失敗');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function saveProduct(e) {
-    e.preventDefault();
-    try {
-      setSaving(true);
-      setMessage('');
-      setError('');
-      const path = editingProductId
-        ? `/companies/${companyId}/commerce-site/products/${editingProductId}`
-        : `/companies/${companyId}/commerce-site/products`;
-      const saved = await api(path, {
-        method: editingProductId ? 'PATCH' : 'POST',
-        body: JSON.stringify(productForm)
-      });
-      setProducts((old) => editingProductId ? old.map((p) => (p.id === editingProductId ? saved : p)) : [saved, ...old]);
-      setEditingProductId(null);
-      setProductForm(emptyCommerceProduct);
-      setMessage('已儲存');
-    } catch (err) {
-      setError(err.message || '儲存商品失敗');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deleteProduct(id) {
-    if (!window.confirm('確定要刪除此商品嗎？')) return;
-    try {
-      setError('');
-      await api(`/companies/${companyId}/commerce-site/products/${id}`, { method: 'DELETE' });
-      setProducts((old) => old.filter((p) => p.id !== id));
-      setMessage('已儲存');
-    } catch (err) {
-      setError(err.message || '刪除商品失敗');
-    }
-  }
-
-  async function savePromotion(e) {
-    e.preventDefault();
-    try {
-      setSaving(true);
-      setMessage('');
-      setError('');
-      const path = editingPromotionId
-        ? `/companies/${companyId}/commerce-site/promotions/${editingPromotionId}`
-        : `/companies/${companyId}/commerce-site/promotions`;
-      const saved = await api(path, {
-        method: editingPromotionId ? 'PATCH' : 'POST',
-        body: JSON.stringify(promotionForm)
-      });
-      setPromotions((old) => editingPromotionId ? old.map((p) => (p.id === editingPromotionId ? saved : p)) : [saved, ...old]);
-      setEditingPromotionId(null);
-      setPromotionForm(emptyCommercePromotion);
-      setMessage('已儲存');
-    } catch (err) {
-      setError(err.message || '儲存活動失敗');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function deletePromotion(id) {
-    if (!window.confirm('確定要刪除此活動嗎？')) return;
-    try {
-      setError('');
-      await api(`/companies/${companyId}/commerce-site/promotions/${id}`, { method: 'DELETE' });
-      setPromotions((old) => old.filter((p) => p.id !== id));
-      setMessage('已儲存');
-    } catch (err) {
-      setError(err.message || '刪除活動失敗');
-    }
-  }
-
-  function editProduct(product) {
-    setEditingProductId(product.id);
-    setProductForm({
-      name: product.name || '',
-      category: product.category || '',
-      price: product.price || '',
-      originalPrice: product.originalPrice || '',
-      imageUrl: product.imageUrl || '',
-      description: product.description || '',
-      isFeatured: product.isFeatured ? '1' : '0',
-      isVisible: product.isVisible ? '1' : '0',
-      sortOrder: product.sortOrder || 0
-    });
-  }
-
-  function editPromotion(promotion) {
-    setEditingPromotionId(promotion.id);
-    setPromotionForm({
-      title: promotion.title || '',
-      description: promotion.description || '',
-      promoType: promotion.promoType || 'banner',
-      startDate: promotion.startDate || '',
-      endDate: promotion.endDate || '',
-      isActive: promotion.isActive ? '1' : '0',
-      sortOrder: promotion.sortOrder || 0
-    });
-  }
-
-  if (loading || !settings) {
-    return (
-      <section>
-        <Title title="Commerce 官網後台" desc="正在讀取官網後台資料..." />
-      </section>
-    );
-  }
-
-  const featuredProducts = products.filter((p) => p.isFeatured && p.isVisible).slice(0, 3);
-  const previewProducts = featuredProducts.length ? featuredProducts : products.filter((p) => p.isVisible).slice(0, 3);
-  const activePromotions = promotions.filter((p) => p.isActive).slice(0, 3);
-  const visibleProductCount = products.filter((p) => p.isVisible).length;
-
-  return (
-    <section className="commerce-site-page">
-      <Title title="Commerce 官網後台" desc="管理品牌資訊、商品展示、活動跑馬燈與官方 LINE 導流內容。" />
-
-      {message && <div className="notice">{message}</div>}
-      {error && <div className="error">{error}</div>}
-
-      <div className="commerce-cms-status">
-        <div className="commerce-cms-status-card">
-          <span>官網狀態</span>
-          <strong>{settings.siteStatus === 'live' ? '已上線' : settings.siteStatus === 'paused' ? '暫停' : '草稿'}</strong>
-          <small>最後更新：{settings.updatedAt || '尚未更新'}</small>
-        </div>
-        <div className="commerce-cms-status-card">
-          <span>商品展示</span>
-          <strong>{visibleProductCount} 件</strong>
-          <small>主打商品：{featuredProducts.length} 件</small>
-        </div>
-        <div className="commerce-cms-status-card">
-          <span>活動內容</span>
-          <strong>{activePromotions.length} 則</strong>
-          <small>首頁橫幅 / 跑馬燈 / 活動</small>
-        </div>
-      </div>
-
-      <div className="commerce-site-grid">
-        <form className="panel commerce-site-card commerce-cms-editor" onSubmit={saveSettings}>
-          <div className="commerce-cms-head">
-            <div>
-              <h2>首頁內容設定</h2>
-              <p>管理訪客第一眼看到的品牌名稱、主標、副標與公告文字。</p>
-            </div>
-            <div className="commerce-site-actions">
-              <button disabled={saving}>儲存設定</button>
-              <button type="button" className="link" onClick={() => setMessage('預覽會顯示在右側官網預覽卡。')}>預覽官方網站</button>
-              <button type="button" onClick={publishSettings} disabled={saving}>發布更新</button>
-            </div>
-          </div>
-
-          <div className="form commerce-cms-form">
-            <label><span>品牌名稱</span><input value={settings.brandName || ''} onChange={(e) => setSettings({ ...settings, brandName: e.target.value })} /></label>
-            <label><span>首頁主標題</span><input value={settings.heroTitle || ''} onChange={(e) => setSettings({ ...settings, heroTitle: e.target.value })} /></label>
-            <label><span>首頁副標</span><input value={settings.heroSubtitle || ''} onChange={(e) => setSettings({ ...settings, heroSubtitle: e.target.value })} /></label>
-            <label><span>跑馬燈 / 公告文字</span><input value={settings.announcementText || ''} onChange={(e) => setSettings({ ...settings, announcementText: e.target.value })} /></label>
-          </div>
-
-          <div className="commerce-cms-head compact">
-            <div>
-              <h2>品牌資訊</h2>
-              <p>官方 LINE、聯絡方式與網站狀態。</p>
-            </div>
-          </div>
-          <div className="form commerce-cms-form">
-            <label><span>官方 LINE 連結</span><input value={settings.officialLineUrl || ''} onChange={(e) => setSettings({ ...settings, officialLineUrl: e.target.value })} /></label>
-            <label><span>聯絡電話</span><input value={settings.contactPhone || ''} onChange={(e) => setSettings({ ...settings, contactPhone: e.target.value })} /></label>
-            <label><span>聯絡電子信箱</span><input value={settings.contactEmail || ''} onChange={(e) => setSettings({ ...settings, contactEmail: e.target.value })} /></label>
-            <label><span>網站狀態</span><select value={settings.siteStatus || 'draft'} onChange={(e) => setSettings({ ...settings, siteStatus: e.target.value })}><option value="draft">草稿</option><option value="live">已上線</option><option value="paused">暫停</option></select></label>
-            <label><span>版型名稱</span><input value={settings.themeName || 'default'} onChange={(e) => setSettings({ ...settings, themeName: e.target.value })} /></label>
-          </div>
-        </form>
-
-        <div className="panel commerce-site-preview">
-          <span className="commerce-site-pill">{settings.siteStatus === 'live' ? '已上線' : settings.siteStatus === 'paused' ? '暫停' : '草稿'}</span>
-          <h2>{settings.brandName || company.name}</h2>
-          <h3>{settings.heroTitle}</h3>
-          <p>{settings.heroSubtitle}</p>
-          <div className="commerce-site-marquee">{settings.announcementText}</div>
-          <h3>主打商品</h3>
-          <div className="commerce-site-preview-products">
-            {previewProducts.map((product) => (
-              <div key={product.id}><strong>{product.name}</strong><span>{money(product.price)}</span></div>
-            ))}
-            {!products.length && <p>尚未新增商品。</p>}
-          </div>
-          <h3>目前啟用活動</h3>
-          <ul>
-            {activePromotions.map((promo) => <li key={promo.id}>{promo.title}</li>)}
-            {!activePromotions.length && <li>尚無啟用活動。</li>}
-          </ul>
-        </div>
-      </div>
-
-      <div className="panel commerce-site-card">
-        <div className="commerce-cms-head">
-          <div>
-            <h2>商品展示管理</h2>
-            <p>設定商品名稱、分類、售價、主打商品、上架狀態與排序。</p>
-          </div>
-        </div>
-        <form className="form" onSubmit={saveProduct}>
-          <label><span>商品名稱</span><input value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} /></label>
-          <label><span>商品分類</span><input value={productForm.category} onChange={(e) => setProductForm({ ...productForm, category: e.target.value })} /></label>
-          <label><span>商品價格</span><input type="number" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} /></label>
-          <label><span>原價</span><input type="number" value={productForm.originalPrice} onChange={(e) => setProductForm({ ...productForm, originalPrice: e.target.value })} /></label>
-          <label><span>圖片網址</span><input value={productForm.imageUrl} onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })} /></label>
-          <label><span>商品描述</span><input value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} /></label>
-          <label><span>主打商品</span><select value={productForm.isFeatured} onChange={(e) => setProductForm({ ...productForm, isFeatured: e.target.value })}><option value="0">否</option><option value="1">是</option></select></label>
-          <label><span>是否顯示</span><select value={productForm.isVisible} onChange={(e) => setProductForm({ ...productForm, isVisible: e.target.value })}><option value="1">顯示</option><option value="0">隱藏</option></select></label>
-          <label><span>排序</span><input type="number" value={productForm.sortOrder} onChange={(e) => setProductForm({ ...productForm, sortOrder: e.target.value })} /></label>
-          <button disabled={saving}>{editingProductId ? '儲存商品' : '新增商品'}</button>
-          {editingProductId && <button type="button" className="link" onClick={() => { setEditingProductId(null); setProductForm(emptyCommerceProduct); }}>取消編輯</button>}
-        </form>
-
-        <Table
-          cols={['商品', '分類', '價格', '原價', '主打', '顯示', '排序', '操作']}
-          rows={products.map((product) => [
-            product.name,
-            product.category || '-',
-            money(product.price),
-            money(product.originalPrice),
-            product.isFeatured ? '是' : '否',
-            product.isVisible ? '是' : '否',
-            product.sortOrder,
-            <div className="commerce-site-actions"><button type="button" onClick={() => editProduct(product)}>編輯</button><button type="button" className="lead-danger-btn" onClick={() => deleteProduct(product.id)}>刪除</button></div>
-          ])}
-        />
-      </div>
-
-      <div className="panel commerce-site-card">
-        <div className="commerce-cms-head">
-          <div>
-            <h2>活動 / 跑馬燈管理</h2>
-            <p>管理首頁橫幅、跑馬燈與活動訊息。</p>
-          </div>
-        </div>
-        <form className="form" onSubmit={savePromotion}>
-          <label><span>活動標題</span><input value={promotionForm.title} onChange={(e) => setPromotionForm({ ...promotionForm, title: e.target.value })} /></label>
-          <label><span>活動描述</span><input value={promotionForm.description} onChange={(e) => setPromotionForm({ ...promotionForm, description: e.target.value })} /></label>
-          <label><span>類型</span><select value={promotionForm.promoType} onChange={(e) => setPromotionForm({ ...promotionForm, promoType: e.target.value })}><option value="banner">首頁橫幅</option><option value="marquee">跑馬燈</option><option value="campaign">活動</option></select></label>
-          <label><span>開始日期</span><input type="date" value={promotionForm.startDate} onChange={(e) => setPromotionForm({ ...promotionForm, startDate: e.target.value })} /></label>
-          <label><span>結束日期</span><input type="date" value={promotionForm.endDate} onChange={(e) => setPromotionForm({ ...promotionForm, endDate: e.target.value })} /></label>
-          <label><span>是否啟用</span><select value={promotionForm.isActive} onChange={(e) => setPromotionForm({ ...promotionForm, isActive: e.target.value })}><option value="1">啟用</option><option value="0">停用</option></select></label>
-          <label><span>排序</span><input type="number" value={promotionForm.sortOrder} onChange={(e) => setPromotionForm({ ...promotionForm, sortOrder: e.target.value })} /></label>
-          <button disabled={saving}>{editingPromotionId ? '儲存活動' : '新增活動'}</button>
-          {editingPromotionId && <button type="button" className="link" onClick={() => { setEditingPromotionId(null); setPromotionForm(emptyCommercePromotion); }}>取消編輯</button>}
-        </form>
-
-        <Table
-          cols={['活動', '類型', '期間', '啟用', '排序', '操作']}
-          rows={promotions.map((promotion) => [
-            promotion.title,
-            promotion.promoType === 'marquee' ? '跑馬燈' : promotion.promoType === 'campaign' ? '活動' : '首頁橫幅',
-            `${promotion.startDate || '-'} ~ ${promotion.endDate || '-'}`,
-            promotion.isActive ? '是' : '否',
-            promotion.sortOrder,
-            <div className="commerce-site-actions"><button type="button" onClick={() => editPromotion(promotion)}>編輯</button><button type="button" className="lead-danger-btn" onClick={() => deletePromotion(promotion.id)}>刪除</button></div>
-          ])}
-        />
-      </div>
-    </section>
-  );
-}
-
-function FounderDashboard() {
-  const [analytics, setAnalytics] = useState(null);
-  const [dbHealth, setDbHealth] = useState(null);
-  const [backups, setBackups] = useState([]);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function loadFounderData() {
-    try {
-      setError('');
-      const [analyticsData, healthData, backupRows] = await Promise.all([
-        api('/founder/analytics'),
-        api('/founder/db-health'),
-        api('/founder/backups')
-      ]);
-      setAnalytics(analyticsData);
-      setDbHealth(healthData);
-      setBackups(Array.isArray(backupRows) ? backupRows : []);
-    } catch (err) {
-      setError(err.message || '讀取創辦人營運中心失敗');
-    }
-  }
-
-  useEffect(() => {
-    loadFounderData();
-  }, []);
-
-  async function createBackup() {
-    try {
-      setMessage('');
-      setError('');
-      const backup = await api('/founder/backup', { method: 'POST' });
-      setMessage(`備份已建立：${backup.filename}`);
-      await loadFounderData();
-    } catch (err) {
-      setError(err.message || '建立備份失敗');
-    }
-  }
-
-  if (!analytics || !dbHealth) {
-    return <div className="loading">讀取創辦人營運中心...</div>;
-  }
-
-  const sourceLabel = {
-    line: 'LINE',
-    official_website: '官方網站',
-    facebook: 'Facebook',
-    instagram: 'Instagram',
-    google: 'Google',
-    direct: 'Direct',
-    referral: 'Referral',
-    demo_link: '測試連結',
-    unknown: 'Unknown'
-  };
-
-  return (
-    <section className="founder-dashboard">
-      <div className="founder-hero">
-        <div>
-          <p className="command-kicker">Founder Dashboard</p>
-          <h1>創辦人營運中心</h1>
-          <p>追蹤訪客、註冊、登入、活躍會員、來源轉換、資料庫健康與備份狀態。</p>
-        </div>
-        <button type="button" onClick={loadFounderData}>重新整理</button>
-      </div>
-
-      {message && <div className="admin-message">{message}</div>}
-      {error && <div className="admin-error">{error}</div>}
-
-      <div className="command-metrics">
-        <Card title="總會員數" value={analytics.users.total} />
-        <Card title="今日訪客" value={analytics.visitors.today} sub={`昨日 ${analytics.visitors.yesterday}`} />
-        <Card title="今日註冊" value={analytics.users.today} sub={`本週 ${analytics.users.last7Days}`} />
-        <Card title="今日登入" value={analytics.logins.today} sub={`本週 ${analytics.logins.last7Days}`} />
-        <Card title="7日活躍會員" value={analytics.activeUsers.last7Days} />
-        <Card title="30日活躍會員" value={analytics.activeUsers.last30Days} />
-      </div>
-
-      <div className="command-metrics">
-        <Card title="7日訪客" value={analytics.visitors.last7Days} />
-        <Card title="7日註冊" value={analytics.users.last7Days} />
-        <Card title="7日登入" value={analytics.logins.last7Days} />
-        <Card title="30日訪客" value={analytics.visitors.last30Days} />
-        <Card title="30日註冊" value={analytics.users.last30Days} />
-        <Card title="30日登入" value={analytics.logins.last30Days} />
-      </div>
-
-      <div className="panel-grid">
-        <div className="panel">
-          <h2>流量來源</h2>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>來源</th>
-                  <th>訪客數</th>
-                  <th>註冊數</th>
-                  <th>登入數</th>
-                  <th>註冊轉換率</th>
-                  <th>登入轉換率</th>
-                </tr>
-              </thead>
-              <tbody>
-                {analytics.sources.map((row) => (
-                  <tr key={row.source}>
-                    <td>{sourceLabel[row.source] || row.source}</td>
-                    <td>{row.visits}</td>
-                    <td>{row.registers}</td>
-                    <td>{row.logins}</td>
-                    <td>{row.registerConversionRate}%</td>
-                    <td>{row.loginConversionRate}%</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="panel">
-          <h2>漏斗分析</h2>
-          <div className="founder-funnel">
-            <div><span>訪客</span><strong>{analytics.funnel.visits}</strong></div>
-            <div><span>註冊</span><strong>{analytics.funnel.registers}</strong></div>
-            <div><span>登入</span><strong>{analytics.funnel.logins}</strong></div>
-            <div><span>活躍</span><strong>{analytics.funnel.activeUsers}</strong></div>
-          </div>
-        </div>
-      </div>
-
-      <div className="panel">
-        <h2>測試者名單</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>公司名稱</th>
-                <th>電子信箱</th>
-                <th>產業別</th>
-                <th>註冊時間</th>
-                <th>最後登入</th>
-                <th>登入次數</th>
-                <th>來源</th>
-              </tr>
-            </thead>
-            <tbody>
-              {analytics.testers.map((row) => (
-                <tr key={row.id}>
-                  <td>{row.companyName}</td>
-                  <td>{row.email || '-'}</td>
-                  <td>{getIndustryName(row.industry)}</td>
-                  <td>{row.createdAt || '-'}</td>
-                  <td>{row.lastLoginAt || '-'}</td>
-                  <td>{row.loginCount || 0}</td>
-                  <td>{sourceLabel[row.source] || row.source || '-'}</td>
-                </tr>
-              ))}
-              {!analytics.testers.length && (
-                <tr><td colSpan="7">目前沒有早期體驗使用者。</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="panel-grid">
-        <div className="panel">
-          <h2>DB Health</h2>
-          <ul className="summary">
-            <li>資料庫位置：{dbHealth.dbPath}</li>
-            <li>資料庫模式：{dbHealth.provider || 'sqlite'}</li>
-            <li>資料儲存：{dbHealth.storage || (dbHealth.isPersistentPath ? 'persistent-disk' : 'sqlite')}</li>
-            <li>PostgreSQL：{dbHealth.provider === 'postgresql' ? '已啟用' : (dbHealth.postgres?.checked ? dbHealth.postgres.message : '未啟用')}</li>
-            <li>資料庫大小：{dbHealth.dbSizeMB} MB</li>
-            <li>儲存狀態：{dbHealth.storage === 'postgresql' ? 'PostgreSQL' : (dbHealth.isPersistentPath ? 'Persistent Disk' : 'SQLite')}</li>
-            <li>Render 環境：{dbHealth.renderEnvironment}</li>
-            <li>會員數：{dbHealth.usersCount}</li>
-            <li>案場數：{dbHealth.jobSitesCount}</li>
-            <li>收款紀錄：{dbHealth.paymentsCount}</li>
-            <li>最後註冊：{dbHealth.lastUserCreatedAt || '-'}</li>
-            {dbHealth.warning && <li className="danger-text">{dbHealth.warning}</li>}
-          </ul>
-        </div>
-
-        <div className="panel">
-          <div className="panel-heading-row">
-            <h2>備份中心</h2>
-            <button type="button" onClick={createBackup}>建立備份</button>
-          </div>
-          <ul className="summary">
-            <li>備份數量：{dbHealth.backupCount}</li>
-            <li>最後備份：{dbHealth.lastBackupAt || '-'}</li>
-          </ul>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>檔名</th>
-                  <th>大小</th>
-                  <th>建立時間</th>
-                </tr>
-              </thead>
-              <tbody>
-                {backups.slice(0, 8).map((row) => (
-                  <tr key={row.filename}>
-                    <td>{row.filename}</td>
-                    <td>{row.sizeMB} MB</td>
-                    <td>{row.createdAt}</td>
-                  </tr>
-                ))}
-                {!backups.length && <tr><td colSpan="3">目前尚無備份。</td></tr>}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div className="panel">
-        <h2>異常提醒</h2>
-        <ul className="summary">
-          {analytics.alerts.map((alert) => <li key={alert}>{alert}</li>)}
-          {!analytics.alerts.length && <li>目前沒有異常提醒。</li>}
-        </ul>
-      </div>
-    </section>
-  );
-}
-
-function AdminConsole() {
-  const [companies, setCompanies] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
-  const [settings, setSettings] = useState({});
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [keyword, setKeyword] = useState('');
-  const [billingForm, setBillingForm] = useState({});
-  const [websiteForm, setWebsiteForm] = useState({});
-  const [testerForm, setTesterForm] = useState({});
-  const [settingsForm, setSettingsForm] = useState({});
-  const [feedbacks, setFeedbacks] = useState([]);
-  const [reviewUsers, setReviewUsers] = useState([]);
-  const [featureCatalog, setFeatureCatalog] = useState([]);
-  const [featureForm, setFeatureForm] = useState({});
-  const [featureNote, setFeatureNote] = useState('');
-  const [feedbackStatusFilter, setFeedbackStatusFilter] = useState('all');
-  const [feedbackCategoryFilter, setFeedbackCategoryFilter] = useState('all');
-  const [memberStatusFilter, setMemberStatusFilter] = useState('pending_review');
-  const [memberPlanForm, setMemberPlanForm] = useState({});
-  const [memberProductLineForm, setMemberProductLineForm] = useState({});
-  const [demoResult, setDemoResult] = useState(null);
-  const [demoLoading, setDemoLoading] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
-
-  async function loadAdmin() {
-    try {
-      setError('');
-      const [companyRows, settingRows, feedbackRows, featureRows, reviewRows] = await Promise.all([
-        api('/admin/companies'),
-        api('/admin/settings'),
-        api('/admin/feedbacks'),
-        api('/admin/features/catalog'),
-        api(`/admin/members?status=${memberStatusFilter}`)
-      ]);
-      setCompanies(companyRows || []);
-      setSettings(settingRows || {});
-      setSettingsForm(settingRows || {});
-      setFeedbacks(feedbackRows || []);
-      setFeatureCatalog(featureRows || []);
-      setReviewUsers(reviewRows || []);
-      setMemberPlanForm((old) => {
-        const next = { ...old };
-        (reviewRows || []).forEach((row) => {
-          next[row.id] = next[row.id] || row.plan || 'trial';
-        });
-        return next;
-      });
-      setMemberProductLineForm((old) => {
-        const next = { ...old };
-        (reviewRows || []).forEach((row) => {
-          next[row.id] = next[row.id] || row.product_line || 'general';
-        });
-        return next;
-      });
-      setSelectedId((old) => old || companyRows?.[0]?.id || null);
-    } catch (err) {
-      setError(err.message || '會員審核資料讀取失敗，請稍後再試或聯繫系統管理員。');
-    }
-  }
-
-  async function reviewUser(userId, action, note = '') {
-    try {
-      setError('');
-      setMessage('');
-      const statusMap = {
-        approve: 'approved',
-        reject: 'rejected',
-        suspend: 'suspended',
-        restore: 'approved',
-        demo: 'demo'
-      };
-      await api(`/admin/members/${userId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          approval_status: statusMap[action] || action,
-          plan: memberPlanForm[userId] || 'trial',
-          product_line: memberProductLineForm[userId] || 'general',
-          reviewNote: note
-        })
-      });
-      setMessage('會員審核狀態已更新');
-      await loadAdmin();
-    } catch (err) {
-      setError(err.message || '更新會員審核狀態失敗');
-    }
-  }
-
-  useEffect(() => {
-    loadAdmin();
-  }, [memberStatusFilter]);
-
-  const selected = companies.find((c) => c.id === selectedId) || null;
-
-  useEffect(() => {
-    if (!selected) return;
-
-    setBillingForm({
-      billing_status: selected.billing_status || 'trial',
-      subscription_plan: selected.subscription_plan || 'engineering_trial',
-      subscription_expires_at: selected.subscription_expires_at || '',
-      is_paid_customer: selected.is_paid_customer ? '1' : '0',
-      billing_note: selected.billing_note || ''
-    });
-
-    setWebsiteForm({
-      has_official_site: selected.has_official_site ? '1' : '0',
-      official_site_url: selected.official_site_url || '',
-      official_site_status: selected.official_site_status || 'none',
-      official_site_note: selected.official_site_note || ''
-    });
-
-    setTesterForm({
-      is_tester: selected.is_tester ? '1' : '0',
-      tester_started_at: selected.tester_started_at || '',
-      tester_feedback_status: selected.tester_feedback_status || '尚未回饋',
-      tester_note: selected.tester_note || ''
-    });
-
-    api(`/admin/companies/${selected.id}/features`)
-      .then((data) => {
-        const enabledSet = new Set(data?.effectiveFeatures || []);
-        const next = {};
-        (featureCatalog || []).forEach((item) => {
-          next[item.key] = enabledSet.has(item.key);
-        });
-        setFeatureForm(next);
-        setFeatureNote('');
-      })
-      .catch((err) => setError(err.message || '讀取功能授權失敗'));
-  }, [selectedId, companies, featureCatalog]);
-
-  const filteredCompanies = companies.filter((company) => {
-    const statusMatched = statusFilter === 'all' || company.billing_status === statusFilter;
-    const keywordMatched = !keyword.trim() || String(company.name || '').includes(keyword.trim());
-    return statusMatched && keywordMatched;
-  });
-
-  const renewalDays = Number(settings.renewal_reminder_days || 7);
-  const now = new Date();
-  const soonLimit = new Date();
-  soonLimit.setDate(soonLimit.getDate() + renewalDays);
-
-  const metrics = {
-    total: companies.length,
-    trial: companies.filter((c) => c.billing_status === 'trial').length,
-    active: companies.filter((c) => c.billing_status === 'active').length,
-    expired: companies.filter((c) => c.billing_status === 'expired').length,
-    paused: companies.filter((c) => c.billing_status === 'paused').length,
-    website: companies.filter((c) => Number(c.has_official_site || 0) === 1).length,
-    expiring: companies.filter((c) => {
-      if (!c.subscription_expires_at) return false;
-      const expires = new Date(c.subscription_expires_at);
-      return expires >= now && expires <= soonLimit;
-    }).length,
-    testers: companies.filter((c) => Number(c.is_tester || 0) === 1).length,
-    pendingReview: reviewUsers.filter((u) => (u.approval_status || u.status || u.review_status) === 'pending_review').length,
-    freeBetaApproved: companies.filter((c) => Number(c.is_free_beta || 0) === 1 && ['approved', 'demo'].includes(c.beta_status || '')).length,
-    newFeedbacks: feedbacks.filter((f) => f.status === 'new').length,
-    mrr: companies.reduce((sum, c) => {
-      if (!c.is_paid_customer || c.billing_status !== 'active') return sum;
-      const map = {
-        engineering_starter: 799,
-        engineering_pro: 1999,
-        engineering_premium: 3999
-      };
-      return sum + Number(map[c.subscription_plan] || 0);
-    }, 0)
-  };
-
-  const productLineCounts = companies.reduce((acc, company) => {
-    const key = company.product_line || 'general';
-    acc[key] = (acc[key] || 0) + 1;
-    return acc;
-  }, {});
-
-  async function saveBilling(e) {
-    e.preventDefault();
-    if (!selected) return;
-
-    try {
-      setMessage('');
-      setError('');
-      await api(`/admin/companies/${selected.id}/billing`, {
-        method: 'PATCH',
-        body: JSON.stringify(billingForm)
-      });
-      await loadAdmin();
-      setMessage('收費狀態已更新');
-    } catch (err) {
-      setError(err.message || '更新收費狀態失敗');
-    }
-  }
-
-  async function saveWebsite(e) {
-    e.preventDefault();
-    if (!selected) return;
-
-    try {
-      setMessage('');
-      setError('');
-      await api(`/admin/companies/${selected.id}/website`, {
-        method: 'PATCH',
-        body: JSON.stringify(websiteForm)
-      });
-      await loadAdmin();
-      setMessage('網站狀態已更新');
-    } catch (err) {
-      setError(err.message || '更新網站狀態失敗');
-    }
-  }
-
-  async function saveTester(e) {
-    e.preventDefault();
-    if (!selected) return;
-
-    try {
-      setMessage('');
-      setError('');
-      await api(`/admin/companies/${selected.id}/tester`, {
-        method: 'PUT',
-        body: JSON.stringify(testerForm)
-      });
-      await loadAdmin();
-      setMessage('早期體驗狀態已更新');
-    } catch (err) {
-      setError(err.message || '更新早期體驗狀態失敗');
-    }
-  }
-
-  async function saveFeatureAccess(e) {
-    e.preventDefault();
-    if (!selected) return;
-
-    try {
-      setMessage('');
-      setError('');
-      await api(`/admin/companies/${selected.id}/features`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          features: featureForm,
-          note: featureNote || '系統管理員調整'
-        })
-      });
-      await loadAdmin();
-      setMessage('功能授權已更新');
-    } catch (err) {
-      setError(err.message || '更新功能授權失敗');
-    }
-  }
-
-  async function saveSettings(e) {
-    e.preventDefault();
-
-    try {
-      setMessage('');
-      setError('');
-      const updated = await api('/admin/settings', {
-        method: 'PATCH',
-        body: JSON.stringify(settingsForm)
-      });
-      setSettings(updated || {});
-      setSettingsForm(updated || {});
-      setMessage('平台設定已更新');
-    } catch (err) {
-      setError(err.message || '更新平台設定失敗');
-    }
-  }
-
-  async function prepareDemoEngineering() {
-    try {
-      setDemoLoading(true);
-      setDemoResult(null);
-      setMessage('');
-      setError('');
-      const result = await api('/admin/demo/engineering', {
-        method: 'POST'
-      });
-      setDemoResult(result.demo || null);
-      await loadAdmin();
-      setMessage('工程測試資料已建立或更新');
-    } catch (err) {
-      setError(err.message || '建立工程測試資料失敗');
-    } finally {
-      setDemoLoading(false);
-    }
-  }
-
-  async function updateFeedback(row, patch) {
-    try {
-      setMessage('');
-      setError('');
-      const updated = await api(`/admin/feedbacks/${row.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          status: patch.status ?? row.status,
-          admin_note: patch.adminNote ?? row.adminNote ?? ''
-        })
-      });
-      setFeedbacks((items) => items.map((item) => item.id === updated.id ? updated : item));
-      setMessage('回饋狀態已更新');
-    } catch (err) {
-      setError(err.message || '更新回饋失敗');
-    }
-  }
-
-  const filteredFeedbacks = feedbacks.filter((row) => {
-    const statusMatched = feedbackStatusFilter === 'all' || row.status === feedbackStatusFilter;
-    const categoryMatched = feedbackCategoryFilter === 'all' || row.category === feedbackCategoryFilter;
-    return statusMatched && categoryMatched;
-  });
-
-  return (
-    <section className="admin-console">
-      <div className="admin-space-bg" />
-
-      <div className="admin-cockpit">
-        <div className="admin-hero">
-          <div>
-            <div className="admin-pill">BookAI 營運後台</div>
-            <h1>系統管理中心</h1>
-            <p>管理客戶、方案、網站與平台設定的企業管理平台。</p>
-          </div>
-          <div className="admin-orbit">
-            <span className="admin-status-light active" />
-            <strong>系統狀態正常</strong>
-          </div>
-        </div>
-
-        {message && <div className="admin-message">{message}</div>}
-        {error && <div className="admin-error">{error}</div>}
-
-        <div className="admin-control-panel">
-          <div className="admin-panel-head">
-            <div>
-              <h2>會員審核中心</h2>
-              <p>審核新申請的企業使用者，控管測試期准入品質與資料安全。</p>
-            </div>
-            <div className="inline-actions">
-              <select value={memberStatusFilter} onChange={(e) => setMemberStatusFilter(e.target.value)}>
-                <option value="pending_review">等待審核</option>
-                <option value="approved">已通過</option>
-                <option value="rejected">已拒絕</option>
-                <option value="suspended">已暫停</option>
-                <option value="demo">Demo 測試</option>
-                <option value="all">全部</option>
-              </select>
-              <button type="button" onClick={loadAdmin}>重新整理</button>
-            </div>
-          </div>
-          <div className="admin-beta-summary">
-            <div>
-              <span>BookAI 封閉測試</span>
-              <strong>{metrics.freeBetaApproved} 人</strong>
-              <small>目前已通過測試者</small>
-            </div>
-            <div>
-              <span>第一階段觀察目標</span>
-              <strong>20 人</strong>
-              <small>營運觀察目標，不作為審核限制</small>
-            </div>
-            <div>
-              <span>待審核</span>
-              <strong>{metrics.pendingReview}</strong>
-              <small>等待官方審核</small>
-            </div>
-            <div>
-              <span>各行業測試者分布</span>
-              <small>{Object.entries(productLineCounts).map(([key, count]) => `${productLineLabels[key] || key} ${count}`).join(' / ') || '尚無資料'}</small>
-            </div>
-          </div>
-          <div className="table-scroll">
-            <table className="admin-customer-table">
-              <thead>
-                <tr>
-                  <th>申請時間</th>
-                  <th>電子信箱</th>
-                  <th>公司 / 品牌</th>
-                  <th>聯絡人</th>
-                  <th>電話</th>
-                  <th>LINE</th>
-                  <th>統編</th>
-                  <th>階段</th>
-                  <th>行業版本</th>
-                  <th>目前產品線</th>
-                  <th>設定產品線</th>
-                  <th>會員狀態</th>
-                  <th>測試狀態</th>
-                  <th>免費測試</th>
-                  <th>方案狀態</th>
-                  <th>設定方案</th>
-                  <th>條款版本</th>
-                  <th>同意時間</th>
-                  <th>操作</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reviewUsers.slice(0, 40).map((row) => (
-                  <tr key={row.id}>
-                    <td>{formatDate(row.created_at)}</td>
-                    <td>{row.email}</td>
-                    <td>{row.company_name || '-'}</td>
-                    <td>{row.company_contact_name || row.contact_name || row.name || '-'}</td>
-                    <td>{row.company_phone || row.phone || '-'}</td>
-                    <td>{row.company_line_contact || row.line_contact || '-'}</td>
-                    <td>{row.tax_id || row.user_tax_id || '未提供'}</td>
-                    <td>{row.company_company_stage || row.company_stage || '-'}</td>
-                    <td>{getIndustryName(row.industry)}</td>
-                    <td>{productLineLabels[row.product_line] || row.product_line || '一般中小企業版'}</td>
-                    <td>
-                      <select
-                        value={memberProductLineForm[row.id] || row.product_line || 'general'}
-                        onChange={(e) => setMemberProductLineForm({ ...memberProductLineForm, [row.id]: e.target.value })}
-                      >
-                        {Object.entries(productLineLabels).map(([value, label]) => (
-                          <option key={value} value={value}>{label}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td><span className="admin-pill">{getReviewStatusLabel(row.approval_status || row.status || row.review_status || 'pending_review')}</span></td>
-                    <td>{getBetaStatusLabel(row.beta_status)}</td>
-                    <td>{Number(row.is_free_beta || 0) === 1 ? '是' : '否'}</td>
-                    <td>{getPlanDisplayLabel(row.plan || 'trial')}</td>
-                    <td>
-                      <select
-                        value={memberPlanForm[row.id] || row.plan || 'trial'}
-                        onChange={(e) => setMemberPlanForm({ ...memberPlanForm, [row.id]: e.target.value })}
-                      >
-                        <option value="trial">封閉測試</option>
-                        <option value="starter">入門版</option>
-                        <option value="pro">專業版</option>
-                        <option value="enterprise">企業版</option>
-                        <option value="custom">客製方案</option>
-                      </select>
-                    </td>
-                    <td>{row.terms_version || '-'}</td>
-                    <td>{formatDate(row.terms_accepted_at)}</td>
-                    <td>
-                      <div className="inline-actions">
-                        <button type="button" onClick={() => reviewUser(row.id, 'approve')}>通過免費測試</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'reject', '未通過審核')}>拒絕申請</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'suspend', '暫停使用')}>停權帳號</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'restore')}>恢復帳號</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'demo')}>設為 Demo</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-                {!reviewUsers.length && (
-                  <tr><td colSpan="19">目前沒有會員申請資料。</td></tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <div className="admin-control-panel">
-          <div className="admin-panel-head">
-            <div>
-              <h2>測試資料工具</h2>
-              <p>在線上環境建立工程業測試資料，僅供系統管理員驗收與展示使用。</p>
-            </div>
-            <button type="button" onClick={prepareDemoEngineering} disabled={demoLoading}>
-              {demoLoading ? '建立中...' : '建立 / 更新工程測試資料'}
-            </button>
-          </div>
-
-          {demoResult && (
-            <div className="admin-detail-list">
-              <p><span>電子信箱</span><strong>{demoResult.email}</strong></p>
-              <p><span>登入密碼</span><strong>{demoResult.password}</strong></p>
-              <p><span>公司編號</span><strong>#{demoResult.companyId}</strong></p>
-              <p><span>公司名稱</span><strong>{demoResult.companyName}</strong></p>
-            </div>
-          )}
-        </div>
-
-        <div className="admin-command-grid">
-          <div className="admin-metric-card"><span>總客戶數</span><strong>{metrics.total}</strong></div>
-          <div className="admin-metric-card"><span>試用中</span><strong>{metrics.trial}</strong></div>
-          <div className="admin-metric-card"><span>正式使用中</span><strong>{metrics.active}</strong></div>
-          <div className="admin-metric-card"><span>已到期</span><strong>{metrics.expired}</strong></div>
-          <div className="admin-metric-card"><span>暫停使用</span><strong>{metrics.paused}</strong></div>
-          <div className="admin-metric-card"><span>有官方網站客戶</span><strong>{metrics.website}</strong></div>
-          <div className="admin-metric-card"><span>即將到期客戶</span><strong>{metrics.expiring}</strong></div>
-          <div className="admin-metric-card"><span>早期體驗使用者</span><strong>{metrics.testers}</strong></div>
-          <div className="admin-metric-card"><span>待審會員</span><strong>{metrics.pendingReview}</strong></div>
-          <div className="admin-metric-card"><span>新回饋</span><strong>{metrics.newFeedbacks}</strong></div>
-          <div className="admin-metric-card gold"><span>本月預估月收</span><strong>{money(metrics.mrr)}</strong></div>
-        </div>
-
-        <div className="admin-grid">
-          <div className="admin-control-panel">
-            <div className="admin-panel-head">
-              <div>
-                <h2>客戶管理</h2>
-                <p>依公司、收費狀態與網站狀態追蹤客戶。</p>
-              </div>
-              <button type="button" onClick={loadAdmin}>重新同步</button>
-            </div>
-
-            <div className="admin-toolbar">
-              <input
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder="搜尋公司名稱"
-              />
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-                <option value="all">全部狀態</option>
-                <option value="trial">試用中</option>
-                <option value="active">正式使用中</option>
-                <option value="expired">已到期</option>
-                <option value="paused">暫停使用</option>
-              </select>
-            </div>
-
-            <div className="admin-customer-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>公司</th>
-                    <th>方案</th>
-                    <th>狀態</th>
-                    <th>到期日</th>
-                    <th>早期體驗</th>
-                    <th>網站</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredCompanies.map((company) => (
-                    <tr
-                      key={company.id}
-                      className={selectedId === company.id ? 'selected' : ''}
-                      onClick={() => setSelectedId(company.id)}
-                    >
-                      <td>#{company.id}</td>
-                      <td>
-                        <strong>{company.name}</strong>
-                        <small>{company.owner_email || '未設定 owner email'}</small>
-                      </td>
-                      <td>{getSubscriptionPlanLabel(company.subscription_plan)}</td>
-                      <td>
-                        <span className={`admin-status-dot ${company.billing_status || 'trial'}`} />
-                        {getAdminBillingStatusLabel(company.billing_status)}
-                      </td>
-                      <td>{company.subscription_expires_at || '未設定'}</td>
-                      <td>{Number(company.is_tester || 0) === 1 ? '是' : '否'}</td>
-                      <td>{getOfficialSiteStatusLabel(company.official_site_status)}</td>
-                    </tr>
-                  ))}
-                  {!filteredCompanies.length && (
-                    <tr>
-                      <td colSpan="7">目前沒有符合條件的公司。</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="admin-drawer">
-            <div className="admin-glow-card">
-              <h2>客戶詳細資料</h2>
-              {selected ? (
-                <>
-                  <div className="admin-detail-list">
-                    <p><span>公司 ID</span><strong>#{selected.id}</strong></p>
-                    <p><span>公司名稱</span><strong>{selected.name}</strong></p>
-                    <p><span>行業別</span><strong>{getIndustryName(selected.industry)}</strong></p>
-                    <p><span>產品線</span><strong>{productLineLabels[selected.product_line] || selected.product_line || '一般中小企業版'}</strong></p>
-                    <p><span>測試狀態</span><strong>{getBetaStatusLabel(selected.beta_status)}</strong></p>
-                    <p><span>免費封閉測試</span><strong>{Number(selected.is_free_beta || 0) === 1 ? '是' : '否'}</strong></p>
-                    <p><span>測試群組</span><strong>{getReviewStatusLabel(selected.beta_group || 'closed_beta')}</strong></p>
-                    <p><span>測試核准時間</span><strong>{selected.beta_approved_at || '未設定'}</strong></p>
-                    <p><span>是否正式客戶</span><strong>{yesNoPaid(selected.is_paid_customer)}</strong></p>
-                    <p><span>早期體驗使用者</span><strong>{Number(selected.is_tester || 0) === 1 ? '是' : '否'}</strong></p>
-                    <p><span>使用回饋狀態</span><strong>{selected.tester_feedback_status || '尚未回饋'}</strong></p>
-                    <p><span>官方網站網址</span><strong>{selected.official_site_url || '未設定'}</strong></p>
-                    <p><span>管理備註</span><strong>{selected.billing_note || '無'}</strong></p>
-                  </div>
-
-                  <form className="admin-settings-panel" onSubmit={saveBilling}>
-                    <h3>方案 / 收費管理</h3>
-                    <label>
-                      <span>使用狀態</span>
-                      <select value={billingForm.billing_status || 'trial'} onChange={(e) => setBillingForm({ ...billingForm, billing_status: e.target.value })}>
-                        <option value="trial">試用中</option>
-                        <option value="active">正式使用中</option>
-                        <option value="expired">已到期</option>
-                        <option value="paused">暫停使用</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>方案</span>
-                      <input value={billingForm.subscription_plan || ''} onChange={(e) => setBillingForm({ ...billingForm, subscription_plan: e.target.value })} />
-                    </label>
-                    <label>
-                      <span>到期日</span>
-                      <input value={billingForm.subscription_expires_at || ''} onChange={(e) => setBillingForm({ ...billingForm, subscription_expires_at: e.target.value })} placeholder="YYYY-MM-DD" />
-                    </label>
-                    <label>
-                      <span>正式客戶</span>
-                      <select value={billingForm.is_paid_customer || '0'} onChange={(e) => setBillingForm({ ...billingForm, is_paid_customer: e.target.value })}>
-                        <option value="0">否</option>
-                        <option value="1">是</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>管理備註</span>
-                      <input value={billingForm.billing_note || ''} onChange={(e) => setBillingForm({ ...billingForm, billing_note: e.target.value })} />
-                    </label>
-                    <button>儲存收費狀態</button>
-                  </form>
-
-                  <form className="admin-settings-panel" onSubmit={saveTester}>
-                    <h3>早期體驗管理</h3>
-                    <label>
-                      <span>早期體驗使用者</span>
-                      <select value={testerForm.is_tester || '0'} onChange={(e) => setTesterForm({ ...testerForm, is_tester: e.target.value })}>
-                        <option value="0">否</option>
-                        <option value="1">是</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>體驗開始日</span>
-                      <input value={testerForm.tester_started_at || ''} onChange={(e) => setTesterForm({ ...testerForm, tester_started_at: e.target.value })} placeholder="YYYY-MM-DD" />
-                    </label>
-                    <label>
-                      <span>回饋狀態</span>
-                      <select value={testerForm.tester_feedback_status || '尚未回饋'} onChange={(e) => setTesterForm({ ...testerForm, tester_feedback_status: e.target.value })}>
-                        <option>尚未回饋</option>
-                        <option>已回饋</option>
-                        <option>需追蹤</option>
-                        <option>已完成測試</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>內部備註</span>
-                      <input value={testerForm.tester_note || ''} onChange={(e) => setTesterForm({ ...testerForm, tester_note: e.target.value })} />
-                    </label>
-                    <button>儲存早期體驗狀態</button>
-                  </form>
-
-                  <form className="admin-settings-panel" onSubmit={saveFeatureAccess}>
-                    <h3>功能授權管理</h3>
-                    <p className="admin-form-note">針對這家公司快速調整可使用功能。關閉後，使用者側邊欄會隱藏該功能，後端進階功能檢查也會套用有效授權。</p>
-                    <div className="admin-feature-grid">
-                      {Object.entries(
-                        (featureCatalog || []).reduce((groups, item) => {
-                          const group = item.group || '其他';
-                          groups[group] = groups[group] || [];
-                          groups[group].push(item);
-                          return groups;
-                        }, {})
-                      ).map(([group, items]) => (
-                        <div className="admin-feature-group" key={group}>
-                          <strong>{group}</strong>
-                          {items.map((item) => (
-                            <label key={item.key} className="admin-feature-toggle">
-                              <input
-                                type="checkbox"
-                                checked={featureForm[item.key] !== false}
-                                onChange={(e) => setFeatureForm({ ...featureForm, [item.key]: e.target.checked })}
-                              />
-                              <span>{item.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                    <label>
-                      <span>調整備註</span>
-                      <input value={featureNote} onChange={(e) => setFeatureNote(e.target.value)} placeholder="例：早期體驗開通工程模組" />
-                    </label>
-                    <button>儲存功能授權</button>
-                  </form>
-
-                  <form className="admin-settings-panel" onSubmit={saveWebsite}>
-                    <h3>客戶網站狀態</h3>
-                    <label>
-                      <span>是否有官方網站</span>
-                      <select value={websiteForm.has_official_site || '0'} onChange={(e) => setWebsiteForm({ ...websiteForm, has_official_site: e.target.value })}>
-                        <option value="0">否</option>
-                        <option value="1">是</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>網站網址</span>
-                      <input value={websiteForm.official_site_url || ''} onChange={(e) => setWebsiteForm({ ...websiteForm, official_site_url: e.target.value })} />
-                    </label>
-                    <label>
-                      <span>網站狀態</span>
-                      <select value={websiteForm.official_site_status || 'none'} onChange={(e) => setWebsiteForm({ ...websiteForm, official_site_status: e.target.value })}>
-                        <option value="none">未建立</option>
-                        <option value="planning">規劃中</option>
-                        <option value="building">製作中</option>
-                        <option value="live">已上線</option>
-                        <option value="paused">暫停</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>網站備註</span>
-                      <input value={websiteForm.official_site_note || ''} onChange={(e) => setWebsiteForm({ ...websiteForm, official_site_note: e.target.value })} />
-                    </label>
-                    <button>儲存網站狀態</button>
-                  </form>
-                </>
-              ) : (
-                <p>請先選擇一家公司。</p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        <div className="admin-control-panel">
-          <div className="admin-panel-head">
-            <div>
-              <h2>產品回饋管理</h2>
-              <p>查看所有公司送出的產品回饋，並標記處理狀態與內部備註。</p>
-            </div>
-          </div>
-
-          <div className="admin-toolbar">
-            <select value={feedbackStatusFilter} onChange={(e) => setFeedbackStatusFilter(e.target.value)}>
-              <option value="all">全部狀態</option>
-              <option value="new">新回饋</option>
-              <option value="reviewing">處理中</option>
-              <option value="resolved">已處理</option>
-              <option value="ignored">暫不處理</option>
-            </select>
-            <select value={feedbackCategoryFilter} onChange={(e) => setFeedbackCategoryFilter(e.target.value)}>
-              <option value="all">全部類別</option>
-              <option value="操作問題">操作問題</option>
-              <option value="介面建議">介面建議</option>
-              <option value="功能需求">功能需求</option>
-              <option value="錯誤回報">錯誤回報</option>
-              <option value="其他">其他</option>
-            </select>
-          </div>
-
-          <div className="admin-customer-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>公司</th>
-                  <th>使用者</th>
-                  <th>類別</th>
-                  <th>評分</th>
-                  <th>內容</th>
-                  <th>狀態</th>
-                  <th>管理備註</th>
-                  <th>建立時間</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredFeedbacks.map((row) => (
-                  <tr key={row.id}>
-                    <td>{row.companyName || '-'}</td>
-                    <td>
-                      <strong>{row.userName || '-'}</strong>
-                      <small>{row.userEmail || ''}</small>
-                    </td>
-                    <td>{row.category}</td>
-                    <td>{row.rating} / 5</td>
-                    <td className="admin-feedback-message">{row.message}</td>
-                    <td>
-                      <select value={row.status || 'new'} onChange={(e) => updateFeedback(row, { status: e.target.value })}>
-                        <option value="new">新回饋</option>
-                        <option value="reviewing">處理中</option>
-                        <option value="resolved">已處理</option>
-                        <option value="ignored">暫不處理</option>
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        value={row.adminNote || ''}
-                        onChange={(e) => setFeedbacks((items) => items.map((item) => item.id === row.id ? { ...item, adminNote: e.target.value } : item))}
-                        onBlur={(e) => updateFeedback(row, { adminNote: e.target.value })}
-                        placeholder="內部備註"
-                      />
-                    </td>
-                    <td>{row.createdAt || '-'}</td>
-                  </tr>
-                ))}
-                {!filteredFeedbacks.length && (
-                  <tr>
-                    <td colSpan="8">目前沒有符合條件的回饋。</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <form className="admin-control-panel admin-platform-settings" onSubmit={saveSettings}>
-          <div className="admin-panel-head">
-            <div>
-              <h2>平台設定</h2>
-              <p>這裡保存平台設定，後續可串到官網與營運流程。</p>
-            </div>
-          </div>
-
-          <div className="admin-settings-grid">
-            <label>
-              <span>官方網站網址</span>
-              <input value={settingsForm.official_site_url || ''} onChange={(e) => setSettingsForm({ ...settingsForm, official_site_url: e.target.value })} />
-            </label>
-            <label>
-              <span>官方 LINE 連結</span>
-              <input value={settingsForm.official_line_url || ''} onChange={(e) => setSettingsForm({ ...settingsForm, official_line_url: e.target.value })} />
-            </label>
-            <label>
-              <span>預設試用天數</span>
-              <input value={settingsForm.default_trial_days || ''} onChange={(e) => setSettingsForm({ ...settingsForm, default_trial_days: e.target.value })} />
-            </label>
-            <label>
-              <span>到期提醒天數</span>
-              <input value={settingsForm.renewal_reminder_days || ''} onChange={(e) => setSettingsForm({ ...settingsForm, renewal_reminder_days: e.target.value })} />
-            </label>
-            <label>
-              <span>啟用官網後台功能</span>
-              <select value={settingsForm.enable_website_backend || 'true'} onChange={(e) => setSettingsForm({ ...settingsForm, enable_website_backend: e.target.value })}>
-                <option value="true">啟用</option>
-                <option value="false">停用</option>
-              </select>
-            </label>
-            <label>
-              <span>系統公告</span>
-              <input value={settingsForm.system_announcement || ''} onChange={(e) => setSettingsForm({ ...settingsForm, system_announcement: e.target.value })} />
-            </label>
-          </div>
-
-          <button>儲存平台設定</button>
-        </form>
-      </div>
-    </section>
-  );
-}
-
 function Settings({ company }) {
   return (
     <section>
-      <Title title="公司設定" desc="公司基本資料、行業別與早期體驗狀態。" />
+      <Title title="公司設定" desc="公司基本資料、方案、行業別與稅籍資訊。" />
       <div className="panel">
         <h2>{company.name}</h2>
-        <p>帳號狀態：已依 BookAI 核准範圍開放功能</p>
+        <p>測試狀態：封閉測試中</p>
         <p>產業：{getIndustryName(company.industry)}</p>
-        <p>產品線：{productLineLabels[company.product_line] || '一般中小企業版'}</p>
         <p>統編：{company.tax_id || '未設定'}</p>
         <p>公司 / 營業地址：{company.address || company.company_address || '未設定'}</p>
-      </div>
-
-      <div className="panel">
-        <h2>早期體驗</h2>
-        <p>目前階段：{getBetaStatusLabel(company.beta_status) === '未設定' ? '已開通使用' : getBetaStatusLabel(company.beta_status)}</p>
-        <p>測試群組：{getReviewStatusLabel(company.beta_group || 'closed_beta')}</p>
-        <p>注意事項：早期體驗期間功能與開放範圍可能依產品測試安排調整。</p>
       </div>
     </section>
   );
@@ -7486,7 +4690,7 @@ function Locked({ feature }) {
       <main className="locked">
         <h1>此功能尚未開放</h1>
         <p>你正在開啟的功能：{feature}</p>
-        <p>此功能尚未包含在目前公司開放範圍，請聯絡 BookAI 官方確認開通狀態。</p>
+        <p>封閉測試期間，此功能將依測試進度逐步開放。</p>
       </main>
     </div>
   );

@@ -362,7 +362,40 @@ function toPayload(data) {
   };
 }
 
-export default function LeadCenterMock({ companyId }) {
+function normalizeTenderItem(item = {}) {
+  const budget = Number(item.budget ?? item.budgetAmount ?? 0);
+  const estimatedCost = Number(item.estimatedCost ?? Math.round(budget * 0.72));
+  return {
+    id: String(item.id ?? item.sourceTenderId ?? item.tenderNo ?? ''),
+    title: item.title || item.tenderName || '未命名標案',
+    agency: item.agency || item.agencyName || '',
+    agencyType: item.agencyType || '其他機關',
+    agencyLevel: item.agencyLevel || '',
+    region: item.region || '其他',
+    projectType: item.projectType || item.category || '工程',
+    budget,
+    estimatedCost,
+    deadline: item.deadline || item.deadlineDate || '',
+    source: item.source || '公開標案',
+    sourceUrl: item.sourceUrl || item.url || '',
+    summary: item.summary || '公開標案資料，請進一步確認公告內容與投標資格。',
+    reason: item.reason || '依公開標案欄位整理，請評估預算、地區與履約條件。',
+    fitScore: Number(item.fitScore ?? item.score ?? 70)
+  };
+}
+
+function agencyLevelText(key) {
+  const labels = {
+    central: '中央部會',
+    local: '地方政府',
+    public_school: '學校機關',
+    public_enterprise: '公營事業',
+    other: '其他機關'
+  };
+  return labels[key] || key || '未分類';
+}
+
+export default function LeadCenterMock({ companyId, isAdmin = false }) {
   const formPanelRef = useRef(null);
   const [leads, setLeads] = useState([]);
   const [form, setForm] = useState(emptyForm);
@@ -379,6 +412,10 @@ export default function LeadCenterMock({ companyId }) {
   const [tenderRegion, setTenderRegion] = useState('全部地區');
   const [tenderAgencyType, setTenderAgencyType] = useState('全部機關');
   const [tenderProjectType, setTenderProjectType] = useState('全部工程');
+  const [tenders, setTenders] = useState(tenderRadarItems.map(normalizeTenderItem));
+  const [tenderStats, setTenderStats] = useState(null);
+  const [tenderLoading, setTenderLoading] = useState(false);
+  const [tenderError, setTenderError] = useState('');
 
   async function loadLeads() {
     if (!companyId) {
@@ -404,6 +441,33 @@ export default function LeadCenterMock({ companyId }) {
     loadLeads();
   }, [companyId]);
 
+  async function loadTenders() {
+    try {
+      setTenderLoading(true);
+      setTenderError('');
+      const [tenderRows, statsRows] = await Promise.all([
+        api('/tenders?limit=120'),
+        api('/tenders/stats').catch(() => null)
+      ]);
+      const items = Array.isArray(tenderRows?.items)
+        ? tenderRows.items
+        : Array.isArray(tenderRows)
+          ? tenderRows
+          : [];
+      setTenders(items.length ? items.map(normalizeTenderItem) : []);
+      setTenderStats(statsRows || null);
+    } catch (err) {
+      setTenderError(err.message || '標案資料暫時無法載入，已保留本機示範資料。');
+      setTenders(tenderRadarItems.map(normalizeTenderItem));
+    } finally {
+      setTenderLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadTenders();
+  }, []);
+
   const stats = useMemo(() => {
     const total = leads.length;
     const highScore = leads.filter((lead) => Number(lead.aiScore || 0) >= 80).length;
@@ -423,7 +487,7 @@ export default function LeadCenterMock({ companyId }) {
   const filteredTenders = useMemo(() => {
     const q = tenderKeyword.trim().toLowerCase();
 
-    return tenderRadarItems.filter((item) => {
+    return tenders.filter((item) => {
       const text = [item.title, item.agency, item.region, item.projectType, item.summary].join(' ').toLowerCase();
 
       const keywordMatched = !q || text.includes(q);
@@ -433,7 +497,7 @@ export default function LeadCenterMock({ companyId }) {
 
       return keywordMatched && regionMatched && agencyMatched && projectMatched;
     });
-  }, [tenderKeyword, tenderRegion, tenderAgencyType, tenderProjectType]);
+  }, [tenders, tenderKeyword, tenderRegion, tenderAgencyType, tenderProjectType]);
 
   const filteredLeads = useMemo(() => {
     const q = keyword.trim().toLowerCase();
@@ -544,6 +608,23 @@ export default function LeadCenterMock({ companyId }) {
       setError(err.message || '匯入標案失敗');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function syncTendersNow() {
+    if (!isAdmin) return;
+    try {
+      setTenderLoading(true);
+      setTenderError('');
+      await api('/admin/tenders/sync-now', {
+        method: 'POST',
+        body: JSON.stringify({ source: 'all' })
+      });
+      await loadTenders();
+    } catch (err) {
+      setTenderError(err.message || '標案資料同步暫時失敗，系統已保留既有資料。');
+    } finally {
+      setTenderLoading(false);
     }
   }
 
@@ -698,13 +779,45 @@ export default function LeadCenterMock({ companyId }) {
         <div className="lead-panel-head">
           <h2>政府 / 地方標案雷達 Beta</h2>
           <p>
-            先以公開標案格式資料展示中央與地方案源，下一階段可正式串接政府電子採購網或開放資料 API。
-            此區塊適合用來吸引工程業測試者：找案、評估、匯入、追蹤、轉案場。
+            整理中央、地方政府、公營事業與學校機關公開標案資料，協助工程業者找案、評估、匯入、追蹤與轉案場。
           </p>
         </div>
 
         <div className="tender-source-note">
-          資料來源方向：政府電子採購網公開標案資料。正式商用前需確認開放資料授權、欄位格式、快取與 API 穩定性。
+          最後更新：{tenderStats?.latestRun?.finished_at || tenderStats?.lastSyncState?.finishedAt || '尚未同步'}。
+          本次新增 {tenderStats?.latestRun?.inserted_count ?? tenderStats?.lastSyncState?.insertedCount ?? 0} 筆，
+          更新 {tenderStats?.latestRun?.updated_count ?? tenderStats?.lastSyncState?.updatedCount ?? 0} 筆。
+          {tenderLoading ? ' 正在同步標案資料...' : ''}
+          {isAdmin && (
+            <button type="button" className="lead-soft-btn" onClick={syncTendersNow} disabled={tenderLoading}>
+              立即更新標案
+            </button>
+          )}
+        </div>
+
+        {tenderError && <div className="notice">{tenderError}</div>}
+
+        <div className="lead-stats-grid compact">
+          <div className="lead-stat-card">
+            <span>總標案數</span>
+            <strong>{tenderStats?.total ?? tenders.length}</strong>
+            <small>資料庫目前可查詢標案</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>中央 / 地方</span>
+            <strong>{(tenderStats?.agencyLevels || []).slice(0, 2).map((row) => `${agencyLevelText(row.key)} ${row.count}`).join(' / ') || '尚無資料'}</strong>
+            <small>機關層級分布</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>熱門地區</span>
+            <strong>{(tenderStats?.regions || []).slice(0, 2).map((row) => `${row.key} ${row.count}`).join(' / ') || '尚無資料'}</strong>
+            <small>依標案所在地統計</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>即將截止</span>
+            <strong>{tenderStats?.upcoming?.length || 0}</strong>
+            <small>需優先檢查投標期限</small>
+          </div>
         </div>
 
         <div className="tender-toolbar">
@@ -800,7 +913,7 @@ export default function LeadCenterMock({ companyId }) {
 
           {filteredTenders.length === 0 && (
             <div className="lead-empty">
-              目前沒有符合條件的標案，可調整地區、機關類型或工程類型。
+              目前沒有符合條件的標案，可調整地區、機關類型或工程類型。若尚未同步，請稍後再試。
             </div>
           )}
         </div>
