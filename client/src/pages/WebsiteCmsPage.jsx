@@ -54,6 +54,26 @@ function normalizeForm(resource, item) {
   return { ...emptyForm(resource), ...item };
 }
 
+function getStatusBadgeClass(status) {
+  if (status === 'published') return 'website-chip website-chip-published';
+  if (status === 'draft') return 'website-chip website-chip-draft';
+  if (status === 'hidden') return 'website-chip website-chip-hidden';
+  if (status === 'active') return 'website-chip website-chip-active';
+  if (status === 'inactive') return 'website-chip website-chip-inactive';
+  return 'website-chip';
+}
+
+function getStatusLabel(status) {
+  const labels = {
+    published: '已發布',
+    draft: '草稿',
+    hidden: '隱藏',
+    active: '啟用',
+    inactive: '停用'
+  };
+  return labels[status] || status;
+}
+
 function TextField({ label, value, onChange, type = 'text', textarea = false, placeholder = '' }) {
   return (
     <label className="website-field">
@@ -133,7 +153,13 @@ export default function WebsiteCmsPage() {
     banners: resources.banners.length,
     sections: resources['home-sections'].length,
     products: resources.products.length,
+    productsPublished: resources.products.filter((p) => p.status === 'published').length,
+    productsDraft: resources.products.filter((p) => p.status === 'draft').length,
+    productsHidden: resources.products.filter((p) => p.status === 'hidden').length,
     posts: resources.posts.length,
+    postsPublished: resources.posts.filter((p) => p.status === 'published').length,
+    postsDraft: resources.posts.filter((p) => p.status === 'draft').length,
+    postsHidden: resources.posts.filter((p) => p.status === 'hidden').length,
     faqs: resources.faqs.length,
     newInquiries: resources.inquiries.filter((item) => item.status === 'new').length
   }), [resources]);
@@ -202,17 +228,19 @@ export default function WebsiteCmsPage() {
 }
 
 function WebsiteOverview({ settings, overview, onNavigate }) {
+  const previewUrl = settings?.siteSlug ? `/site/${encodeURIComponent(settings.siteSlug)}` : null;
   const cards = [
     ['網站名稱', settings?.siteName || '-'],
     ['品牌名稱', settings?.brandName || '-'],
     ['site_slug', settings?.siteSlug || '-'],
-    ['發布狀態', settings?.isPublished ? '已發布' : '未發布'],
-    ['Banner 數量', overview.banners],
+    ['發布狀態', settings?.isPublished ? '✓ 已發布' : '○ 未發布'],
+    ['公開網址', previewUrl ? previewUrl : '(請先設定 site_slug)'],
+    ['Banner', overview.banners],
     ['首頁區塊', overview.sections],
-    ['商品數量', overview.products],
-    ['文章數量', overview.posts],
-    ['FAQ 數量', overview.faqs],
-    ['新聯絡詢問', overview.newInquiries]
+    ['商品', `${overview.productsPublished} 已發布 / ${overview.productsDraft} 草稿 / ${overview.productsHidden} 隱藏`],
+    ['文章', `${overview.postsPublished} 已發布 / ${overview.postsDraft} 草稿 / ${overview.postsHidden} 隱藏`],
+    ['FAQ', overview.faqs],
+    ['新詢問', overview.newInquiries]
   ];
 
   return (
@@ -222,7 +250,12 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
           <h2>官網總覽</h2>
           <p>這裡可以管理你的品牌官網內容，資料會依登入公司自動隔離。</p>
         </div>
-        <button type="button" onClick={() => onNavigate('settings')}>編輯網站設定</button>
+        <div className="website-overview-actions">
+          {previewUrl && (
+            <a href={previewUrl} target="_blank" rel="noreferrer" className="website-link-btn">預覽網站</a>
+          )}
+          <button type="button" onClick={() => onNavigate('settings')}>編輯網站設定</button>
+        </div>
       </div>
       <div className="website-metric-grid">
         {cards.map(([label, value]) => (
@@ -264,6 +297,10 @@ function SettingsPanel({ settings, setSettings, saving, onSave }) {
         <TextField label="地址" value={settings?.address} onChange={(v) => update('address', v)} />
         <TextField label="SEO 標題" value={settings?.seoTitle} onChange={(v) => update('seoTitle', v)} />
         <TextField label="SEO 描述" value={settings?.seoDescription} onChange={(v) => update('seoDescription', v)} textarea />
+      </div>
+      <div className="website-form-section">
+        <h3>發布狀態</h3>
+        <p className="website-form-hint">{settings?.isPublished ? '✓ 已發布：消費者可以從公開網址瀏覽你的網站' : '○ 未發布：公開網址會顯示「網站尚未開放」'}</p>
         <SwitchField label="發布網站" checked={settings?.isPublished} onChange={(v) => update('isPublished', v)} />
       </div>
     </section>
@@ -411,7 +448,11 @@ function ResourceTable({ resource, items, onEdit, onDelete }) {
                 <strong>{item.title || item.name || item.question || '-'}</strong>
                 <small>{item.slug || item.subtitle || item.summary || item.shortDescription || item.answer || ''}</small>
               </td>
-              <td><span className="website-chip">{item.status || (item.isActive ? 'active' : 'inactive')}</span></td>
+              <td>
+                <span className={getStatusBadgeClass(item.status || (item.isActive ? 'active' : 'inactive'))}>
+                  {getStatusLabel(item.status || (item.isActive ? 'active' : 'inactive'))}
+                </span>
+              </td>
               <td>{item.sortOrder ?? '-'} {item.category ? ` / ${item.category}` : ''} {resource === 'home-sections' && item.sectionType ? ` / ${item.sectionType}` : ''}</td>
               <td>{formatDate(item.updatedAt || item.createdAt)}</td>
               <td>
