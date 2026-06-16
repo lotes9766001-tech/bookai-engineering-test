@@ -567,6 +567,10 @@ function App() {
     return <Auth onAuth={() => setTokenReady(true)} />;
   }
 
+  if (window.location.pathname.startsWith('/site-preview/')) {
+    return <PublicSitePage />;
+  }
+
   return (
     <Shell
       onLogout={() => {

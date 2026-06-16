@@ -228,13 +228,14 @@ export default function WebsiteCmsPage() {
 }
 
 function WebsiteOverview({ settings, overview, onNavigate }) {
-  const previewUrl = settings?.siteSlug ? `/site/${encodeURIComponent(settings.siteSlug)}` : null;
+  const previewUrl = settings?.siteSlug ? `/site-preview/${encodeURIComponent(settings.siteSlug)}` : null;
+  const publicUrl = settings?.siteSlug ? `/site/${encodeURIComponent(settings.siteSlug)}` : null;
   const cards = [
     ['網站名稱', settings?.siteName || '-'],
     ['品牌名稱', settings?.brandName || '-'],
     ['site_slug', settings?.siteSlug || '-'],
     ['發布狀態', settings?.isPublished ? '✓ 已發布' : '○ 未發布'],
-    ['公開網址', previewUrl ? previewUrl : '(請先設定 site_slug)'],
+    ['公開網址', publicUrl ? publicUrl : '(請先設定 site_slug)'],
     ['Banner', overview.banners],
     ['首頁區塊', overview.sections],
     ['商品', `${overview.productsPublished} 已發布 / ${overview.productsDraft} 草稿 / ${overview.productsHidden} 隱藏`],
@@ -253,6 +254,9 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
         <div className="website-overview-actions">
           {previewUrl && (
             <a href={previewUrl} target="_blank" rel="noreferrer" className="website-link-btn">預覽網站</a>
+          )}
+          {settings?.isPublished && publicUrl && (
+            <a href={publicUrl} target="_blank" rel="noreferrer" className="website-link-btn">開啟公開網站</a>
           )}
           <button type="button" onClick={() => onNavigate('settings')}>編輯網站設定</button>
         </div>
