@@ -672,6 +672,7 @@ export async function initPostgresDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS contact_name TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS tax_id TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS use_case TEXT;
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS test_edition TEXT DEFAULT 'commerce';
 
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'pending_review';
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending_review';

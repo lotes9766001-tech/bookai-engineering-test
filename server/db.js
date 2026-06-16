@@ -976,6 +976,7 @@ export function initDb() {
   safeAddColumn('users', 'contact_name', 'TEXT');
   safeAddColumn('users', 'tax_id', 'TEXT');
   safeAddColumn('users', 'use_case', 'TEXT');
+  safeAddColumn('users', 'test_edition', "TEXT DEFAULT 'commerce'");
 
   const defaultSettings = {
     official_site_url: 'https://bookai-engineering-official.onrender.com',

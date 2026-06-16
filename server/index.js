@@ -47,6 +47,8 @@ const ADMIN_EMAILS = new Set(
 );
 const ADMIN_EMAIL = [...ADMIN_EMAILS][0] || DEFAULT_ADMIN_EMAIL;
 const FOUNDER_EMAIL = normalizeFounderEmail(process.env.FOUNDER_EMAIL || DEFAULT_ADMIN_EMAIL);
+const FOUNDER_TEST_EDITIONS = new Set(['commerce', 'engineering', 'all']);
+const DEFAULT_FOUNDER_TEST_EDITION = 'commerce';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' ? '' : 'demo123456');
 const BOOTSTRAP_SECRET = process.env.BOOTSTRAP_SECRET || process.env.BOOKAI_BOOTSTRAP_SECRET || '';
 const ADMIN_NAME = 'BookAI Admin';
@@ -517,6 +519,24 @@ function normalizeEmail(email) {
 
 function isFounderEmail(email) {
   return normalizeEmail(email) === FOUNDER_EMAIL;
+}
+
+function normalizeFounderTestEdition(value) {
+  const edition = String(value || '').trim().toLowerCase();
+  return FOUNDER_TEST_EDITIONS.has(edition) ? edition : '';
+}
+
+async function ensureFounderTestEditionStorage() {
+  if (PG_ENABLED) {
+    await pgQuery(`ALTER TABLE users ADD COLUMN IF NOT EXISTS test_edition TEXT DEFAULT 'commerce'`);
+    return;
+  }
+
+  const columns = db.prepare(`PRAGMA table_info(users)`).all();
+  const exists = columns.some((column) => column.name === 'test_edition');
+  if (!exists) {
+    db.prepare(`ALTER TABLE users ADD COLUMN test_edition TEXT DEFAULT 'commerce'`).run();
+  }
 }
 
 function privilegedStatusForEmail(email) {
@@ -1935,6 +1955,42 @@ app.get('/api/me', auth, async (req, res) => {
 
 app.get('/api/plans', (_, res) => {
   res.json(plans);
+});
+
+app.get('/api/founder/test-edition', auth, requireFounder, async (req, res) => {
+  try {
+    await ensureFounderTestEditionStorage();
+    const user = PG_ENABLED
+      ? await pgOne(`SELECT test_edition FROM users WHERE id = $1`, [req.user.id])
+      : db.prepare(`SELECT test_edition FROM users WHERE id = ?`).get(req.user.id);
+
+    const edition = normalizeFounderTestEdition(user?.test_edition) || DEFAULT_FOUNDER_TEST_EDITION;
+    return res.json({ ok: true, edition });
+  } catch (error) {
+    console.error('[founder test edition get] failed', { userId: req.user?.id, code: error.code, message: error.message });
+    return res.status(500).json({ error: '測試版本讀取失敗', code: 'DATABASE_ERROR' });
+  }
+});
+
+app.put('/api/founder/test-edition', auth, requireFounder, async (req, res) => {
+  const edition = normalizeFounderTestEdition(req.body?.edition);
+  if (!edition) {
+    return res.status(400).json({ error: 'edition 只允許 commerce、engineering、all', code: 'VALIDATION_ERROR' });
+  }
+
+  try {
+    await ensureFounderTestEditionStorage();
+    if (PG_ENABLED) {
+      await pgQuery(`UPDATE users SET test_edition = $1 WHERE id = $2`, [edition, req.user.id]);
+    } else {
+      db.prepare(`UPDATE users SET test_edition = ? WHERE id = ?`).run(edition, req.user.id);
+    }
+
+    return res.json({ ok: true, edition });
+  } catch (error) {
+    console.error('[founder test edition update] failed', { userId: req.user?.id, code: error.code, message: error.message });
+    return res.status(500).json({ error: '測試版本更新失敗', code: 'DATABASE_ERROR' });
+  }
 });
 
 function distinctVisitors(range) {

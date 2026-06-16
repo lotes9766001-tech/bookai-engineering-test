@@ -80,3 +80,14 @@ export async function api(path, options = {}) {
 
   return data;
 }
+
+export function getFounderTestEdition() {
+  return api('/founder/test-edition');
+}
+
+export function updateFounderTestEdition(edition) {
+  return api('/founder/test-edition', {
+    method: 'PUT',
+    body: JSON.stringify({ edition })
+  });
+}

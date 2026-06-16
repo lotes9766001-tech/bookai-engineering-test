@@ -18,7 +18,7 @@ import {
   WalletCards,
   X
 } from 'lucide-react';
-import { api, setToken, clearToken, getToken } from './lib/api';
+import { api, setToken, clearToken, getToken, getFounderTestEdition, updateFounderTestEdition } from './lib/api';
 import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
@@ -199,6 +199,62 @@ const navs = {
     ['settings', '事務所設定', Building2]
   ]
 };
+
+const founderEditionLabels = {
+  commerce: '電商版',
+  engineering: '工程版',
+  all: '全功能測試'
+};
+
+const commerceEditionPages = new Set([
+  'dashboard',
+  'purchases',
+  'sales',
+  'receivables',
+  'payables',
+  'suppliers',
+  'customers',
+  'transactions',
+  'invoices',
+  'vouchers',
+  'inventory',
+  'integrations',
+  'commerce_site',
+  'website',
+  'reports',
+  'feedbacks',
+  'settings',
+  'admin',
+  'founder'
+]);
+
+const engineeringEditionPages = new Set([
+  'dashboard',
+  'leads',
+  'purchases',
+  'sales',
+  'receivables',
+  'payables',
+  'suppliers',
+  'customers',
+  'transactions',
+  'invoices',
+  'vouchers',
+  'inventory',
+  'jobsites',
+  'website',
+  'reports',
+  'feedbacks',
+  'settings',
+  'admin',
+  'founder'
+]);
+
+function filterNavByFounderEdition(items, edition, isFounder) {
+  if (!isFounder || edition === 'all') return items;
+  const allowed = edition === 'engineering' ? engineeringEditionPages : commerceEditionPages;
+  return items.filter(([id]) => allowed.has(id));
+}
 
 function getPlatformName(key) {
   return platformLabel[key] || key || '未分類平台';
@@ -789,6 +845,39 @@ function accountNeedsReview(user, company) {
   return !['approved', 'founder', 'admin', 'demo'].includes(status) && company?.approval_status !== 'approved' && company?.review_status !== 'approved';
 }
 
+function FounderEditionSwitcher({ edition, loading, saving, error, success, collapsed, onChange }) {
+  if (collapsed) {
+    return (
+      <div className="founder-edition-switcher collapsed" title={`測試版本：${founderEditionLabels[edition] || '電商版'}`}>
+        <span>測</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="founder-edition-switcher">
+      <div className="founder-edition-header">
+        <strong>測試版本</strong>
+        {loading && <small>載入中</small>}
+        {saving && <small>儲存中</small>}
+      </div>
+      <p>目前版本：{founderEditionLabels[edition] || '電商版'}</p>
+      <select
+        value={edition}
+        disabled={loading || saving}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label="測試版本"
+      >
+        <option value="commerce">電商版</option>
+        <option value="engineering">工程版</option>
+        <option value="all">全功能測試</option>
+      </select>
+      {error && <small className="founder-edition-error">{error}</small>}
+      {success && !error && <small className="founder-edition-success">{success}</small>}
+    </div>
+  );
+}
+
 function Shell({ onLogout }) {
   const [me, setMe] = useState(null);
   const [page, setPage] = useState('dashboard');
@@ -797,6 +886,11 @@ function Shell({ onLogout }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('bookai_sidebar_collapsed') === '1');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [pendingMemberCount, setPendingMemberCount] = useState(0);
+  const [testEdition, setTestEdition] = useState(() => localStorage.getItem('bookai_founder_test_edition') || 'commerce');
+  const [testEditionLoading, setTestEditionLoading] = useState(false);
+  const [testEditionSaving, setTestEditionSaving] = useState(false);
+  const [testEditionError, setTestEditionError] = useState('');
+  const [testEditionSuccess, setTestEditionSuccess] = useState('');
 
   useEffect(() => {
     api('/me')
@@ -853,9 +947,10 @@ function Shell({ onLogout }) {
         ...commerceNav.slice(Math.max(1, commerceNav.length - 1))
       ];
   const allowedCompanyNav = websiteNav.filter(([id]) => hasCompanyFeature(company, id));
+  const editionCompanyNav = filterNavByFounderEdition(allowedCompanyNav, testEdition, userIsFounder);
   const visibleNav = userIsAdmin
-    ? [...allowedCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
-    : allowedCompanyNav;
+    ? [...editionCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
+    : editionCompanyNav;
   const founderNav = userIsFounder
     ? [...visibleNav, ['founder', '創辦人營運中心', ShieldCheck]]
     : visibleNav;
@@ -865,6 +960,39 @@ function Shell({ onLogout }) {
     ['terms_beta', '測試會員條款', FileText]
   ];
   const activeNav = needsReview ? reviewNav : founderNav;
+
+  useEffect(() => {
+    if (!me || !userIsFounder) return;
+    setTestEditionLoading(true);
+    setTestEditionError('');
+    getFounderTestEdition()
+      .then((data) => {
+        const edition = data?.edition || 'commerce';
+        setTestEdition(edition);
+        localStorage.setItem('bookai_founder_test_edition', edition);
+      })
+      .catch((error) => {
+        setTestEditionError(error.message || '測試版本載入失敗');
+      })
+      .finally(() => setTestEditionLoading(false));
+  }, [me, userIsFounder]);
+
+  async function handleFounderEditionChange(edition) {
+    setTestEditionSaving(true);
+    setTestEditionError('');
+    setTestEditionSuccess('');
+    try {
+      const data = await updateFounderTestEdition(edition);
+      const nextEdition = data?.edition || edition;
+      setTestEdition(nextEdition);
+      localStorage.setItem('bookai_founder_test_edition', nextEdition);
+      setTestEditionSuccess('已更新');
+    } catch (error) {
+      setTestEditionError(error.message || '測試版本更新失敗');
+    } finally {
+      setTestEditionSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!me || !userIsAdmin || needsReview) {
@@ -889,8 +1017,13 @@ function Shell({ onLogout }) {
     }
     if (me && !needsReview && page !== 'admin' && !hasCompanyFeature(company, page)) {
       setPage('dashboard');
+      return;
     }
-  }, [me, userIsAdmin, userIsFounder, page, company, needsReview]);
+    const visiblePageIds = new Set(activeNav.map(([id]) => id));
+    if (me && !needsReview && page !== 'admin' && page !== 'founder' && !visiblePageIds.has(page)) {
+      setPage('dashboard');
+    }
+  }, [me, userIsAdmin, userIsFounder, page, company, needsReview, activeNav]);
 
 if (!me || !company) {
     return <div className="loading">載入中...</div>;
@@ -971,6 +1104,18 @@ if (!me || !company) {
             </button>
           ))}
         </nav>
+
+        {userIsFounder && !needsReview && (
+          <FounderEditionSwitcher
+            edition={testEdition}
+            loading={testEditionLoading}
+            saving={testEditionSaving}
+            error={testEditionError}
+            success={testEditionSuccess}
+            collapsed={sidebarCollapsed}
+            onChange={handleFounderEditionChange}
+          />
+        )}
 
         <button className="logout" data-label="登出" title={sidebarCollapsed ? '登出' : undefined} onClick={onLogout}>
           <LogOut size={18} />
