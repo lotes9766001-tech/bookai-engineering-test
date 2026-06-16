@@ -2925,6 +2925,7 @@ async function getPublicSiteCandidate(slug) {
 const cmsSectionTypes = new Set(['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom']);
 const cmsContentStatuses = new Set(['draft', 'published', 'hidden']);
 const cmsInquiryStatuses = new Set(['new', 'read', 'replied', 'archived']);
+const cmsAssetModules = new Set(['logo', 'favicon', 'banner', 'home_section', 'product', 'post', 'general']);
 
 const cmsResources = {
   banners: {
@@ -3271,6 +3272,78 @@ app.put('/api/website/inquiries/:id/status', auth, cmsCompany, requireCmsRole('o
   } catch (err) {
     console.error('[website inquiry status] failed', { userId: req.user?.id, code: err.code, message: err.message });
     return jsonError(res, 500, '詢問狀態更新失敗');
+  }
+});
+
+app.get('/api/website/assets', auth, cmsCompany, async (req, res) => {
+  try {
+    const sql = `
+      SELECT *
+      FROM website_assets
+      WHERE company_id = ${PG_ENABLED ? '$1' : '?'}
+      ORDER BY id DESC
+    `;
+    const rows = PG_ENABLED ? await pgAll(sql, [req.cmsCompany.id]) : db.prepare(sql).all(req.cmsCompany.id);
+    return jsonOk(res, rows.map(cmsGenericRow));
+  } catch (err) {
+    console.error('[website assets list] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '素材資料讀取失敗');
+  }
+});
+
+app.post('/api/website/assets', auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), async (req, res) => {
+  try {
+    const b = req.body || {};
+    const fileUrl = cmsText(b.fileUrl ?? b.file_url);
+    if (!fileUrl) return jsonError(res, 400, '請輸入圖片 URL');
+    const module = cmsText(b.module, 'general');
+    const data = {
+      file_url: fileUrl,
+      file_name: cmsText(b.fileName ?? b.file_name),
+      file_type: cmsText(b.fileType ?? b.file_type, 'image'),
+      file_size: cmsNumber(b.fileSize ?? b.file_size, 0),
+      module: cmsAssetModules.has(module) ? module : 'general'
+    };
+
+    const row = PG_ENABLED
+      ? await pgOne(`
+        INSERT INTO website_assets (
+          company_id, file_url, file_name, file_type, file_size, module, created_by, created_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [req.cmsCompany.id, data.file_url, data.file_name, data.file_type, data.file_size, data.module, req.user.id])
+      : (() => {
+        const result = db.prepare(`
+          INSERT INTO website_assets (
+            company_id, file_url, file_name, file_type, file_size, module, created_by, created_at
+          )
+          VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP)
+        `).run(req.cmsCompany.id, data.file_url, data.file_name, data.file_type, data.file_size, data.module, req.user.id);
+        return db.prepare('SELECT * FROM website_assets WHERE id = ? AND company_id = ?').get(result.lastInsertRowid, req.cmsCompany.id);
+      })();
+
+    audit(req.cmsCompany.id, req.user.id, 'website_asset_created', String(row.id));
+    return jsonOk(res, cmsGenericRow(row));
+  } catch (err) {
+    console.error('[website assets create] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '素材新增失敗');
+  }
+});
+
+app.delete('/api/website/assets/:id', auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const result = PG_ENABLED
+      ? await pgQuery('DELETE FROM website_assets WHERE id = $1 AND company_id = $2', [id, req.cmsCompany.id])
+      : db.prepare('DELETE FROM website_assets WHERE id = ? AND company_id = ?').run(id, req.cmsCompany.id);
+    const changes = PG_ENABLED ? result.rowCount : result.changes;
+    if (!changes) return jsonError(res, 404, '找不到素材');
+    audit(req.cmsCompany.id, req.user.id, 'website_asset_deleted', String(id));
+    return jsonOk(res, { deleted: true });
+  } catch (err) {
+    console.error('[website assets delete] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    return jsonError(res, 500, '素材刪除失敗');
   }
 });
 
