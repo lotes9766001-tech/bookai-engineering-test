@@ -2911,6 +2911,17 @@ async function getPublicSite(slug) {
   return PG_ENABLED ? pgOne(sql, [siteSlug]) : db.prepare(sql).get(siteSlug);
 }
 
+async function getPublicSiteCandidate(slug) {
+  const siteSlug = slugify(slug, '');
+  if (!siteSlug) return null;
+  const sql = `
+    SELECT *
+    FROM website_settings
+    WHERE site_slug = ${PG_ENABLED ? '$1' : '?'}
+  `;
+  return PG_ENABLED ? pgOne(sql, [siteSlug]) : db.prepare(sql).get(siteSlug);
+}
+
 const cmsSectionTypes = new Set(['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom']);
 const cmsContentStatuses = new Set(['draft', 'published', 'hidden']);
 const cmsInquiryStatuses = new Set(['new', 'read', 'replied', 'archived']);
@@ -3265,8 +3276,10 @@ app.put('/api/website/inquiries/:id/status', auth, cmsCompany, requireCmsRole('o
 
 app.get('/api/public/sites/:slug', async (req, res) => {
   try {
-    const site = await getPublicSite(req.params.slug);
-    if (!site) return jsonError(res, 404, '找不到網站');
+    const candidate = await getPublicSiteCandidate(req.params.slug);
+    if (!candidate) return jsonError(res, 404, '找不到網站');
+    if (Number(candidate.is_published || 0) !== 1) return jsonError(res, 403, '網站尚未開放');
+    const site = candidate;
     const [banners, sections, faqs] = await Promise.all([
       PG_ENABLED
         ? pgAll('SELECT * FROM website_banners WHERE company_id = $1 AND is_active = 1 ORDER BY sort_order ASC, id DESC', [site.company_id])

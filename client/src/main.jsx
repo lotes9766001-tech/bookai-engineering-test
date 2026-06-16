@@ -22,6 +22,7 @@ import { api, setToken, clearToken, getToken, getFounderTestEdition, updateFound
 import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
+import PublicSitePage from './pages/PublicSitePage.jsx';
 import WebsiteCmsPage from './pages/WebsiteCmsPage.jsx';
 
 const planNames = {
@@ -557,6 +558,10 @@ function App() {
   useEffect(() => {
     trackVisit();
   }, []);
+
+  if (window.location.pathname.startsWith('/site/')) {
+    return <PublicSitePage />;
+  }
 
   if (!tokenReady) {
     return <Auth onAuth={() => setTokenReady(true)} />;
