@@ -206,54 +206,59 @@ const founderEditionLabels = {
   all: '全功能測試'
 };
 
-const commerceEditionPages = new Set([
-  'dashboard',
-  'purchases',
-  'sales',
-  'receivables',
-  'payables',
-  'suppliers',
-  'customers',
-  'transactions',
-  'invoices',
-  'vouchers',
-  'inventory',
-  'integrations',
-  'commerce_site',
-  'website',
-  'reports',
-  'feedbacks',
-  'settings',
-  'admin',
-  'founder'
-]);
+const commerceEditionNav = [
+  ['dashboard', '經營總覽', BarChart3],
+  ['inventory', '商品 / 材料庫存', Package],
+  ['purchases', '進貨管理', WalletCards],
+  ['sales', '銷貨管理', WalletCards],
+  ['suppliers', '供應商管理', Users],
+  ['customers', '客戶管理', Users],
+  ['receivables', '應收帳款', WalletCards],
+  ['payables', '應付帳款', WalletCards],
+  ['invoices', '發票中心', FileText],
+  ['vouchers', '電子憑證', ReceiptText],
+  ['transactions', '收支管理', WalletCards],
+  ['integrations', '平台串接', PlugZap],
+  ['commerce_site', '官網後台', Building2],
+  ['website', '品牌官網', Building2],
+  ['reports', '經營報表', BarChart3],
+  ['feedbacks', '產品回饋', FileText],
+  ['settings', '公司設定', Building2]
+];
 
-const engineeringEditionPages = new Set([
-  'dashboard',
-  'leads',
-  'purchases',
-  'sales',
-  'receivables',
-  'payables',
-  'suppliers',
-  'customers',
-  'transactions',
-  'invoices',
-  'vouchers',
-  'inventory',
-  'jobsites',
-  'website',
-  'reports',
-  'feedbacks',
-  'settings',
-  'admin',
-  'founder'
-]);
+const engineeringEditionNav = [
+  ['dashboard', '經營總覽', BarChart3],
+  ['jobsites', '案場中心', Building2],
+  ['leads', '接案中心 / 標案雷達', FileText],
+  ['receivables', '收款管理', WalletCards],
+  ['reports', '工程月報 / 經營報表', BarChart3],
+  ['inventory', '商品 / 材料庫存', Package],
+  ['customers', '客戶管理', Users],
+  ['suppliers', '供應商管理', Users],
+  ['purchases', '進貨管理', WalletCards],
+  ['sales', '銷貨管理', WalletCards],
+  ['payables', '應付帳款', WalletCards],
+  ['transactions', '收支管理', WalletCards],
+  ['invoices', '發票中心', FileText],
+  ['vouchers', '電子憑證', ReceiptText],
+  ['website', '品牌官網', Building2],
+  ['feedbacks', '產品回饋', FileText],
+  ['settings', '公司設定', Building2]
+];
 
-function filterNavByFounderEdition(items, edition, isFounder) {
-  if (!isFounder || edition === 'all') return items;
-  const allowed = edition === 'engineering' ? engineeringEditionPages : commerceEditionPages;
-  return items.filter(([id]) => allowed.has(id));
+function mergeNavItems(...groups) {
+  const seen = new Set();
+  return groups.flat().filter(([id]) => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function getFounderEditionNav(currentNav, edition) {
+  if (edition === 'commerce') return commerceEditionNav;
+  if (edition === 'engineering') return engineeringEditionNav;
+  return mergeNavItems(currentNav, commerceEditionNav, engineeringEditionNav);
 }
 
 function getPlatformName(key) {
@@ -946,8 +951,12 @@ function Shell({ onLogout }) {
         ['website', '品牌官網', Building2],
         ...commerceNav.slice(Math.max(1, commerceNav.length - 1))
       ];
-  const allowedCompanyNav = websiteNav.filter(([id]) => hasCompanyFeature(company, id));
-  const editionCompanyNav = filterNavByFounderEdition(allowedCompanyNav, testEdition, userIsFounder);
+  const editionSourceNav = userIsFounder
+    ? getFounderEditionNav(websiteNav, testEdition)
+    : websiteNav;
+  const editionCompanyNav = userIsFounder
+    ? editionSourceNav
+    : editionSourceNav.filter(([id]) => hasCompanyFeature(company, id));
   const visibleNav = userIsAdmin
     ? [...editionCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
     : editionCompanyNav;
@@ -1015,11 +1024,11 @@ function Shell({ onLogout }) {
     if (me && !userIsFounder && page === 'founder') {
       setPage('dashboard');
     }
-    if (me && !needsReview && page !== 'admin' && !hasCompanyFeature(company, page)) {
+    const visiblePageIds = new Set(activeNav.map(([id]) => id));
+    if (me && !needsReview && !userIsFounder && page !== 'admin' && !hasCompanyFeature(company, page)) {
       setPage('dashboard');
       return;
     }
-    const visiblePageIds = new Set(activeNav.map(([id]) => id));
     if (me && !needsReview && page !== 'admin' && page !== 'founder' && !visiblePageIds.has(page)) {
       setPage('dashboard');
     }
@@ -1031,11 +1040,11 @@ if (!me || !company) {
 
   const lockedFeature = getPageFeatureKey(page);
 
-  if (!needsReview && !['admin', 'founder'].includes(page) && !hasCompanyFeature(company, page)) {
+  if (!needsReview && !userIsFounder && !['admin', 'founder'].includes(page) && !hasCompanyFeature(company, page)) {
     return <Locked feature={lockedFeature} />;
   }
 
-  if (!needsReview && featureByPage[page] && !company.effectiveFeatures?.includes(lockedFeature)) {
+  if (!needsReview && !userIsFounder && featureByPage[page] && !company.effectiveFeatures?.includes(lockedFeature)) {
     return <Locked feature={lockedFeature} />;
   }
 
