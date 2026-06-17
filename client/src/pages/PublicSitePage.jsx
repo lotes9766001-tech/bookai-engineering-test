@@ -100,6 +100,17 @@ function PublicImage({ src, alt, className = '' }) {
   return <img className={className} src={src} alt={alt || ''} loading="lazy" onError={() => setFailed(true)} />;
 }
 
+function PublicLogo({ src, brandName }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) return <span>{brandName.slice(0, 1)}</span>;
+  return <img src={src} alt={brandName} onError={() => setFailed(true)} />;
+}
+
 function PublicSiteShell({ slug, site, preview, children }) {
   const settings = site?.settings || {};
   const brandName = settings.brandName || settings.siteName || 'Brand Website';
@@ -115,13 +126,19 @@ function PublicSiteShell({ slug, site, preview, children }) {
     <div className="public-site">
       <header className="public-site-header">
         <a className="public-site-brand" href={publicPath(slug, '', preview)}>
-          {settings.logoUrl ? <img src={settings.logoUrl} alt={brandName} /> : <span>{brandName.slice(0, 1)}</span>}
+          <PublicLogo src={settings.logoUrl} brandName={brandName} />
           <strong>{brandName}</strong>
         </a>
         <nav className="public-site-nav" aria-label="品牌官網導覽">
           {nav.map(([label, href]) => <a key={href} href={href}>{label}</a>)}
         </nav>
       </header>
+
+      {preview && (
+        <div className="public-site-preview-banner">
+          預覽模式：此頁僅供後台檢查，未發布網站不會公開顯示，聯絡表單不會送出。
+        </div>
+      )}
 
       <main>{children}</main>
 
@@ -158,7 +175,12 @@ function PublicNotice({ title, message }) {
 }
 
 function EmptyState({ children }) {
-  return <div className="public-site-empty">{children}</div>;
+  return (
+    <div className="public-site-empty">
+      <strong>{children}</strong>
+      <span>請稍後再回來查看，或透過聯絡表單詢問品牌團隊。</span>
+    </div>
+  );
 }
 
 function ProductCard({ slug, product, preview }) {
@@ -292,7 +314,7 @@ function PublicHome({ slug, site, products, posts, preview }) {
 
       <section className="public-site-cta">
         <h2>想了解更多？</h2>
-        <p>留下需求，我們會盡快與您聯繫。</p>
+        <p>{preview ? '預覽模式可檢查表單畫面，但不會建立詢問紀錄。' : '留下需求，我們會盡快與您聯繫。'}</p>
         <a href={publicPath(slug, '/contact', preview)}>聯絡我們</a>
       </section>
     </>
@@ -427,7 +449,7 @@ function PublicContactPage({ slug, site, preview }) {
       <div>
         <span>Contact</span>
         <h1>聯絡我們</h1>
-        <p>歡迎留下需求、商品詢問或合作訊息。</p>
+        <p>{preview ? '目前為預覽模式，送出按鈕不會建立後台詢問紀錄。' : '歡迎留下需求、商品詢問或合作訊息。'}</p>
         <dl>
           {settings.contactEmail && <><dt>Email</dt><dd><a href={`mailto:${settings.contactEmail}`}>{settings.contactEmail}</a></dd></>}
           {settings.contactPhone && <><dt>電話</dt><dd><a href={`tel:${settings.contactPhone}`}>{settings.contactPhone}</a></dd></>}
@@ -457,7 +479,7 @@ function PublicContactPage({ slug, site, preview }) {
         </label>
         {error && <div className="public-site-form-error">{error}</div>}
         {success && <div className="public-site-form-success">{success}</div>}
-        <button type="submit" disabled={saving}>{saving ? '送出中...' : preview ? '預覽模式' : '送出詢問'}</button>
+        <button type="submit" disabled={saving}>{saving ? '送出中...' : preview ? '預覽模式不送出' : '送出詢問'}</button>
       </form>
     </section>
   );
@@ -557,10 +579,10 @@ export default function PublicSitePage() {
     };
   }, [route]);
 
-  if (!route) return <PublicNotice title="網站不存在或尚未開放" message="請確認網址是否正確。" />;
-  if (loading) return <PublicNotice title="載入中" message="正在載入品牌官網內容..." />;
-  if (error) return <PublicNotice title={error} message="請確認網站網址，或稍後再試。" />;
-  if (!site) return <PublicNotice title="網站不存在或尚未開放" message="請確認網址是否正確。" />;
+  if (!route) return <PublicNotice title="網站不存在" message="請確認網址是否正確，或回到 BookAI 後台取得正確的公開網址。" />;
+  if (loading) return <PublicNotice title="載入中" message="正在載入品牌官網內容，請稍候。" />;
+  if (error) return <PublicNotice title={error} message={error === '網站尚未開放' ? '此網站尚未發布，請稍後再試。' : '請確認網站網址，或稍後再試。'} />;
+  if (!site) return <PublicNotice title="網站不存在" message="請確認網址是否正確。" />;
 
   let content = null;
   if (route.section === 'home') {

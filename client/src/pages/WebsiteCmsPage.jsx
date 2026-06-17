@@ -37,6 +37,24 @@ const statusOptions = ['draft', 'published', 'hidden'];
 const sectionTypes = ['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom'];
 const inquiryStatuses = ['new', 'read', 'replied', 'archived'];
 const assetModules = ['logo', 'favicon', 'banner', 'home_section', 'product', 'post', 'general'];
+const moduleLabels = {
+  logo: 'Logo',
+  favicon: 'Favicon',
+  banner: 'Banner',
+  home_section: '首頁區塊',
+  product: '商品',
+  post: '文章',
+  general: '通用'
+};
+const resourceEmptyText = {
+  banners: '尚未新增 Banner。請先建立首頁主視覺，公開網站首頁會優先顯示第一筆啟用 Banner。',
+  'home-sections': '尚未新增首頁區塊。可加入品牌故事、服務特色或促銷資訊。',
+  products: '尚未新增商品。新增商品並設為已發布後，才會出現在公開網站。',
+  posts: '尚未新增文章。新增文章並設為已發布後，才會出現在最新消息。',
+  faqs: '尚未新增 FAQ。常見問題可降低顧客詢問成本。',
+  inquiries: '目前尚無聯絡詢問。公開網站送出的表單會出現在這裡。',
+  assets: '目前尚無素材。可先新增圖片 URL，再套用到 Logo、Banner、商品或文章封面。'
+};
 
 function emptyForm(resource) {
   const base = { sortOrder: 0, isActive: true };
@@ -79,7 +97,7 @@ function getStatusLabel(status) {
   return labels[status] || status;
 }
 
-function TextField({ label, value, onChange, type = 'text', textarea = false, placeholder = '' }) {
+function TextField({ label, value, onChange, type = 'text', textarea = false, placeholder = '', hint = '' }) {
   return (
     <label className="website-field">
       <span>{label}</span>
@@ -88,6 +106,7 @@ function TextField({ label, value, onChange, type = 'text', textarea = false, pl
       ) : (
         <input type={type} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(type === 'number' ? Number(e.target.value) : e.target.value)} />
       )}
+      {hint && <small>{hint}</small>}
     </label>
   );
 }
@@ -141,7 +160,7 @@ function ImageUrlField({ label, value, onChange, assets = [], module = 'general'
             if (e.target.value) onChange(e.target.value);
           }}
         >
-          <option value="">{filteredAssets.length ? '選擇素材' : '目前無可用素材'}</option>
+          <option value="">{filteredAssets.length ? '從素材管理套用圖片 URL' : '目前無可用素材'}</option>
           {filteredAssets.map((asset) => (
             <option key={asset.id} value={asset.fileUrl}>{asset.fileName || asset.fileUrl}</option>
           ))}
@@ -235,8 +254,8 @@ export default function WebsiteCmsPage() {
           <p>管理品牌網站內容、首頁展示、商品資訊與顧客詢問。</p>
         </div>
         <div className="website-preview-card">
-          <span>前台預覽連結</span>
-          <strong>/site/{settings?.siteSlug || 'your-brand'}</strong>
+          <span>後台預覽連結</span>
+          <strong>/site-preview/{settings?.siteSlug || 'your-brand'}</strong>
         </div>
       </section>
 
@@ -256,25 +275,25 @@ export default function WebsiteCmsPage() {
       ) : (
         <>
           {activeTab === 'overview' && <WebsiteOverview settings={settings} overview={overview} onNavigate={setActiveTab} />}
-          {activeTab === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} assets={resources.assets} saving={saving} onSave={() => run(() => saveWebsiteSettings(settings), '網站設定已儲存')} />}
+          {activeTab === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} assets={resources.assets} saving={saving} onSave={() => run(() => saveWebsiteSettings(settings), '網站設定已儲存，可使用預覽網站確認前台呈現。')} />}
           {['banners', 'home-sections', 'products', 'posts', 'faqs'].includes(activeTab) && (
             <ResourcePanel
               resource={activeTab}
               items={resources[activeTab] || []}
               assets={resources.assets}
               saving={saving}
-              onCreate={(payload) => run(() => createWebsiteResource(activeTab, payload), `${resourceLabels[activeTab]}已新增`)}
-              onUpdate={(id, payload) => run(() => updateWebsiteResource(activeTab, id, payload), `${resourceLabels[activeTab]}已更新`)}
-              onDelete={(id) => run(() => deleteWebsiteResource(activeTab, id), `${resourceLabels[activeTab]}已刪除`)}
+              onCreate={(payload) => run(() => createWebsiteResource(activeTab, payload), `${resourceLabels[activeTab]}已新增，請確認狀態與排序。`)}
+              onUpdate={(id, payload) => run(() => updateWebsiteResource(activeTab, id, payload), `${resourceLabels[activeTab]}已更新。`)}
+              onDelete={(id) => run(() => deleteWebsiteResource(activeTab, id), `${resourceLabels[activeTab]}已刪除。`)}
             />
           )}
-          {activeTab === 'inquiries' && <InquiriesPanel items={resources.inquiries} saving={saving} onStatus={(id, status) => run(() => updateWebsiteInquiryStatus(id, status), '詢問狀態已更新')} />}
+          {activeTab === 'inquiries' && <InquiriesPanel items={resources.inquiries} saving={saving} onStatus={(id, status) => run(() => updateWebsiteInquiryStatus(id, status), '詢問狀態已更新。')} />}
           {activeTab === 'assets' && (
             <AssetsPanel
               items={resources.assets}
               saving={saving}
-              onCreate={(payload) => run(() => createWebsiteAsset(payload), '素材已新增')}
-              onDelete={(id) => run(() => deleteWebsiteAsset(id), '素材已刪除')}
+              onCreate={(payload) => run(() => createWebsiteAsset(payload), '素材已新增，可在圖片欄位選擇套用。')}
+              onDelete={(id) => run(() => deleteWebsiteAsset(id), '素材紀錄已刪除。')}
             />
           )}
         </>
@@ -287,18 +306,26 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
   const previewUrl = settings?.siteSlug ? `/site-preview/${encodeURIComponent(settings.siteSlug)}` : null;
   const publicUrl = settings?.siteSlug ? `/site/${encodeURIComponent(settings.siteSlug)}` : null;
   const cards = [
-    ['網站名稱', settings?.siteName || '-'],
-    ['品牌名稱', settings?.brandName || '-'],
-    ['site_slug', settings?.siteSlug || '-'],
+    ['網站名稱', settings?.siteName || '尚未設定網站名稱'],
+    ['品牌名稱', settings?.brandName || '尚未設定品牌名稱'],
+    ['site_slug', settings?.siteSlug || '尚未設定 site_slug'],
     ['發布狀態', settings?.isPublished ? '✓ 已發布' : '○ 未發布'],
     ['公開網址', publicUrl ? publicUrl : '(請先設定 site_slug)'],
-    ['Banner', overview.banners],
-    ['首頁區塊', overview.sections],
-    ['商品', `${overview.productsPublished} 已發布 / ${overview.productsDraft} 草稿 / ${overview.productsHidden} 隱藏`],
-    ['文章', `${overview.postsPublished} 已發布 / ${overview.postsDraft} 草稿 / ${overview.postsHidden} 隱藏`],
-    ['FAQ', overview.faqs],
-    ['新詢問', overview.newInquiries]
+    ['Banner 數量', overview.banners],
+    ['首頁區塊數量', overview.sections],
+    ['商品數量', `${overview.products} 總數 / ${overview.productsPublished} 已發布 / ${overview.productsDraft} 草稿 / ${overview.productsHidden} 隱藏`],
+    ['文章數量', `${overview.posts} 總數 / ${overview.postsPublished} 已發布 / ${overview.postsDraft} 草稿 / ${overview.postsHidden} 隱藏`],
+    ['FAQ 數量', overview.faqs],
+    ['新聯絡詢問', overview.newInquiries]
   ];
+  const checklist = [
+    !settings?.siteName && ['settings', '尚未設定網站名稱'],
+    !settings?.siteSlug && ['settings', '尚未設定 site_slug'],
+    overview.banners === 0 && ['banners', '尚未新增 Banner'],
+    overview.products === 0 && ['products', '尚未新增商品'],
+    overview.posts === 0 && ['posts', '尚未新增文章'],
+    overview.faqs === 0 && ['faqs', '尚未新增 FAQ']
+  ].filter(Boolean);
 
   return (
     <section className="website-panel">
@@ -325,6 +352,16 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
           </div>
         ))}
       </div>
+      {checklist.length > 0 && (
+        <div className="website-next-steps">
+          <h3>建議完成項目</h3>
+          <div>
+            {checklist.map(([tab, text]) => (
+              <button key={text} type="button" onClick={() => onNavigate(tab)}>{text}</button>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -337,14 +374,14 @@ function SettingsPanel({ settings, setSettings, assets, saving, onSave }) {
       <div className="website-panel-head">
         <div>
           <h2>網站設定</h2>
-          <p>設定品牌識別、聯絡資訊、SEO 與發布狀態。</p>
+          <p>設定品牌識別、聯絡資訊、SEO 與發布狀態。儲存後可立即用預覽網站確認。</p>
         </div>
-        <button type="button" disabled={saving} onClick={onSave}>儲存設定</button>
+        <button type="button" disabled={saving} onClick={onSave}>{saving ? '儲存中...' : '儲存網站設定'}</button>
       </div>
       <div className="website-form-grid">
-        <TextField label="site_slug" value={settings?.siteSlug} onChange={(v) => update('siteSlug', v)} />
-        <TextField label="網站名稱" value={settings?.siteName} onChange={(v) => update('siteName', v)} />
-        <TextField label="品牌名稱" value={settings?.brandName} onChange={(v) => update('brandName', v)} />
+        <TextField label="site_slug" value={settings?.siteSlug} onChange={(v) => update('siteSlug', v)} hint="公開網址會使用 /site/site_slug，建議使用英文、數字或短橫線。" />
+        <TextField label="網站名稱" value={settings?.siteName} onChange={(v) => update('siteName', v)} hint="顯示於前台頁面標題與 SEO 預設值。" />
+        <TextField label="品牌名稱" value={settings?.brandName} onChange={(v) => update('brandName', v)} hint="顯示於前台導覽與頁尾。" />
         <ImageUrlField label="Logo URL" value={settings?.logoUrl} onChange={(v) => update('logoUrl', v)} assets={assets} module="logo" />
         <ImageUrlField label="Favicon URL" value={settings?.faviconUrl} onChange={(v) => update('faviconUrl', v)} assets={assets} module="favicon" />
         <TextField label="主色" type="color" value={settings?.primaryColor || '#2563eb'} onChange={(v) => update('primaryColor', v)} />
@@ -356,7 +393,7 @@ function SettingsPanel({ settings, setSettings, assets, saving, onSave }) {
         <TextField label="Instagram URL" value={settings?.instagramUrl} onChange={(v) => update('instagramUrl', v)} />
         <TextField label="地址" value={settings?.address} onChange={(v) => update('address', v)} />
         <TextField label="SEO 標題" value={settings?.seoTitle} onChange={(v) => update('seoTitle', v)} />
-        <TextField label="SEO 描述" value={settings?.seoDescription} onChange={(v) => update('seoDescription', v)} textarea />
+        <TextField label="SEO 描述" value={settings?.seoDescription} onChange={(v) => update('seoDescription', v)} textarea hint="簡短描述品牌、商品或服務內容，公開網站會用於首頁文案 fallback。" />
       </div>
       <div className="website-form-section">
         <h3>發布狀態</h3>
@@ -400,13 +437,13 @@ function ResourcePanel({ resource, items, assets, saving, onCreate, onUpdate, on
       <div className="website-panel-head">
         <div>
           <h2>{label}管理</h2>
-          <p>新增、編輯、排序與控制顯示狀態。</p>
+          <p>新增、編輯、排序與控制顯示狀態。公開網站只會顯示已發布或啟用的內容。</p>
         </div>
       </div>
       <form className="website-editor" onSubmit={submit}>
         <ResourceFields resource={resource} form={form} setForm={setForm} assets={assets} />
         <div className="website-editor-actions">
-          <button type="submit" disabled={saving}>{editingId ? '儲存修改' : `新增${label}`}</button>
+          <button type="submit" disabled={saving}>{saving ? '處理中...' : editingId ? '儲存修改' : `新增${label}`}</button>
           {editingId && <button type="button" className="website-secondary-btn" onClick={() => { setEditingId(null); setForm(emptyForm(resource)); }}>取消編輯</button>}
         </div>
       </form>
@@ -488,7 +525,7 @@ function ResourceFields({ resource, form, setForm, assets }) {
 }
 
 function ResourceTable({ resource, items, onEdit, onDelete }) {
-  if (!items.length) return <div className="website-empty">目前尚無資料，請先新增內容。</div>;
+  if (!items.length) return <div className="website-empty">{resourceEmptyText[resource] || '目前尚無資料，請先新增內容。'}</div>;
   return (
     <div className="website-table-wrap">
       <table>
@@ -517,8 +554,8 @@ function ResourceTable({ resource, items, onEdit, onDelete }) {
               <td>{formatDate(item.updatedAt || item.createdAt)}</td>
               <td>
                 <div className="website-row-actions">
-                  <button type="button" onClick={() => onEdit(item)}>編輯</button>
-                  <button type="button" className="website-danger-btn" onClick={() => onDelete(item.id)}>刪除</button>
+                  <button type="button" onClick={() => onEdit(item)}>編輯內容</button>
+                  <button type="button" className="website-danger-btn" onClick={() => onDelete(item.id)}>刪除紀錄</button>
                 </div>
               </td>
             </tr>
@@ -558,26 +595,26 @@ function AssetsPanel({ items, saving, onCreate, onDelete }) {
       <div className="website-panel-head">
         <div>
           <h2>素材管理</h2>
-          <p>管理品牌官網可重複套用的圖片 URL 素材。</p>
+          <p>管理品牌官網可重複套用的圖片 URL 素材。此版本只紀錄 URL，不會上傳檔案。</p>
         </div>
       </div>
       <form className="website-editor" onSubmit={submit}>
         <div className="website-form-grid">
           <ImageUrlField label="圖片 URL" value={form.fileUrl} onChange={(v) => setForm({ ...form, fileUrl: v })} assets={[]} />
-          <TextField label="檔名" value={form.fileName} onChange={(v) => setForm({ ...form, fileName: v })} />
-          <TextField label="檔案類型" value={form.fileType} onChange={(v) => setForm({ ...form, fileType: v })} placeholder="image/png" />
-          <TextField label="檔案大小" type="number" value={form.fileSize} onChange={(v) => setForm({ ...form, fileSize: v })} />
+          <TextField label="檔名" value={form.fileName} onChange={(v) => setForm({ ...form, fileName: v })} hint="可用於辨識素材，例如 hero-banner.jpg。" />
+          <TextField label="檔案類型" value={form.fileType} onChange={(v) => setForm({ ...form, fileType: v })} placeholder="image/png" hint="可填 image/png、image/jpeg 或 image/webp。" />
+          <TextField label="檔案大小" type="number" value={form.fileSize} onChange={(v) => setForm({ ...form, fileSize: v })} hint="可留 0；目前僅作紀錄用途。" />
           <SelectField label="用途 module" value={form.module} onChange={(v) => setForm({ ...form, module: v })} options={assetModules} />
         </div>
         <div className="website-editor-actions">
-          <button type="submit" disabled={saving}>新增素材</button>
+          <button type="submit" disabled={saving}>{saving ? '新增中...' : '新增圖片素材'}</button>
         </div>
       </form>
 
       {copyMessage && <div className="website-success">{copyMessage}</div>}
 
       {!items.length ? (
-        <div className="website-empty">目前尚無素材</div>
+        <div className="website-empty">{resourceEmptyText.assets}</div>
       ) : (
         <div className="website-table-wrap">
           <table>
@@ -599,13 +636,13 @@ function AssetsPanel({ items, saving, onCreate, onDelete }) {
                     <strong>{item.fileName || '-'}</strong>
                     <small>{item.fileUrl}</small>
                   </td>
-                  <td><span className="website-chip">{item.module || 'general'}</span></td>
+                  <td><span className="website-chip">{moduleLabels[item.module] || item.module || '通用'}</span></td>
                   <td>{item.fileType || '-'} / {Number(item.fileSize || 0).toLocaleString()} bytes</td>
                   <td>{formatDate(item.createdAt)}</td>
                   <td>
                     <div className="website-row-actions">
-                      <button type="button" onClick={() => copyUrl(item.fileUrl)}>複製 URL</button>
-                      <button type="button" className="website-danger-btn" onClick={() => remove(item.id)}>刪除</button>
+                      <button type="button" onClick={() => copyUrl(item.fileUrl)}>複製圖片 URL</button>
+                      <button type="button" className="website-danger-btn" onClick={() => remove(item.id)}>刪除素材</button>
                     </div>
                   </td>
                 </tr>
@@ -624,11 +661,11 @@ function InquiriesPanel({ items, saving, onStatus }) {
       <div className="website-panel-head">
         <div>
           <h2>聯絡詢問</h2>
-          <p>查看品牌官網送出的詢問並更新處理狀態。</p>
+          <p>查看品牌官網送出的詢問並更新處理狀態。預覽模式不會建立詢問紀錄。</p>
         </div>
       </div>
       {!items.length ? (
-        <div className="website-empty">目前尚無聯絡詢問。</div>
+        <div className="website-empty">{resourceEmptyText.inquiries}</div>
       ) : (
         <div className="website-table-wrap">
           <table>

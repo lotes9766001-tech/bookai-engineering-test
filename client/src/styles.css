@@ -3848,6 +3848,33 @@ tr:hover td {
   background: #f8fafc;
 }
 
+.website-next-steps {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 16px;
+  background: #fff7ed;
+}
+
+.website-next-steps h3 {
+  margin: 0;
+  color: #9a3412;
+  font-size: 15px;
+}
+
+.website-next-steps div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.website-next-steps button {
+  border-color: #fed7aa;
+  background: #ffffff;
+  color: #9a3412;
+}
+
 .website-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3876,6 +3903,12 @@ tr:hover td {
   border-radius: 12px;
   background: #ffffff;
   color: var(--text);
+}
+
+.website-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .website-field textarea {
@@ -4127,6 +4160,15 @@ tr:hover td {
   border-bottom: 1px solid #e6edf5;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(18px);
+}
+
+.public-site-preview-banner {
+  padding: 10px clamp(20px, 6vw, 72px);
+  border-bottom: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .public-site-brand,
@@ -4400,12 +4442,23 @@ tr:hover td {
 }
 
 .public-site-empty {
+  display: grid;
+  gap: 8px;
   padding: 30px;
   border: 1px dashed #cbd5e1;
   border-radius: 18px;
   background: #ffffff;
   color: #64748b;
   text-align: center;
+}
+
+.public-site-empty strong {
+  color: #334155;
+  font-size: 18px;
+}
+
+.public-site-empty span {
+  font-size: 14px;
 }
 
 .public-site-detail {
@@ -4607,9 +4660,23 @@ tr:hover td {
     margin-top: 12px;
   }
 
+  .website-overview-actions {
+    display: grid;
+  }
+
   .website-metric-grid,
   .website-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .website-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .website-tabs button {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .public-site-header,
@@ -4624,6 +4691,19 @@ tr:hover td {
     flex-wrap: wrap;
   }
 
+  .public-site-header {
+    position: relative;
+  }
+
+  .public-site-nav {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .public-site-nav a {
+    padding: 6px 0;
+  }
+
   .public-site-hero,
   .public-site-detail,
   .public-site-contact {
@@ -4632,6 +4712,10 @@ tr:hover td {
 
   .public-site-hero {
     min-height: auto;
+  }
+
+  .public-site-hero h1 {
+    font-size: 38px;
   }
 
   .public-site-card-grid,
