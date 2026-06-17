@@ -122,9 +122,9 @@ const pgCoreTables = [
 ];
 
 const pgCoreColumns = {
-  users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'approval_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'phone', 'line_contact', 'contact_name', 'company_stage', 'tax_id', 'created_at'],
-  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'approval_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'contact_name', 'phone', 'line_contact', 'company_stage', 'is_tester', 'tester_feedback_status', 'beta_status', 'is_free_beta', 'beta_group', 'beta_limit_group', 'product_line', 'industry_type', 'beta_approved_at', 'created_at'],
-  company_users: ['id', 'company_id', 'user_id', 'role', 'created_at'],
+  users: ['id', 'name', 'email', 'password_hash', 'status', 'review_status', 'approval_status', 'terms_accepted_at', 'terms_version', 'last_login_at', 'created_source', 'created_utm_source', 'login_count', 'phone', 'line_contact', 'contact_name', 'company_stage', 'tax_id', 'created_at', 'updated_at'],
+  companies: ['id', 'name', 'tax_id', 'industry', 'plan', 'owner_id', 'review_status', 'approval_status', 'is_active', 'billing_status', 'subscription_plan', 'is_paid_customer', 'contact_name', 'phone', 'line_contact', 'company_stage', 'is_tester', 'tester_feedback_status', 'beta_status', 'is_free_beta', 'beta_group', 'beta_limit_group', 'product_line', 'industry_type', 'beta_approved_at', 'created_at', 'updated_at'],
+  company_users: ['id', 'company_id', 'user_id', 'role', 'created_at', 'updated_at'],
   job_sites: ['id', 'company_id', 'name', 'site_name', 'client_name', 'quote_amount', 'received_amount', 'status', 'created_at', 'updated_at'],
   job_site_payments: ['id', 'company_id', 'job_site_id', 'amount', 'payment_date', 'method', 'note', 'created_at'],
   job_site_estimate_items: ['id', 'company_id', 'job_site_id', 'work_type', 'item_category', 'item_name', 'quantity', 'unit', 'unit_price', 'amount', 'cost_amount', 'sort_order', 'created_at', 'updated_at'],
@@ -158,7 +158,7 @@ const pgCoreColumns = {
   website_posts: ['id', 'company_id', 'title', 'slug', 'status', 'published_at', 'created_at', 'updated_at'],
   website_faqs: ['id', 'company_id', 'question', 'answer', 'is_active', 'created_at', 'updated_at'],
   website_inquiries: ['id', 'company_id', 'name', 'email', 'message', 'status', 'created_at', 'updated_at'],
-  website_assets: ['id', 'company_id', 'file_url', 'file_name', 'file_type', 'module', 'created_by', 'created_at']
+  website_assets: ['id', 'company_id', 'file_url', 'file_name', 'file_type', 'module', 'created_by', 'created_at', 'updated_at']
 };
 
 if (databaseUrl) {
@@ -353,7 +353,8 @@ const requiredColumns = {
     'contact_name',
     'company_stage',
     'tax_id',
-    'created_at'
+    'created_at',
+    'updated_at'
   ],
   companies: [
     'id',
@@ -380,14 +381,16 @@ const requiredColumns = {
     'product_line',
     'industry_type',
     'beta_approved_at',
-    'created_at'
+    'created_at',
+    'updated_at'
   ],
   company_users: [
     'id',
     'company_id',
     'user_id',
     'role',
-    'created_at'
+    'created_at',
+    'updated_at'
   ],
   company_feature_overrides: [
     'id',
@@ -744,7 +747,8 @@ const requiredColumns = {
     'file_type',
     'module',
     'created_by',
-    'created_at'
+    'created_at',
+    'updated_at'
   ],
   feedbacks: [
     'id',
