@@ -567,6 +567,10 @@ function App() {
     return <Auth onAuth={() => setTokenReady(true)} />;
   }
 
+  if (window.location.pathname.startsWith('/site-preview/')) {
+    return <PublicSitePage />;
+  }
+
   return (
     <Shell
       onLogout={() => {
@@ -3187,6 +3191,86 @@ function JobSites({ companyId, company }) {
     '板模工程': '板模工程適合用柱模、樑模、牆模、樓板模、清水模加價、支撐鋼管與拆模估價。'
   };
 
+  const estimateUnitOptions = [
+    '個', '組', '台', '套', '支', '片', '張',
+    '坪', '㎡', '才',
+    '米', '公尺', '尺', '台尺',
+    '式', '工', '日', '趟', '戶', '間',
+    '公斤', '包', '桶', '箱',
+    '自訂'
+  ];
+
+  function isPresetEstimateUnit(unit) {
+    return estimateUnitOptions.includes(unit) && unit !== '自訂';
+  }
+
+  function emptyEstimateDraft() {
+    return {
+      itemCategory: '加項',
+      itemName: '',
+      quantity: '',
+      unit: '式',
+      unitPrice: '',
+      unitCost: '',
+      note: ''
+    };
+  }
+
+  function estimateQuantity(item) {
+    return numberValue(item.quantity);
+  }
+
+  function estimateUnitPrice(item) {
+    return numberValue(item.unitPrice ?? item.unit_price);
+  }
+
+  function estimateUnitCost(item) {
+    if (item.unitCost !== undefined || item.unit_cost !== undefined) {
+      return numberValue(item.unitCost ?? item.unit_cost);
+    }
+
+    const quantity = estimateQuantity(item);
+    const costAmount = numberValue(item.costAmount ?? item.cost_amount);
+    return quantity > 0 ? costAmount / quantity : costAmount;
+  }
+
+  function estimateQuoteSubtotal(item) {
+    return estimateQuantity(item) * estimateUnitPrice(item);
+  }
+
+  function estimateCostSubtotal(item) {
+    return estimateQuantity(item) * estimateUnitCost(item);
+  }
+
+  function EstimateUnitInput({ value, onChange }) {
+    const unit = String(value || '');
+    const selectValue = isPresetEstimateUnit(unit) ? unit : '自訂';
+
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <select
+          value={selectValue}
+          onChange={(e) => {
+            const next = e.target.value;
+            onChange(next === '自訂' ? (isPresetEstimateUnit(unit) ? '' : unit) : next);
+          }}
+        >
+          {estimateUnitOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+
+        {selectValue === '自訂' && (
+          <input
+            value={unit}
+            placeholder="輸入自訂單位"
+            onChange={(e) => onChange(e.target.value)}
+          />
+        )}
+      </div>
+    );
+  }
+
   const estimateTemplates = {
     '油漆工程': [
       ['牆面 / 天花施作坪數', 0, '坪', 1200, 0, '主項'],
@@ -3314,7 +3398,7 @@ function JobSites({ companyId, company }) {
       quantity,
       unit,
       unitPrice,
-      costAmount,
+      unitCost: costAmount,
       note: '',
       sortOrder: index + 1
     }));
@@ -3383,7 +3467,7 @@ function JobSites({ companyId, company }) {
     quantity: '',
     unit: '式',
     unitPrice: '',
-    costAmount: '',
+    unitCost: '',
     note: ''
   });
 
@@ -3405,7 +3489,8 @@ function JobSites({ companyId, company }) {
     status: '已簽約'
   });
 
-  const [estimateItems, setEstimateItems] = useState(() => createEstimateItemsForType('冷氣工程'));
+  const [estimateDraft, setEstimateDraft] = useState(() => emptyEstimateDraft());
+  const [estimateItems, setEstimateItems] = useState([]);
 
   async function jobSiteRequest(path, options = {}) {
     return api(path, options);
@@ -3439,8 +3524,6 @@ function JobSites({ companyId, company }) {
 
   function update(key, value) {
     if (key === 'projectType') {
-      setEstimateItems(createEstimateItemsForType(value));
-
       setForm((old) => ({
         ...old,
         projectType: value,
@@ -3468,7 +3551,8 @@ function JobSites({ companyId, company }) {
   }
 
   function numberValue(value) {
-    return Number(value || 0);
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? n : 0;
   }
 
   function updateEstimateItem(uid, key, value) {
@@ -3477,21 +3561,35 @@ function JobSites({ companyId, company }) {
     );
   }
 
+  function updateEstimateDraft(key, value) {
+    setEstimateDraft((old) => ({
+      ...old,
+      [key]: value
+    }));
+  }
+
   function addEstimateItem() {
+    if (!String(estimateDraft.itemName || '').trim()) {
+      setError('請先輸入估價項目名稱，再加入明細列表。');
+      return;
+    }
+
     setEstimateItems((old) => [
       ...old,
       {
         uid: `${Date.now()}_custom_${old.length + 1}`,
-        itemCategory: '加項',
-        itemName: '',
-        quantity: 0,
-        unit: '式',
-        unitPrice: 0,
-        costAmount: 0,
-        note: '',
+        itemCategory: estimateDraft.itemCategory || '加項',
+        itemName: estimateDraft.itemName || '',
+        quantity: estimateDraft.quantity,
+        unit: estimateDraft.unit || '',
+        unitPrice: estimateDraft.unitPrice,
+        unitCost: estimateDraft.unitCost,
+        note: estimateDraft.note || '',
         sortOrder: old.length + 1
       }
     ]);
+    setEstimateDraft(emptyEstimateDraft());
+    setError('');
   }
 
   function removeEstimateItem(uid) {
@@ -3500,16 +3598,17 @@ function JobSites({ companyId, company }) {
 
   function resetEstimateTemplate(type = form.projectType) {
     setEstimateItems(createEstimateItemsForType(type));
+    setEstimateDraft(emptyEstimateDraft());
   }
 
   function getEstimateSummary() {
     const estimateTotal = estimateItems.reduce(
-      (sum, item) => sum + numberValue(item.quantity) * numberValue(item.unitPrice),
+      (sum, item) => sum + estimateQuoteSubtotal(item),
       0
     );
 
     const estimateCostTotal = estimateItems.reduce(
-      (sum, item) => sum + numberValue(item.costAmount),
+      (sum, item) => sum + estimateCostSubtotal(item),
       0
     );
 
@@ -3565,16 +3664,18 @@ function JobSites({ companyId, company }) {
       .map((item, index) => ({
         ...item,
         sortOrder: index + 1,
-        quantity: numberValue(item.quantity),
-        unitPrice: numberValue(item.unitPrice),
-        costAmount: numberValue(item.costAmount),
-        amount: numberValue(item.quantity) * numberValue(item.unitPrice)
+        quantity: estimateQuantity(item),
+        unitPrice: estimateUnitPrice(item),
+        unitCost: estimateUnitCost(item),
+        costAmount: estimateCostSubtotal(item),
+        amount: estimateQuoteSubtotal(item)
       }))
       .filter((item) =>
         String(item.itemName || '').trim() &&
         (
           item.quantity > 0 ||
           item.unitPrice > 0 ||
+          item.unitCost > 0 ||
           item.costAmount > 0 ||
           item.amount > 0
         )
@@ -3925,7 +4026,8 @@ function JobSites({ companyId, company }) {
         taxRate: 0.05,
         status: '已報價'
       });
-      setEstimateItems(createEstimateItemsForType('油漆工程'));
+      setEstimateItems([]);
+      setEstimateDraft(emptyEstimateDraft());
     } catch (err) {
       console.error(err);
       setError(err.message || '儲存案場失敗，請稍後再試。');
@@ -3954,6 +4056,8 @@ function JobSites({ companyId, company }) {
       status: site.status || '已報價',
       note: site.note || ''
     });
+    setEstimateItems([]);
+    setEstimateDraft(emptyEstimateDraft());
 
     window.scrollTo({
       top: 0,
@@ -3965,6 +4069,8 @@ function JobSites({ companyId, company }) {
     setEditingId(null);
     setError('');
     setForm(emptyForm);
+    setEstimateItems([]);
+    setEstimateDraft(emptyEstimateDraft());
   }
 
   async function removeSite(siteId) {
@@ -4049,7 +4155,7 @@ function JobSites({ companyId, company }) {
       quantity: '',
       unit: '式',
       unitPrice: '',
-      costAmount: '',
+      unitCost: '',
       note: ''
     });
   }
@@ -4062,7 +4168,7 @@ function JobSites({ companyId, company }) {
       quantity: item.quantity ?? '',
       unit: item.unit || '式',
       unitPrice: item.unitPrice ?? '',
-      costAmount: item.costAmount ?? '',
+      unitCost: estimateUnitCost(item) || '',
       note: item.note || ''
     });
 
@@ -4098,7 +4204,7 @@ function JobSites({ companyId, company }) {
         quantity: numberValue(estimateItemForm.quantity),
         unit: estimateItemForm.unit || '',
         unitPrice: numberValue(estimateItemForm.unitPrice),
-        costAmount: numberValue(estimateItemForm.costAmount),
+        costAmount: numberValue(estimateItemForm.quantity) * numberValue(estimateItemForm.unitCost),
         note: estimateItemForm.note || '',
         sortOrder: editingEstimateItemId
           ? estimateItemsView.findIndex((item) => item.id === editingEstimateItemId) + 1
@@ -4675,7 +4781,7 @@ function JobSites({ companyId, company }) {
 客戶應付總額：${money(totalAmount)}
 
 【成本摘要】
-估價明細內部成本：${money(estimateCostTotal)}
+估價明細成本合計：${money(estimateCostTotal)}
 額外材料費：${money(materialCost)}
 工資：${money(laborCost)}
 外包費：${money(outsourcedCost)}
@@ -4729,7 +4835,7 @@ function JobSites({ companyId, company }) {
 毛利率：${marginRate}%
 
 【成本明細】
-估價明細內部成本：${money(estimateCostTotal)}
+估價明細成本合計：${money(estimateCostTotal)}
 額外材料費：${money(materialCost)}
 工資：${money(laborCost)}
 外包費：${money(outsourcedCost)}
@@ -5022,9 +5128,67 @@ function JobSites({ companyId, company }) {
                 </label>
               </div>
 
-              <div style={{ display: 'grid', gap: 12 }}>
-                {estimateItems.map((item) => {
-                  const amount = numberValue(item.quantity) * numberValue(item.unitPrice);
+              <div className="panel" style={{ marginTop: 12, padding: 14, border: '1px solid #e5e7eb' }}>
+                <h3>新增估價項目</h3>
+
+                <div className="grid">
+                  <label>
+                    <span>類型</span>
+                    <select value={estimateDraft.itemCategory || '加項'} onChange={(e) => updateEstimateDraft('itemCategory', e.target.value)}>
+                      <option value="主項">主項</option>
+                      <option value="加項">加項</option>
+                      <option value="材料">材料</option>
+                      <option value="工資">工資</option>
+                      <option value="外包">外包</option>
+                    </select>
+                  </label>
+
+                  <label>
+                    <span>項目名稱 / 品項</span>
+                    <input value={estimateDraft.itemName} placeholder="例：銅管追加、洗洞費、配電箱" onChange={(e) => updateEstimateDraft('itemName', e.target.value)} />
+                  </label>
+
+                  <label>
+                    <span>數量</span>
+                    <input type="number" min="0" step="0.01" value={estimateDraft.quantity} placeholder="例：8" onChange={(e) => updateEstimateDraft('quantity', e.target.value)} />
+                  </label>
+
+                  <label>
+                    <span>單位</span>
+                    <EstimateUnitInput value={estimateDraft.unit} onChange={(value) => updateEstimateDraft('unit', value)} />
+                  </label>
+
+                  <label>
+                    <span>報價單價</span>
+                    <input type="number" min="0" step="1" value={estimateDraft.unitPrice} placeholder="例：700" onChange={(e) => updateEstimateDraft('unitPrice', e.target.value)} />
+                  </label>
+
+                  <label>
+                    <span>單價成本</span>
+                    <input type="number" min="0" step="1" value={estimateDraft.unitCost} placeholder="例：350" onChange={(e) => updateEstimateDraft('unitCost', e.target.value)} />
+                  </label>
+
+                  <label style={{ gridColumn: '1 / -1' }}>
+                    <span>說明 / 備註</span>
+                    <input value={estimateDraft.note || ''} placeholder="例：超出標準安裝、特殊施工、高樓危險施工" onChange={(e) => updateEstimateDraft('note', e.target.value)} />
+                  </label>
+                </div>
+
+                <div className="row-actions" style={{ marginTop: 12 }}>
+                  <button type="button" onClick={addEstimateItem}>加入明細</button>
+                  <button type="button" onClick={() => setEstimateDraft(emptyEstimateDraft())}>清空輸入</button>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 12, marginTop: 12 }}>
+                <h3>已加入明細列表</h3>
+
+                {estimateItems.length === 0 ? (
+                  <div className="notice">尚未加入估價明細。請先在上方輸入一筆項目，再按「加入明細」。</div>
+                ) : estimateItems.map((item) => {
+                  const quoteSubtotal = estimateQuoteSubtotal(item);
+                  const costSubtotal = estimateCostSubtotal(item);
+                  const profit = quoteSubtotal - costSubtotal;
 
                   return (
                     <div
@@ -5036,14 +5200,7 @@ function JobSites({ companyId, company }) {
                         border: '1px solid #e5e7eb'
                       }}
                     >
-                      <div
-                        style={{
-                          display: 'grid',
-                          gridTemplateColumns: '140px 1fr 150px',
-                          gap: 10,
-                          alignItems: 'end'
-                        }}
-                      >
+                      <div className="grid">
                         <label>
                           <span>類型</span>
                           <select value={item.itemCategory || '加項'} onChange={(e) => updateEstimateItem(item.uid, 'itemCategory', e.target.value)}>
@@ -5056,36 +5213,35 @@ function JobSites({ companyId, company }) {
                         </label>
 
                         <label>
-                          <span>項目名稱</span>
-                          <input value={item.itemName} placeholder="例：銅管追加、洗洞費、配電箱、系統櫃台尺" onChange={(e) => updateEstimateItem(item.uid, 'itemName', e.target.value)} />
+                          <span>項目名稱 / 品項</span>
+                          <input value={item.itemName} onChange={(e) => updateEstimateItem(item.uid, 'itemName', e.target.value)} />
                         </label>
 
-                        <div>
-                          <div className="muted">小計</div>
-                          <strong>{money(amount)}</strong>
-                        </div>
-                      </div>
-
-                      <div className="grid" style={{ marginTop: 10 }}>
                         <label>
                           <span>數量</span>
-                          <input type="number" value={item.quantity} onChange={(e) => updateEstimateItem(item.uid, 'quantity', e.target.value)} />
+                          <input type="number" min="0" step="0.01" value={item.quantity} onChange={(e) => updateEstimateItem(item.uid, 'quantity', e.target.value)} />
                         </label>
 
                         <label>
                           <span>單位</span>
-                          <input value={item.unit} placeholder="例：米、孔、台、式" onChange={(e) => updateEstimateItem(item.uid, 'unit', e.target.value)} />
+                          <EstimateUnitInput value={item.unit} onChange={(value) => updateEstimateItem(item.uid, 'unit', value)} />
                         </label>
 
                         <label>
                           <span>報價單價</span>
-                          <input type="number" value={item.unitPrice} onChange={(e) => updateEstimateItem(item.uid, 'unitPrice', e.target.value)} />
+                          <input type="number" min="0" step="1" value={item.unitPrice} onChange={(e) => updateEstimateItem(item.uid, 'unitPrice', e.target.value)} />
                         </label>
 
                         <label>
-                          <span>內部成本</span>
-                          <input type="number" value={item.costAmount} onChange={(e) => updateEstimateItem(item.uid, 'costAmount', e.target.value)} />
+                          <span>單價成本</span>
+                          <input type="number" min="0" step="1" value={item.unitCost ?? ''} onChange={(e) => updateEstimateItem(item.uid, 'unitCost', e.target.value)} />
                         </label>
+                      </div>
+
+                      <div className="grid" style={{ marginTop: 10 }}>
+                        <Card title="報價小計" value={money(quoteSubtotal)} sub="數量 × 報價單價" />
+                        <Card title="成本小計" value={money(costSubtotal)} sub="數量 × 單價成本" />
+                        <Card title="毛利" value={money(profit)} sub="報價小計 - 成本小計" />
                       </div>
 
                       <div
@@ -5098,8 +5254,8 @@ function JobSites({ companyId, company }) {
                         }}
                       >
                         <label>
-                          <span>備註</span>
-                          <input value={item.note || ''} placeholder="例：超出標準安裝、特殊施工、高樓危險施工" onChange={(e) => updateEstimateItem(item.uid, 'note', e.target.value)} />
+                          <span>說明 / 備註</span>
+                          <input value={item.note || ''} onChange={(e) => updateEstimateItem(item.uid, 'note', e.target.value)} />
                         </label>
 
                         <button type="button" onClick={() => removeEstimateItem(item.uid)}>
@@ -5111,11 +5267,6 @@ function JobSites({ companyId, company }) {
                 })}
               </div>
 
-              <div className="row-actions" style={{ marginTop: 12 }}>
-                <button type="button" onClick={addEstimateItem}>+ 新增估價項目</button>
-                <button type="button" onClick={() => resetEstimateTemplate()}>重新套用{form.projectType}模板</button>
-              </div>
-
               <div className="grid" style={{ marginTop: 12 }}>
                 <Card title="估價明細小計" value={money(summary.estimateTotal)} sub="所有項目小計加總" />
                 <Card title="未稅金額" value={money(summary.subtotalAmount)} sub="毛利計算基礎" />
@@ -5124,7 +5275,7 @@ function JobSites({ companyId, company }) {
               </div>
 
               <div className="grid">
-                <Card title="明細成本" value={money(summary.estimateCostTotal)} sub="估價項目成本合計" />
+                <Card title="成本合計" value={money(summary.estimateCostTotal)} sub="數量 × 單價成本加總" />
                 <Card title="核心成本" value={money(summary.coreCost)} sub="明細成本 + 額外材料 + 工資 + 外包 + 雜支" />
                 <Card title="預估毛利" value={money(summary.profit)} sub="未稅金額 - 核心成本" />
                 <Card title="伙食費" value={money(summary.foodCost)} sub="內部參考，不計入核心毛利" />
@@ -5417,8 +5568,8 @@ function JobSites({ companyId, company }) {
           {estimateError && <div className="notice">⚠️ {estimateError}</div>}
 
           {(() => {
-            const itemTotal = estimateItemsView.reduce((sum, item) => sum + numberValue(item.amount), 0);
-            const costTotal = estimateItemsView.reduce((sum, item) => sum + numberValue(item.costAmount), 0);
+            const itemTotal = estimateItemsView.reduce((sum, item) => sum + estimateQuoteSubtotal(item), 0);
+            const costTotal = estimateItemsView.reduce((sum, item) => sum + estimateCostSubtotal(item), 0);
             const siteCalc = calc(estimateSite);
             const grossProfit = itemTotal - costTotal;
             const grossMargin = itemTotal ? Math.round((grossProfit / itemTotal) * 1000) / 10 : 0;
@@ -5427,7 +5578,7 @@ function JobSites({ companyId, company }) {
               <>
                 <div className="grid">
                   <Card title="明細報價合計" value={money(itemTotal)} sub="估價項目小計加總" />
-                  <Card title="明細內部成本" value={money(costTotal)} sub="估價項目成本合計" />
+                  <Card title="成本合計" value={money(costTotal)} sub="數量 × 單價成本加總" />
                   <Card title="明細毛利" value={money(grossProfit)} sub={`明細毛利率 ${grossMargin}%`} />
                   <Card title="案場未收款" value={money(siteCalc.unpaid)} sub={`收款率 ${siteCalc.collectionRate}%`} />
                 </div>
@@ -5459,7 +5610,7 @@ function JobSites({ companyId, company }) {
 
                     <label>
                       <span>單位</span>
-                      <input value={estimateItemForm.unit} placeholder="例：米、孔、台、式" onChange={(e) => updateEstimateItemForm('unit', e.target.value)} />
+                      <EstimateUnitInput value={estimateItemForm.unit} onChange={(value) => updateEstimateItemForm('unit', value)} />
                     </label>
 
                     <label>
@@ -5468,8 +5619,8 @@ function JobSites({ companyId, company }) {
                     </label>
 
                     <label>
-                      <span>內部成本</span>
-                      <input type="number" value={estimateItemForm.costAmount} placeholder="例：3200" onChange={(e) => updateEstimateItemForm('costAmount', e.target.value)} />
+                      <span>單價成本</span>
+                      <input type="number" min="0" step="1" value={estimateItemForm.unitCost} placeholder="例：350" onChange={(e) => updateEstimateItemForm('unitCost', e.target.value)} />
                     </label>
 
                     <label style={{ gridColumn: '1 / -1' }}>
@@ -5489,7 +5640,7 @@ function JobSites({ companyId, company }) {
                   </Form>
 
                   <div className="notice" style={{ marginTop: 10 }}>
-                    小計會由「數量 × 報價單價」自動計算；內部成本用於毛利判斷，不會直接顯示給客戶。
+                    報價小計會由「數量 × 報價單價」自動計算；成本小計會由「數量 × 單價成本」自動計算。
                   </div>
                 </div>
 
@@ -5501,59 +5652,71 @@ function JobSites({ companyId, company }) {
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gap: 10 }}>
-                    {estimateItemsView.map((item) => (
-                      <div
-                        key={item.id}
-                        className="panel"
-                        style={{
-                          marginTop: 0,
-                          padding: 14,
-                          border: '1px solid #e5e7eb'
-                        }}
-                      >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                          <div>
-                            <strong>{item.itemName || '-'}</strong>
-                            <div className="muted">{item.itemCategory || '估價項目'}</div>
-                          </div>
-                          <div style={{ textAlign: 'right' }}>
-                            <strong>{money(item.amount)}</strong>
-                            <div className="row-actions" style={{ marginTop: 6, justifyContent: 'flex-end' }}>
-                              <button type="button" onClick={() => startEditEstimateItem(item)}>編輯</button>
-                              <button
-                                type="button"
-                                style={{
-                                  background: '#fee2e2',
-                                  color: '#991b1b',
-                                  border: '1px solid #fecaca'
-                                }}
-                                onClick={(e) => {
-                                  e.preventDefault();
-                                  e.stopPropagation();
-                                  console.log('[BookAI] delete estimate item clicked', item);
-                                  deleteEstimateItem(item.id);
-                                }}
-                              >
-                                刪除
-                              </button>
+                    {estimateItemsView.map((item) => {
+                      const quoteSubtotal = estimateQuoteSubtotal(item);
+                      const costSubtotal = estimateCostSubtotal(item);
+                      const unitCost = estimateUnitCost(item);
+                      const profit = quoteSubtotal - costSubtotal;
+
+                      return (
+                        <div
+                          key={item.id}
+                          className="panel"
+                          style={{
+                            marginTop: 0,
+                            padding: 14,
+                            border: '1px solid #e5e7eb'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                            <div>
+                              <strong>{item.itemName || '-'}</strong>
+                              <div className="muted">{item.itemCategory || '估價項目'}</div>
+                            </div>
+                            <div style={{ textAlign: 'right' }}>
+                              <strong>{money(quoteSubtotal)}</strong>
+                              <div className="row-actions" style={{ marginTop: 6, justifyContent: 'flex-end' }}>
+                                <button type="button" onClick={() => startEditEstimateItem(item)}>編輯</button>
+                                <button
+                                  type="button"
+                                  style={{
+                                    background: '#fee2e2',
+                                    color: '#991b1b',
+                                    border: '1px solid #fecaca'
+                                  }}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    console.log('[BookAI] delete estimate item clicked', item);
+                                    deleteEstimateItem(item.id);
+                                  }}
+                                >
+                                  刪除
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="grid" style={{ marginTop: 10 }}>
-                          <Card title="數量" value={`${item.quantity || 0} ${item.unit || ''}`} />
-                          <Card title="報價單價" value={money(item.unitPrice)} />
-                          <Card title="內部成本" value={money(item.costAmount)} />
-                          <Card title="小計" value={money(item.amount)} />
-                        </div>
-
-                        {item.note && (
-                          <div className="notice" style={{ marginTop: 10 }}>
-                            備註：{item.note}
+                          <div className="grid" style={{ marginTop: 10 }}>
+                            <Card title="數量" value={`${item.quantity || 0} ${item.unit || ''}`} />
+                            <Card title="報價單價" value={money(item.unitPrice)} />
+                            <Card title="單價成本" value={money(unitCost)} />
+                            <Card title="報價小計" value={money(quoteSubtotal)} />
                           </div>
-                        )}
-                      </div>
-                    ))}
+
+                          <div className="grid" style={{ marginTop: 10 }}>
+                            <Card title="成本小計" value={money(costSubtotal)} sub="數量 × 單價成本" />
+                            <Card title="毛利" value={money(profit)} sub="報價小計 - 成本小計" />
+                          </div>
+
+                          {item.note && (
+                            <div className="notice" style={{ marginTop: 10 }}>
+                              備註：{item.note}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>

@@ -3848,6 +3848,33 @@ tr:hover td {
   background: #f8fafc;
 }
 
+.website-next-steps {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 16px;
+  background: #fff7ed;
+}
+
+.website-next-steps h3 {
+  margin: 0;
+  color: #9a3412;
+  font-size: 15px;
+}
+
+.website-next-steps div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.website-next-steps button {
+  border-color: #fed7aa;
+  background: #ffffff;
+  color: #9a3412;
+}
+
 .website-form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -3878,11 +3905,53 @@ tr:hover td {
   color: var(--text);
 }
 
+.website-field small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
 .website-field textarea {
   min-height: 104px;
   padding: 12px 14px;
   resize: vertical;
   font: inherit;
+}
+
+.website-image-field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.website-image-tools select {
+  margin: 0;
+  min-height: 38px;
+  font-size: 13px;
+}
+
+.website-image-preview,
+.website-image-empty {
+  width: 132px;
+  height: 82px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.website-image-preview {
+  object-fit: cover;
+  display: block;
+}
+
+.website-image-empty {
+  display: grid;
+  place-items: center;
+  padding: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
 }
 
 .website-switch {
@@ -3955,6 +4024,91 @@ tr:hover td {
   font-weight: 900;
 }
 
+.website-chip-published {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.website-chip-draft {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+  color: #4b5563;
+}
+
+.website-chip-hidden {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.website-chip-active {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.website-chip-inactive {
+  border-color: #e5e7eb;
+  background: #f9fafb;
+  color: #4b5563;
+}
+
+.website-link-btn,
+.website-panel-head button {
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.website-link-btn:hover,
+.website-panel-head button:hover {
+  background: #f0f4f8;
+}
+
+.website-link-btn:disabled,
+.website-panel-head button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.website-overview-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.website-form-section {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.website-form-section h3 {
+  margin: 0 0 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.website-form-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .website-success,
 .website-error,
 .website-empty {
@@ -4006,6 +4160,15 @@ tr:hover td {
   border-bottom: 1px solid #e6edf5;
   background: rgba(255, 255, 255, 0.92);
   backdrop-filter: blur(18px);
+}
+
+.public-site-preview-banner {
+  padding: 10px clamp(20px, 6vw, 72px);
+  border-bottom: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .public-site-brand,
@@ -4279,12 +4442,23 @@ tr:hover td {
 }
 
 .public-site-empty {
+  display: grid;
+  gap: 8px;
   padding: 30px;
   border: 1px dashed #cbd5e1;
   border-radius: 18px;
   background: #ffffff;
   color: #64748b;
   text-align: center;
+}
+
+.public-site-empty strong {
+  color: #334155;
+  font-size: 18px;
+}
+
+.public-site-empty span {
+  font-size: 14px;
 }
 
 .public-site-detail {
@@ -4486,9 +4660,23 @@ tr:hover td {
     margin-top: 12px;
   }
 
+  .website-overview-actions {
+    display: grid;
+  }
+
   .website-metric-grid,
   .website-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .website-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+
+  .website-tabs button {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
 
   .public-site-header,
@@ -4503,6 +4691,19 @@ tr:hover td {
     flex-wrap: wrap;
   }
 
+  .public-site-header {
+    position: relative;
+  }
+
+  .public-site-nav {
+    width: 100%;
+    gap: 10px;
+  }
+
+  .public-site-nav a {
+    padding: 6px 0;
+  }
+
   .public-site-hero,
   .public-site-detail,
   .public-site-contact {
@@ -4511,6 +4712,10 @@ tr:hover td {
 
   .public-site-hero {
     min-height: auto;
+  }
+
+  .public-site-hero h1 {
+    font-size: 38px;
   }
 
   .public-site-card-grid,

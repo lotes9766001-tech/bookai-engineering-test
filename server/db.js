@@ -83,6 +83,7 @@ export function initDb() {
     status TEXT NOT NULL DEFAULT 'mock',
     last_sync_at TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(company_id, platform_key)
   );
 
@@ -132,7 +133,8 @@ export function initDb() {
     cost REAL NOT NULL DEFAULT 0,
     stock INTEGER NOT NULL DEFAULT 0,
     safety_stock INTEGER NOT NULL DEFAULT 5,
-    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS inventory_movements (
@@ -697,6 +699,7 @@ export function initDb() {
     module TEXT,
     created_by INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id)
   );
 
@@ -714,6 +717,7 @@ export function initDb() {
     contact_person TEXT,
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id)
   );
 
@@ -731,6 +735,7 @@ export function initDb() {
     contact_person TEXT,
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id)
   );
 
@@ -753,6 +758,7 @@ export function initDb() {
     status TEXT DEFAULT 'confirmed',
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id),
     FOREIGN KEY(supplier_id) REFERENCES suppliers(id)
   );
@@ -796,6 +802,7 @@ export function initDb() {
     status TEXT DEFAULT 'confirmed',
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id),
     FOREIGN KEY(customer_id) REFERENCES customers(id)
   );
@@ -954,6 +961,8 @@ export function initDb() {
   safeAddColumn('companies', 'product_line', "TEXT DEFAULT 'general'");
   safeAddColumn('companies', 'industry_type', 'TEXT');
   safeAddColumn('companies', 'beta_approved_at', 'TEXT');
+  safeAddColumn('companies', 'updated_at', 'TEXT');
+  safeAddColumn('company_users', 'updated_at', 'TEXT');
   safeAddColumn('users', 'last_login_at', 'TEXT');
   safeAddColumn('users', 'created_source', 'TEXT');
   safeAddColumn('users', 'created_utm_source', 'TEXT');
@@ -977,6 +986,7 @@ export function initDb() {
   safeAddColumn('users', 'tax_id', 'TEXT');
   safeAddColumn('users', 'use_case', 'TEXT');
   safeAddColumn('users', 'test_edition', "TEXT DEFAULT 'commerce'");
+  safeAddColumn('users', 'updated_at', 'TEXT');
 
   const defaultSettings = {
     official_site_url: 'https://bookai-engineering-official.onrender.com',
@@ -1004,8 +1014,15 @@ export function initDb() {
   safeAddColumn('products', 'supplier', 'TEXT');
   safeAddColumn('products', 'storage_location', 'TEXT');
   safeAddColumn('products', 'note', 'TEXT');
+  safeAddColumn('products', 'updated_at', 'TEXT');
   safeAddColumn('purchases', 'status', "TEXT DEFAULT 'confirmed'");
+  safeAddColumn('purchases', 'updated_at', 'TEXT');
   safeAddColumn('sales', 'status', "TEXT DEFAULT 'confirmed'");
+  safeAddColumn('sales', 'updated_at', 'TEXT');
+  safeAddColumn('suppliers', 'updated_at', 'TEXT');
+  safeAddColumn('customers', 'updated_at', 'TEXT');
+  safeAddColumn('platform_accounts', 'updated_at', 'TEXT');
+  safeAddColumn('website_assets', 'updated_at', 'TEXT');
 
   safeAddColumn('job_sites', 'site_name', 'TEXT');
   safeAddColumn('job_sites', 'project_type', 'TEXT');

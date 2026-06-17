@@ -651,9 +651,11 @@ export async function initPostgresDb() {
       file_size INTEGER DEFAULT 0,
       module TEXT,
       created_by INTEGER,
-      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
 
+    ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'pending_review';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'pending_review';
     ALTER TABLE users ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending_review';
@@ -674,6 +676,7 @@ export async function initPostgresDb() {
     ALTER TABLE users ADD COLUMN IF NOT EXISTS use_case TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS test_edition TEXT DEFAULT 'commerce';
 
+    ALTER TABLE companies ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS review_status TEXT DEFAULT 'pending_review';
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS approval_status TEXT DEFAULT 'pending_review';
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS is_active INTEGER DEFAULT 0;
@@ -696,6 +699,8 @@ export async function initPostgresDb() {
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS product_line TEXT DEFAULT 'general';
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS industry_type TEXT;
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS beta_approved_at TEXT;
+    ALTER TABLE company_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE website_assets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
 
     CREATE INDEX IF NOT EXISTS idx_companies_owner_id ON companies(owner_id);
     CREATE INDEX IF NOT EXISTS idx_company_users_user_id ON company_users(user_id);

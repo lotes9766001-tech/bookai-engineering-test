@@ -49,3 +49,20 @@ export async function updateWebsiteInquiryStatus(id, status) {
     body: JSON.stringify({ status })
   }));
 }
+
+export async function listWebsiteAssets() {
+  return unwrap(await api('/website/assets'));
+}
+
+export async function createWebsiteAsset(payload) {
+  return unwrap(await api('/website/assets', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }));
+}
+
+export async function deleteWebsiteAsset(id) {
+  return unwrap(await api(`/website/assets/${id}`, {
+    method: 'DELETE'
+  }));
+}
