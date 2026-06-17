@@ -83,7 +83,13 @@ async function getPreviewData() {
 }
 
 function PublicImage({ src, alt, className = '' }) {
-  if (!src) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src || failed) {
     return (
       <div className={`public-site-image-placeholder ${className}`} aria-hidden="true">
         <span>{alt?.slice(0, 1) || 'B'}</span>
@@ -91,7 +97,7 @@ function PublicImage({ src, alt, className = '' }) {
     );
   }
 
-  return <img className={className} src={src} alt={alt || ''} loading="lazy" />;
+  return <img className={className} src={src} alt={alt || ''} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function PublicSiteShell({ slug, site, preview, children }) {

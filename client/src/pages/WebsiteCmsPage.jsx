@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   createWebsiteResource,
+  createWebsiteAsset,
+  deleteWebsiteAsset,
   deleteWebsiteResource,
   getWebsiteSettings,
+  listWebsiteAssets,
   listWebsiteInquiries,
   listWebsiteResource,
   saveWebsiteSettings,
@@ -18,7 +21,8 @@ const tabs = [
   ['products', '商品展示'],
   ['posts', '文章 / 最新消息'],
   ['faqs', 'FAQ'],
-  ['inquiries', '聯絡詢問']
+  ['inquiries', '聯絡詢問'],
+  ['assets', '素材管理']
 ];
 
 const resourceLabels = {
@@ -32,6 +36,7 @@ const resourceLabels = {
 const statusOptions = ['draft', 'published', 'hidden'];
 const sectionTypes = ['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom'];
 const inquiryStatuses = ['new', 'read', 'replied', 'archived'];
+const assetModules = ['logo', 'favicon', 'banner', 'home_section', 'product', 'post', 'general'];
 
 function emptyForm(resource) {
   const base = { sortOrder: 0, isActive: true };
@@ -107,10 +112,50 @@ function SwitchField({ label, checked, onChange }) {
   );
 }
 
+function ImagePreview({ src }) {
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
+
+  if (!src) return <div className="website-image-empty">尚未輸入圖片 URL</div>;
+  if (failed) return <div className="website-image-empty">圖片無法預覽</div>;
+  return <img className="website-image-preview" src={src} alt="" onError={() => setFailed(true)} />;
+}
+
+function ImageUrlField({ label, value, onChange, assets = [], module = 'general' }) {
+  const filteredAssets = assets.filter((asset) => !module || asset.module === module || asset.module === 'general');
+
+  return (
+    <div className="website-image-field">
+      <label className="website-field">
+        <span>{label}</span>
+        <input value={value || ''} placeholder="https://example.com/image.jpg" onChange={(e) => onChange(e.target.value)} />
+      </label>
+      <div className="website-image-tools">
+        <select
+          value=""
+          disabled={!filteredAssets.length}
+          onChange={(e) => {
+            if (e.target.value) onChange(e.target.value);
+          }}
+        >
+          <option value="">{filteredAssets.length ? '選擇素材' : '目前無可用素材'}</option>
+          {filteredAssets.map((asset) => (
+            <option key={asset.id} value={asset.fileUrl}>{asset.fileName || asset.fileUrl}</option>
+          ))}
+        </select>
+      </div>
+      <ImagePreview src={value} />
+    </div>
+  );
+}
+
 export default function WebsiteCmsPage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [settings, setSettings] = useState(null);
-  const [resources, setResources] = useState({ banners: [], 'home-sections': [], products: [], posts: [], faqs: [], inquiries: [] });
+  const [resources, setResources] = useState({ banners: [], 'home-sections': [], products: [], posts: [], faqs: [], inquiries: [], assets: [] });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -120,14 +165,15 @@ export default function WebsiteCmsPage() {
     setLoading(true);
     setError('');
     try {
-      const [nextSettings, banners, sections, products, posts, faqs, inquiries] = await Promise.all([
+      const [nextSettings, banners, sections, products, posts, faqs, inquiries, assets] = await Promise.all([
         getWebsiteSettings(),
         listWebsiteResource('banners'),
         listWebsiteResource('home-sections'),
         listWebsiteResource('products'),
         listWebsiteResource('posts'),
         listWebsiteResource('faqs'),
-        listWebsiteInquiries()
+        listWebsiteInquiries(),
+        listWebsiteAssets()
       ]);
       setSettings(nextSettings);
       setResources({
@@ -136,7 +182,8 @@ export default function WebsiteCmsPage() {
         products: Array.isArray(products) ? products : [],
         posts: Array.isArray(posts) ? posts : [],
         faqs: Array.isArray(faqs) ? faqs : [],
-        inquiries: Array.isArray(inquiries) ? inquiries : []
+        inquiries: Array.isArray(inquiries) ? inquiries : [],
+        assets: Array.isArray(assets) ? assets : []
       });
     } catch (err) {
       setError(err.message || '品牌官網資料載入失敗');
@@ -209,11 +256,12 @@ export default function WebsiteCmsPage() {
       ) : (
         <>
           {activeTab === 'overview' && <WebsiteOverview settings={settings} overview={overview} onNavigate={setActiveTab} />}
-          {activeTab === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} saving={saving} onSave={() => run(() => saveWebsiteSettings(settings), '網站設定已儲存')} />}
+          {activeTab === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} assets={resources.assets} saving={saving} onSave={() => run(() => saveWebsiteSettings(settings), '網站設定已儲存')} />}
           {['banners', 'home-sections', 'products', 'posts', 'faqs'].includes(activeTab) && (
             <ResourcePanel
               resource={activeTab}
               items={resources[activeTab] || []}
+              assets={resources.assets}
               saving={saving}
               onCreate={(payload) => run(() => createWebsiteResource(activeTab, payload), `${resourceLabels[activeTab]}已新增`)}
               onUpdate={(id, payload) => run(() => updateWebsiteResource(activeTab, id, payload), `${resourceLabels[activeTab]}已更新`)}
@@ -221,6 +269,14 @@ export default function WebsiteCmsPage() {
             />
           )}
           {activeTab === 'inquiries' && <InquiriesPanel items={resources.inquiries} saving={saving} onStatus={(id, status) => run(() => updateWebsiteInquiryStatus(id, status), '詢問狀態已更新')} />}
+          {activeTab === 'assets' && (
+            <AssetsPanel
+              items={resources.assets}
+              saving={saving}
+              onCreate={(payload) => run(() => createWebsiteAsset(payload), '素材已新增')}
+              onDelete={(id) => run(() => deleteWebsiteAsset(id), '素材已刪除')}
+            />
+          )}
         </>
       )}
     </div>
@@ -273,7 +329,7 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
   );
 }
 
-function SettingsPanel({ settings, setSettings, saving, onSave }) {
+function SettingsPanel({ settings, setSettings, assets, saving, onSave }) {
   const update = (key, value) => setSettings({ ...(settings || {}), [key]: value });
 
   return (
@@ -289,8 +345,8 @@ function SettingsPanel({ settings, setSettings, saving, onSave }) {
         <TextField label="site_slug" value={settings?.siteSlug} onChange={(v) => update('siteSlug', v)} />
         <TextField label="網站名稱" value={settings?.siteName} onChange={(v) => update('siteName', v)} />
         <TextField label="品牌名稱" value={settings?.brandName} onChange={(v) => update('brandName', v)} />
-        <TextField label="Logo URL" value={settings?.logoUrl} onChange={(v) => update('logoUrl', v)} />
-        <TextField label="Favicon URL" value={settings?.faviconUrl} onChange={(v) => update('faviconUrl', v)} />
+        <ImageUrlField label="Logo URL" value={settings?.logoUrl} onChange={(v) => update('logoUrl', v)} assets={assets} module="logo" />
+        <ImageUrlField label="Favicon URL" value={settings?.faviconUrl} onChange={(v) => update('faviconUrl', v)} assets={assets} module="favicon" />
         <TextField label="主色" type="color" value={settings?.primaryColor || '#2563eb'} onChange={(v) => update('primaryColor', v)} />
         <TextField label="輔色" type="color" value={settings?.secondaryColor || '#0f172a'} onChange={(v) => update('secondaryColor', v)} />
         <TextField label="聯絡 Email" value={settings?.contactEmail} onChange={(v) => update('contactEmail', v)} />
@@ -311,7 +367,7 @@ function SettingsPanel({ settings, setSettings, saving, onSave }) {
   );
 }
 
-function ResourcePanel({ resource, items, saving, onCreate, onUpdate, onDelete }) {
+function ResourcePanel({ resource, items, assets, saving, onCreate, onUpdate, onDelete }) {
   const [form, setForm] = useState(emptyForm(resource));
   const [editingId, setEditingId] = useState(null);
   const label = resourceLabels[resource];
@@ -348,7 +404,7 @@ function ResourcePanel({ resource, items, saving, onCreate, onUpdate, onDelete }
         </div>
       </div>
       <form className="website-editor" onSubmit={submit}>
-        <ResourceFields resource={resource} form={form} setForm={setForm} />
+        <ResourceFields resource={resource} form={form} setForm={setForm} assets={assets} />
         <div className="website-editor-actions">
           <button type="submit" disabled={saving}>{editingId ? '儲存修改' : `新增${label}`}</button>
           {editingId && <button type="button" className="website-secondary-btn" onClick={() => { setEditingId(null); setForm(emptyForm(resource)); }}>取消編輯</button>}
@@ -359,14 +415,14 @@ function ResourcePanel({ resource, items, saving, onCreate, onUpdate, onDelete }
   );
 }
 
-function ResourceFields({ resource, form, setForm }) {
+function ResourceFields({ resource, form, setForm, assets }) {
   const update = (key, value) => setForm({ ...form, [key]: value });
   if (resource === 'banners') {
     return (
       <div className="website-form-grid">
         <TextField label="標題" value={form.title} onChange={(v) => update('title', v)} />
         <TextField label="副標" value={form.subtitle} onChange={(v) => update('subtitle', v)} />
-        <TextField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} />
+        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} assets={assets} module="banner" />
         <TextField label="按鈕文字" value={form.buttonText} onChange={(v) => update('buttonText', v)} />
         <TextField label="按鈕連結" value={form.buttonUrl} onChange={(v) => update('buttonUrl', v)} />
         <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
@@ -381,7 +437,7 @@ function ResourceFields({ resource, form, setForm }) {
         <TextField label="標題" value={form.title} onChange={(v) => update('title', v)} />
         <TextField label="副標" value={form.subtitle} onChange={(v) => update('subtitle', v)} />
         <TextField label="內容" value={form.content} onChange={(v) => update('content', v)} textarea />
-        <TextField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} />
+        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} assets={assets} module="home_section" />
         <TextField label="按鈕文字" value={form.buttonText} onChange={(v) => update('buttonText', v)} />
         <TextField label="按鈕連結" value={form.buttonUrl} onChange={(v) => update('buttonUrl', v)} />
         <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
@@ -398,7 +454,7 @@ function ResourceFields({ resource, form, setForm }) {
         <TextField label="完整描述" value={form.description} onChange={(v) => update('description', v)} textarea />
         <TextField label="價格" type="number" value={form.price} onChange={(v) => update('price', v)} />
         <TextField label="比較價" type="number" value={form.compareAtPrice} onChange={(v) => update('compareAtPrice', v)} />
-        <TextField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} />
+        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} assets={assets} module="product" />
         <TextField label="分類" value={form.category} onChange={(v) => update('category', v)} />
         <SelectField label="狀態" value={form.status} onChange={(v) => update('status', v)} options={statusOptions} />
         <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
@@ -413,7 +469,7 @@ function ResourceFields({ resource, form, setForm }) {
         <TextField label="slug" value={form.slug} onChange={(v) => update('slug', v)} />
         <TextField label="摘要" value={form.summary} onChange={(v) => update('summary', v)} />
         <TextField label="內容" value={form.content} onChange={(v) => update('content', v)} textarea />
-        <TextField label="封面圖 URL" value={form.coverImageUrl} onChange={(v) => update('coverImageUrl', v)} />
+        <ImageUrlField label="封面圖 URL" value={form.coverImageUrl} onChange={(v) => update('coverImageUrl', v)} assets={assets} module="post" />
         <TextField label="分類" value={form.category} onChange={(v) => update('category', v)} />
         <SelectField label="狀態" value={form.status} onChange={(v) => update('status', v)} options={statusOptions} />
         <TextField label="發布時間" value={form.publishedAt} onChange={(v) => update('publishedAt', v)} placeholder="2026-06-15T10:00:00Z" />
@@ -470,6 +526,95 @@ function ResourceTable({ resource, items, onEdit, onDelete }) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+function AssetsPanel({ items, saving, onCreate, onDelete }) {
+  const [form, setForm] = useState({ fileUrl: '', fileName: '', fileType: 'image', fileSize: 0, module: 'general' });
+  const [copyMessage, setCopyMessage] = useState('');
+
+  async function submit(e) {
+    e.preventDefault();
+    await onCreate(form);
+    setForm({ fileUrl: '', fileName: '', fileType: 'image', fileSize: 0, module: 'general' });
+  }
+
+  function remove(id) {
+    if (!window.confirm('確定要刪除此素材紀錄？')) return;
+    onDelete(id);
+  }
+
+  async function copyUrl(url) {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopyMessage('圖片 URL 已複製');
+    } catch {
+      window.prompt('請複製圖片 URL', url);
+    }
+  }
+
+  return (
+    <section className="website-panel">
+      <div className="website-panel-head">
+        <div>
+          <h2>素材管理</h2>
+          <p>管理品牌官網可重複套用的圖片 URL 素材。</p>
+        </div>
+      </div>
+      <form className="website-editor" onSubmit={submit}>
+        <div className="website-form-grid">
+          <ImageUrlField label="圖片 URL" value={form.fileUrl} onChange={(v) => setForm({ ...form, fileUrl: v })} assets={[]} />
+          <TextField label="檔名" value={form.fileName} onChange={(v) => setForm({ ...form, fileName: v })} />
+          <TextField label="檔案類型" value={form.fileType} onChange={(v) => setForm({ ...form, fileType: v })} placeholder="image/png" />
+          <TextField label="檔案大小" type="number" value={form.fileSize} onChange={(v) => setForm({ ...form, fileSize: v })} />
+          <SelectField label="用途 module" value={form.module} onChange={(v) => setForm({ ...form, module: v })} options={assetModules} />
+        </div>
+        <div className="website-editor-actions">
+          <button type="submit" disabled={saving}>新增素材</button>
+        </div>
+      </form>
+
+      {copyMessage && <div className="website-success">{copyMessage}</div>}
+
+      {!items.length ? (
+        <div className="website-empty">目前尚無素材</div>
+      ) : (
+        <div className="website-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>預覽</th>
+                <th>素材</th>
+                <th>用途</th>
+                <th>類型 / 大小</th>
+                <th>建立時間</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <tr key={item.id}>
+                  <td><ImagePreview src={item.fileUrl} /></td>
+                  <td>
+                    <strong>{item.fileName || '-'}</strong>
+                    <small>{item.fileUrl}</small>
+                  </td>
+                  <td><span className="website-chip">{item.module || 'general'}</span></td>
+                  <td>{item.fileType || '-'} / {Number(item.fileSize || 0).toLocaleString()} bytes</td>
+                  <td>{formatDate(item.createdAt)}</td>
+                  <td>
+                    <div className="website-row-actions">
+                      <button type="button" onClick={() => copyUrl(item.fileUrl)}>複製 URL</button>
+                      <button type="button" className="website-danger-btn" onClick={() => remove(item.id)}>刪除</button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   );
 }
 
