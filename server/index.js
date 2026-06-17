@@ -5028,6 +5028,7 @@ let lastTenderSyncState = {
   updatedCount: 0,
   errorMessage: ''
 };
+const TENDER_DAILY_SYNC_MS = 24 * 60 * 60 * 1000;
 
 function tenderRow(row = {}) {
   return {
@@ -5242,6 +5243,103 @@ function computeTenderMatch(tender, keywords) {
     score,
     reason: `命中 ${matched.map((row) => row.keyword).slice(0, 4).join('、')}`
   };
+}
+
+function nextTenderSyncTime(value = new Date()) {
+  const base = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(base.getTime())) {
+    return new Date(Date.now() + TENDER_DAILY_SYNC_MS).toISOString();
+  }
+  return new Date(base.getTime() + TENDER_DAILY_SYNC_MS).toISOString();
+}
+
+async function latestTenderSyncRun() {
+  if (PG_ENABLED) {
+    return pgOne('SELECT * FROM tender_sync_runs ORDER BY finished_at DESC NULLS LAST, started_at DESC, id DESC LIMIT 1');
+  }
+  return db.prepare('SELECT * FROM tender_sync_runs ORDER BY COALESCE(finished_at, started_at) DESC, id DESC LIMIT 1').get() || null;
+}
+
+async function shouldRunDailyTenderSync() {
+  const latest = await latestTenderSyncRun();
+  const finishedAt = latest?.finished_at || latest?.finishedAt || latest?.started_at || latest?.startedAt;
+  if (!finishedAt) return true;
+  const time = new Date(finishedAt).getTime();
+  if (Number.isNaN(time)) return true;
+  return Date.now() - time >= TENDER_DAILY_SYNC_MS;
+}
+
+function tenderSyncStateRow(row = null, latestRun = null) {
+  const lastSyncedAt = row?.last_synced_at || latestRun?.finished_at || latestRun?.finishedAt || '';
+  const nextSuggestedSyncAt = row?.next_suggested_sync_at || (lastSyncedAt ? nextTenderSyncTime(lastSyncedAt) : '');
+  const status = row?.status || (lastSyncedAt ? (latestRun?.status || 'success') : 'not_started');
+  const lastTime = lastSyncedAt ? new Date(lastSyncedAt).getTime() : 0;
+  const todayUpdated = lastTime > 0 && new Date(lastTime).toDateString() === new Date().toDateString();
+  const updateRecommended = !lastTime || Date.now() - lastTime >= TENDER_DAILY_SYNC_MS;
+
+  return {
+    status,
+    lastSyncedAt,
+    nextSuggestedSyncAt,
+    todayUpdated,
+    updateRecommended,
+    running: tenderSyncRunning,
+    errorMessage: row?.error_message || latestRun?.error_message || '',
+    latestRun: latestRun || null
+  };
+}
+
+async function getTenderRadarSyncState(companyId) {
+  const [state, latestRun] = PG_ENABLED
+    ? await Promise.all([
+        pgOne('SELECT * FROM tender_radar_sync_states WHERE company_id = $1', [companyId]),
+        latestTenderSyncRun()
+      ])
+    : [
+        db.prepare('SELECT * FROM tender_radar_sync_states WHERE company_id = ?').get(companyId) || null,
+        await latestTenderSyncRun()
+      ];
+
+  return tenderSyncStateRow(state, latestRun);
+}
+
+async function setTenderRadarSyncState(companyId, status, result = {}) {
+  const now = new Date();
+  const success = status === 'success';
+  const lastSyncedAt = success ? now.toISOString() : result.lastSyncedAt || null;
+  const nextSuggestedSyncAt = success ? nextTenderSyncTime(now) : result.nextSuggestedSyncAt || null;
+  const errorMessage = result.errorMessage || result.error || '';
+
+  if (PG_ENABLED) {
+    await pgQuery(`
+      INSERT INTO tender_radar_sync_states (
+        company_id, status, last_synced_at, next_suggested_sync_at, error_message, created_at, updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+      ON CONFLICT (company_id) DO UPDATE SET
+        status = EXCLUDED.status,
+        last_synced_at = COALESCE(EXCLUDED.last_synced_at, tender_radar_sync_states.last_synced_at),
+        next_suggested_sync_at = COALESCE(EXCLUDED.next_suggested_sync_at, tender_radar_sync_states.next_suggested_sync_at),
+        error_message = EXCLUDED.error_message,
+        updated_at = CURRENT_TIMESTAMP
+    `, [companyId, status, lastSyncedAt, nextSuggestedSyncAt, errorMessage]);
+    return getTenderRadarSyncState(companyId);
+  }
+
+  db.prepare(`
+    INSERT INTO tender_radar_sync_states (
+      company_id, status, last_synced_at, next_suggested_sync_at, error_message, created_at, updated_at
+    )
+    VALUES (?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    ON CONFLICT(company_id) DO UPDATE SET
+      status = excluded.status,
+      last_synced_at = COALESCE(excluded.last_synced_at, tender_radar_sync_states.last_synced_at),
+      next_suggested_sync_at = COALESCE(excluded.next_suggested_sync_at, tender_radar_sync_states.next_suggested_sync_at),
+      error_message = excluded.error_message,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(companyId, status, lastSyncedAt, nextSuggestedSyncAt, errorMessage);
+
+  return getTenderRadarSyncState(companyId);
 }
 
 async function runTenderSync({ source = 'all', triggeredBy = 'system' } = {}) {
@@ -6944,7 +7042,7 @@ app.get('/api/companies/:companyId/summary', auth, company, async (req, res) => 
   });
 });
 
-app.get('/api/tenders/stats', auth, company, async (req, res) => {
+app.get('/api/tenders/stats', auth, async (req, res) => {
   try {
     if (PG_ENABLED) {
       const [
@@ -7034,7 +7132,179 @@ app.get('/api/tenders/stats', auth, company, async (req, res) => {
   }
 });
 
-app.get('/api/tenders/sync-runs', auth, company, async (req, res) => {
+function tenderWatchKeywordRow(row = {}) {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    keyword: row.keyword || '',
+    region: row.region || '',
+    category: row.category || '',
+    minBudget: Number(row.min_budget || 0),
+    maxBudget: Number(row.max_budget || 0),
+    isActive: Number(row.is_active ?? 1) === 1,
+    createdAt: row.created_at || '',
+    updatedAt: row.updated_at || ''
+  };
+}
+
+function normalizeTenderWatchKeywordInput(body = {}) {
+  return {
+    keyword: String(body.keyword || '').trim().slice(0, 80),
+    region: String(body.region || '').trim().slice(0, 40),
+    category: String(body.category || '').trim().slice(0, 40),
+    minBudget: Math.max(0, Number(body.minBudget ?? body.min_budget ?? 0) || 0),
+    maxBudget: Math.max(0, Number(body.maxBudget ?? body.max_budget ?? 0) || 0),
+    isActive: body.isActive === false || body.is_active === 0 || body.is_active === false ? 0 : 1
+  };
+}
+
+app.get('/api/companies/:companyId/tender-radar/status', auth, company, async (req, res) => {
+  try {
+    const status = await getTenderRadarSyncState(req.company.id);
+    res.json({ ok: true, ...status });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.post('/api/companies/:companyId/tenders/refresh', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  try {
+    await setTenderRadarSyncState(req.company.id, 'syncing');
+    const result = await runTenderSync({ source: req.body?.source || 'all', triggeredBy: req.user.email || req.user.id });
+
+    if (!result.ok && result.code === 'TENDER_SYNC_RUNNING') {
+      const state = await getTenderRadarSyncState(req.company.id);
+      return res.status(202).json({ ok: false, code: result.code, message: result.message, syncState: state });
+    }
+
+    const nextState = await setTenderRadarSyncState(req.company.id, result.ok ? 'success' : 'failed', {
+      errorMessage: result.errorMessage || result.error || ''
+    });
+
+    if (!result.ok && result.code === 'TENDER_SYNC_FAILED') {
+      return res.status(503).json({ ok: false, code: result.code, error: result.error, detail: result.errorMessage || '', syncState: nextState });
+    }
+
+    res.json({ ok: true, result, syncState: nextState });
+  } catch (err) {
+    try {
+      await setTenderRadarSyncState(req.company.id, 'failed', { errorMessage: err.message || String(err) });
+    } catch {
+      // ignore status write failure and return the original error
+    }
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.get('/api/companies/:companyId/tender-keywords', auth, company, async (req, res) => {
+  try {
+    const rows = PG_ENABLED
+      ? await pgAll('SELECT * FROM tender_watch_keywords WHERE company_id = $1 ORDER BY is_active DESC, updated_at DESC, id DESC', [req.company.id])
+      : db.prepare('SELECT * FROM tender_watch_keywords WHERE company_id = ? ORDER BY is_active DESC, updated_at DESC, id DESC').all(req.company.id);
+    res.json(rows.map(tenderWatchKeywordRow));
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.post('/api/companies/:companyId/tender-keywords', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  const input = normalizeTenderWatchKeywordInput(req.body);
+  if (!input.keyword) return res.status(400).json({ error: '請輸入監控關鍵字' });
+  if (input.maxBudget > 0 && input.maxBudget < input.minBudget) return res.status(400).json({ error: '最高預算不可小於最低預算' });
+
+  try {
+    if (PG_ENABLED) {
+      const row = await pgOne(`
+        INSERT INTO tender_watch_keywords (
+          company_id, keyword, region, category, min_budget, max_budget, is_active, created_at, updated_at
+        )
+        VALUES ($1,$2,$3,$4,$5,$6,$7,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+        RETURNING *
+      `, [req.company.id, input.keyword, input.region, input.category, input.minBudget, input.maxBudget, input.isActive]);
+      audit(req.company.id, req.user.id, 'tender_keyword_created', String(row.id));
+      return res.json(tenderWatchKeywordRow(row));
+    }
+
+    const result = db.prepare(`
+      INSERT INTO tender_watch_keywords (
+        company_id, keyword, region, category, min_budget, max_budget, is_active, created_at, updated_at
+      )
+      VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    `).run(req.company.id, input.keyword, input.region, input.category, input.minBudget, input.maxBudget, input.isActive);
+    audit(req.company.id, req.user.id, 'tender_keyword_created', String(result.lastInsertRowid));
+    const row = db.prepare('SELECT * FROM tender_watch_keywords WHERE id = ? AND company_id = ?').get(result.lastInsertRowid, req.company.id);
+    return res.json(tenderWatchKeywordRow(row));
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.put('/api/companies/:companyId/tender-keywords/:keywordId', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  const keywordId = Number(req.params.keywordId);
+  const input = normalizeTenderWatchKeywordInput(req.body);
+  if (!input.keyword) return res.status(400).json({ error: '請輸入監控關鍵字' });
+  if (input.maxBudget > 0 && input.maxBudget < input.minBudget) return res.status(400).json({ error: '最高預算不可小於最低預算' });
+
+  try {
+    if (PG_ENABLED) {
+      const row = await pgOne(`
+        UPDATE tender_watch_keywords
+        SET keyword = $1,
+            region = $2,
+            category = $3,
+            min_budget = $4,
+            max_budget = $5,
+            is_active = $6,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = $7 AND company_id = $8
+        RETURNING *
+      `, [input.keyword, input.region, input.category, input.minBudget, input.maxBudget, input.isActive, keywordId, req.company.id]);
+      if (!row) return res.status(404).json({ error: '找不到此監控關鍵字' });
+      audit(req.company.id, req.user.id, 'tender_keyword_updated', String(keywordId));
+      return res.json(tenderWatchKeywordRow(row));
+    }
+
+    const result = db.prepare(`
+      UPDATE tender_watch_keywords
+      SET keyword = ?,
+          region = ?,
+          category = ?,
+          min_budget = ?,
+          max_budget = ?,
+          is_active = ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND company_id = ?
+    `).run(input.keyword, input.region, input.category, input.minBudget, input.maxBudget, input.isActive, keywordId, req.company.id);
+    if (!result.changes) return res.status(404).json({ error: '找不到此監控關鍵字' });
+    audit(req.company.id, req.user.id, 'tender_keyword_updated', String(keywordId));
+    const row = db.prepare('SELECT * FROM tender_watch_keywords WHERE id = ? AND company_id = ?').get(keywordId, req.company.id);
+    return res.json(tenderWatchKeywordRow(row));
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.delete('/api/companies/:companyId/tender-keywords/:keywordId', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  const keywordId = Number(req.params.keywordId);
+
+  try {
+    if (PG_ENABLED) {
+      const result = await pgQuery('DELETE FROM tender_watch_keywords WHERE id = $1 AND company_id = $2', [keywordId, req.company.id]);
+      if (!result.rowCount) return res.status(404).json({ error: '找不到此監控關鍵字' });
+      audit(req.company.id, req.user.id, 'tender_keyword_deleted', String(keywordId));
+      return res.json({ ok: true });
+    }
+
+    const result = db.prepare('DELETE FROM tender_watch_keywords WHERE id = ? AND company_id = ?').run(keywordId, req.company.id);
+    if (!result.changes) return res.status(404).json({ error: '找不到此監控關鍵字' });
+    audit(req.company.id, req.user.id, 'tender_keyword_deleted', String(keywordId));
+    return res.json({ ok: true });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+});
+
+app.get('/api/tenders/sync-runs', auth, async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit || 10) || 10, 50);
     const rows = PG_ENABLED
@@ -7046,7 +7316,7 @@ app.get('/api/tenders/sync-runs', auth, company, async (req, res) => {
   }
 });
 
-app.get('/api/tenders', auth, company, async (req, res) => {
+app.get('/api/tenders', auth, async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit || 80) || 80, 200);
     const q = String(req.query.search || req.query.q || '').trim();
@@ -7119,7 +7389,7 @@ app.get('/api/tenders', auth, company, async (req, res) => {
   }
 });
 
-app.get('/api/tenders/:id', auth, company, async (req, res) => {
+app.get('/api/tenders/:id', auth, async (req, res) => {
   try {
     const row = PG_ENABLED
       ? await pgOne(`
@@ -7371,6 +7641,19 @@ app.post('/api/companies/:companyId/leads', auth, company, requireRole('owner', 
 
   if (!input.title) {
     return res.status(400).json({ error: '請輸入案源名稱' });
+  }
+
+  if (input.tenderRef) {
+    try {
+      const duplicate = PG_ENABLED
+        ? await pgOne('SELECT * FROM leads WHERE company_id = $1 AND tender_ref = $2 LIMIT 1', [req.company.id, input.tenderRef])
+        : db.prepare('SELECT * FROM leads WHERE company_id = ? AND tender_ref = ? LIMIT 1').get(req.company.id, input.tenderRef);
+      if (duplicate) {
+        return res.status(409).json({ error: '此標案已匯入接案中心', lead: leadRow(duplicate) });
+      }
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
   }
 
   if (PG_ENABLED) {
@@ -10841,13 +11124,23 @@ app.listen(PORT, HOST, () => {
   console.log(`BookAI API running on http://${HOST}:${PORT}`);
   checkPostgresStartup();
   setTimeout(() => {
-    runTenderSync({ source: 'all', triggeredBy: 'startup' }).catch((err) => {
-      console.error('[tender sync startup] failed', { code: err.code || null, message: err.message || String(err) });
-    });
+    shouldRunDailyTenderSync()
+      .then((shouldRun) => {
+        if (!shouldRun) return null;
+        return runTenderSync({ source: 'all', triggeredBy: 'startup_daily_check' });
+      })
+      .catch((err) => {
+        console.error('[tender sync startup] failed', { code: err.code || null, message: err.message || String(err) });
+      });
   }, 30000);
   setInterval(() => {
-    runTenderSync({ source: 'all', triggeredBy: 'schedule' }).catch((err) => {
-      console.error('[tender sync schedule] failed', { code: err.code || null, message: err.message || String(err) });
-    });
-  }, Number(process.env.TENDER_SYNC_INTERVAL_MS || 3 * 60 * 60 * 1000));
+    shouldRunDailyTenderSync()
+      .then((shouldRun) => {
+        if (!shouldRun) return null;
+        return runTenderSync({ source: 'all', triggeredBy: 'daily_schedule' });
+      })
+      .catch((err) => {
+        console.error('[tender sync schedule] failed', { code: err.code || null, message: err.message || String(err) });
+      });
+  }, Number(process.env.TENDER_SYNC_INTERVAL_MS || TENDER_DAILY_SYNC_MS));
 });

@@ -9,6 +9,7 @@
     "start": "npm --prefix server start",
     "build": "npm --prefix client run build",
     "seed": "npm --prefix server run seed",
+    "seed:official-site": "node scripts/seed-bookai-official-site.js",
     "backup:db": "node scripts/backup-db.js",
     "billing:activate": "node scripts/activate-company.js",
     "demo:engineering": "node scripts/prepare-engineering-demo.js",

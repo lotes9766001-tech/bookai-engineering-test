@@ -271,12 +271,48 @@ function getIndustryName(key) {
 }
 
 function rate(part, total) {
-  if (!total) return '0%';
-  return `${Math.round((Number(part || 0) / Number(total || 0)) * 1000) / 10}%`;
+  const totalNumber = Number(total || 0);
+  const partNumber = Number(part || 0);
+  if (!Number.isFinite(totalNumber) || !Number.isFinite(partNumber) || totalNumber === 0) return '0%';
+  return `${Math.round((partNumber / totalNumber) * 1000) / 10}%`;
 }
 
 function money(n) {
-  return `NT$ ${Number(n || 0).toLocaleString()}`;
+  const value = Number(n || 0);
+  return `NT$ ${Number.isFinite(value) ? value.toLocaleString() : '0'}`;
+}
+
+async function writeClipboardText(text) {
+  const content = String(text ?? '');
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(content);
+      return true;
+    } catch {
+      // Continue to the textarea fallback below.
+    }
+  }
+
+  if (typeof document === 'undefined') return false;
+
+  const textarea = document.createElement('textarea');
+  textarea.value = content;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.left = '-9999px';
+  textarea.style.top = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  try {
+    return document.execCommand('copy');
+  } catch {
+    return false;
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function platformAdvice(p) {
@@ -4234,12 +4270,6 @@ function JobSites({ companyId, company }) {
   }
 
   async function deleteEstimateItem(itemId) {
-    console.log('[BookAI] deleteEstimateItem start', {
-      itemId,
-      estimateSiteId: estimateSite?.id,
-      companyId
-    });
-
     if (!estimateSite?.id) {
       const msg = '找不到目前案場，無法刪除估價明細。';
       setEstimateError(msg);
@@ -4255,7 +4285,6 @@ function JobSites({ companyId, company }) {
     }
 
     const ok = window.confirm('確定要刪除此估價項目嗎？刪除後案場報價金額會重新計算。');
-    console.log('[BookAI] delete confirm result', ok);
 
     if (!ok) return;
 
@@ -4858,13 +4887,15 @@ function JobSites({ companyId, company }) {
           ? '結案複製'
           : '報價複製';
 
-    try {
-      await navigator.clipboard.writeText(text);
+    const copied = await writeClipboardText(text);
+
+    if (copied) {
       setError('');
       window.alert(`${label}已複製到剪貼簿`);
-    } catch (err) {
-      console.error(err);
-      setError(`${label}失敗，請確認瀏覽器是否允許剪貼簿權限。`);
+    } else {
+      const msg = `${label}失敗，請手動複製下方文字。`;
+      setError(msg);
+      window.prompt(msg, text);
     }
   }
 
@@ -5648,7 +5679,7 @@ function JobSites({ companyId, company }) {
                   <div className="notice">讀取估價明細中...</div>
                 ) : estimateItemsView.length === 0 ? (
                   <div className="notice">
-                    此案場目前沒有估價明細。舊案場可能仍使用舊報價欄位，之後可在 v3.9-2 補上新增明細功能。
+                    此案場目前沒有估價明細。可在上方新增估價項目，舊案場仍可保留原本報價欄位。
                   </div>
                 ) : (
                   <div style={{ display: 'grid', gap: 10 }}>
@@ -5687,7 +5718,6 @@ function JobSites({ companyId, company }) {
                                   onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    console.log('[BookAI] delete estimate item clicked', item);
                                     deleteEstimateItem(item.id);
                                   }}
                                 >
@@ -6271,6 +6301,13 @@ function Reports({ companyId, company }) {
   const netProfit = revenue - totalCost;
   const grossMarginRate = revenue ? Math.round((grossProfit / revenue) * 1000) / 10 : 0;
   const expenseRate = revenue ? Math.round((totalCost / revenue) * 1000) / 10 : 0;
+  const unpaidSales = Number(summary.unpaidSales || 0);
+  const unpaidPurchases = Number(summary.unpaidPurchases || 0);
+  const collectedSales = Number(summary.collectedSales || 0);
+  const paidPurchases = Number(summary.paidPurchases || 0);
+  const monthlySales = Number(summary.monthlySales || 0);
+  const monthlyPurchases = Number(summary.monthlyPurchases || 0);
+  const cashGap = unpaidSales - unpaidPurchases;
 
   const platformMap = tx.reduce((acc, t) => {
     const key = t.platform_key || 'manual';
@@ -6320,21 +6357,49 @@ function Reports({ companyId, company }) {
         <Card title="預估淨利" value={money(netProfit)} sub={netProfit >= 0 ? '目前為正收益' : '目前為虧損'} />
       </div>
 
-      <div className="panel">
-        <h2>平台經營洞察</h2>
-        <div className="grid">
-          <Card title="最賺平台" value={bestPlatform ? getPlatformName(bestPlatform.platform) : '尚無資料'} sub={bestPlatform ? `平台毛利 ${money(bestPlatform.profit)}` : '請先同步平台資料'} />
-          <Card title="最高風險平台" value={riskyPlatform ? getPlatformName(riskyPlatform.platform) : '尚無資料'} sub={riskyPlatform ? `毛利率 ${rate(riskyPlatform.profit, riskyPlatform.revenue)}` : '請先同步平台資料'} />
-          <Card title="平均平台抽成率" value={rate(fees, revenue)} sub="平台費 / 營收" />
-          <Card title="平均商品成本率" value={rate(cogs, revenue)} sub="商品成本 / 營收" />
+      <div className="panel-grid">
+        <div className="panel">
+          <h2>平台經營洞察</h2>
+          <div className="grid">
+            <Card title="最賺平台" value={bestPlatform ? getPlatformName(bestPlatform.platform) : '尚無資料'} sub={bestPlatform ? `平台毛利 ${money(bestPlatform.profit)}` : '請先同步平台資料'} />
+            <Card title="最高風險平台" value={riskyPlatform ? getPlatformName(riskyPlatform.platform) : '尚無資料'} sub={riskyPlatform ? `毛利率 ${rate(riskyPlatform.profit, riskyPlatform.revenue)}` : '請先同步平台資料'} />
+            <Card title="平均平台抽成率" value={rate(fees, revenue)} sub="平台費 / 營收" />
+            <Card title="平均商品成本率" value={rate(cogs, revenue)} sub="商品成本 / 營收" />
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2>應收 / 應付狀態</h2>
+          <div className="grid">
+            <Card title="應收未收" value={money(unpaidSales)} sub={unpaidSales > 0 ? '需追蹤收款' : '目前無未收'} />
+            <Card title="應付未付" value={money(unpaidPurchases)} sub={unpaidPurchases > 0 ? '需安排付款' : '目前無未付'} />
+            <Card title="已收款" value={money(collectedSales)} sub="銷貨收款累計" />
+            <Card title="已付款" value={money(paidPurchases)} sub="進貨付款累計" />
+          </div>
         </div>
       </div>
 
-      <div className="panel">
-        <h2>經營風險提醒</h2>
-        <ul className="summary">
-          {alerts.length ? alerts.map((a, i) => <li key={i}>{a}</li>) : <li>目前沒有明顯風險，請持續追蹤營收、成本與稅務資料。</li>}
-        </ul>
+      <div className="panel-grid">
+        <div className="panel">
+          <h2>經營風險提醒</h2>
+          <ul className="summary">
+            {alerts.length ? alerts.map((a, i) => <li key={i}>{a}</li>) : <li>目前沒有明顯風險，請持續追蹤營收、成本與稅務資料。</li>}
+            {cashGap < 0 && <li>本期應付未付高於應收未收，請留意付款排程與現金流。</li>}
+          </ul>
+        </div>
+
+        <div className="panel">
+          <h2>月度趨勢摘要</h2>
+          <Table
+            cols={['項目', '金額', '狀態']}
+            rows={[
+              ['本月銷貨', money(monthlySales), monthlySales > 0 ? '已有銷貨資料' : '尚無本月銷貨'],
+              ['本月進貨', money(monthlyPurchases), monthlyPurchases > 0 ? '已有進貨資料' : '尚無本月進貨'],
+              ['本月毛利', money(grossProfit), grossProfit >= 0 ? '毛利為正' : '毛利為負'],
+              ['應收應付差額', money(cashGap), cashGap >= 0 ? '流入可覆蓋未付' : '需留意付款壓力']
+            ]}
+          />
+        </div>
       </div>
 
       <div className="panel">
