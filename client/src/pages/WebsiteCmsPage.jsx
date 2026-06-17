@@ -582,11 +582,37 @@ function AssetsPanel({ items, saving, onCreate, onDelete }) {
   }
 
   async function copyUrl(url) {
+    const text = String(url || '');
+
     try {
-      await navigator.clipboard.writeText(url);
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(text);
       setCopyMessage('圖片 URL 已複製');
     } catch {
-      window.prompt('請複製圖片 URL', url);
+      const textarea = document.createElement('textarea');
+      textarea.value = text;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+
+      let copied = false;
+      try {
+        copied = document.execCommand('copy');
+      } catch {
+        copied = false;
+      } finally {
+        document.body.removeChild(textarea);
+      }
+
+      if (copied) {
+        setCopyMessage('圖片 URL 已複製');
+      } else {
+        setCopyMessage('圖片 URL 複製失敗，請手動複製');
+        window.prompt('請複製圖片 URL', text);
+      }
     }
   }
 

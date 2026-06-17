@@ -201,7 +201,8 @@ const emptyForm = {
 };
 
 function money(n) {
-  return `NT$ ${Number(n || 0).toLocaleString('zh-TW')}`;
+  const value = Number(n || 0);
+  return `NT$ ${Number.isFinite(value) ? value.toLocaleString('zh-TW') : '0'}`;
 }
 
 function getStatusLabel(status) {
@@ -307,6 +308,11 @@ function getRiskLevel(score) {
   return 'medium';
 }
 
+function dateInputValue(value) {
+  const text = String(value || '');
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
 function normalizeLead(lead) {
   const result = calculateLeadScore({
     ...lead,
@@ -332,6 +338,7 @@ function normalizeLead(lead) {
     aiScoreReason: lead.aiScoreReason || result.reason,
     rawContent: lead.rawContent || lead.note || '',
     nextAction: lead.nextAction || lead.next_action || '',
+    nextFollowUpDate: dateInputValue(lead.nextFollowUpDate || lead.next_follow_up_date || lead.nextAction || lead.next_action),
     tenderId: lead.tenderId || lead.tenderRef || lead.tender_ref || '',
     tenderRef: lead.tenderRef || lead.tender_ref || lead.tenderId || '',
     converted: lead.converted || lead.status === 'converted' || Boolean(lead.convertedJobSiteId)
@@ -625,7 +632,7 @@ export default function LeadCenterMock({ companyId }) {
       sourceType: lead.sourceType || '手動新增',
       estimatedAmount: lead.estimatedAmount || '',
       estimatedCost: lead.estimatedCost || '',
-      nextFollowUpDate: lead.nextAction || '',
+      nextFollowUpDate: dateInputValue(lead.nextFollowUpDate || lead.nextAction),
       rawContent: lead.rawContent || '',
       status: lead.status || 'new'
     });
