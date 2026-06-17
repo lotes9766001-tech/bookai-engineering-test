@@ -361,6 +361,32 @@ export function initDb() {
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS tender_watch_keywords (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL,
+    keyword TEXT NOT NULL,
+    region TEXT,
+    category TEXT,
+    min_budget REAL DEFAULT 0,
+    max_budget REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS tender_radar_sync_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id INTEGER NOT NULL UNIQUE,
+    status TEXT DEFAULT 'not_started',
+    last_synced_at TEXT,
+    next_suggested_sync_at TEXT,
+    error_message TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(company_id) REFERENCES companies(id)
+  );
+
   CREATE TABLE IF NOT EXISTS tender_matches (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tender_id INTEGER NOT NULL,
@@ -398,6 +424,12 @@ export function initDb() {
 
   CREATE INDEX IF NOT EXISTS idx_tender_matches_company_id
   ON tender_matches(company_id);
+
+  CREATE INDEX IF NOT EXISTS idx_tender_watch_keywords_company_id
+  ON tender_watch_keywords(company_id);
+
+  CREATE INDEX IF NOT EXISTS idx_tender_radar_sync_states_company_id
+  ON tender_radar_sync_states(company_id);
 
   CREATE TABLE IF NOT EXISTS platform_settings (
     key TEXT PRIMARY KEY,
@@ -1023,6 +1055,15 @@ export function initDb() {
   safeAddColumn('customers', 'updated_at', 'TEXT');
   safeAddColumn('platform_accounts', 'updated_at', 'TEXT');
   safeAddColumn('website_assets', 'updated_at', 'TEXT');
+  safeAddColumn('tender_watch_keywords', 'region', 'TEXT');
+  safeAddColumn('tender_watch_keywords', 'category', 'TEXT');
+  safeAddColumn('tender_watch_keywords', 'min_budget', 'REAL DEFAULT 0');
+  safeAddColumn('tender_watch_keywords', 'max_budget', 'REAL DEFAULT 0');
+  safeAddColumn('tender_watch_keywords', 'is_active', 'INTEGER DEFAULT 1');
+  safeAddColumn('tender_watch_keywords', 'updated_at', 'TEXT');
+  safeAddColumn('tender_radar_sync_states', 'next_suggested_sync_at', 'TEXT');
+  safeAddColumn('tender_radar_sync_states', 'error_message', 'TEXT');
+  safeAddColumn('tender_radar_sync_states', 'updated_at', 'TEXT');
 
   safeAddColumn('job_sites', 'site_name', 'TEXT');
   safeAddColumn('job_sites', 'project_type', 'TEXT');

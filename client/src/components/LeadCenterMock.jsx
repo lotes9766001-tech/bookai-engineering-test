@@ -200,9 +200,102 @@ const emptyForm = {
   rawContent: ''
 };
 
+const emptyKeywordForm = {
+  keyword: '',
+  region: '',
+  category: '',
+  minBudget: '',
+  maxBudget: '',
+  isActive: true
+};
+
 function money(n) {
   const value = Number(n || 0);
   return `NT$ ${Number.isFinite(value) ? value.toLocaleString('zh-TW') : '0'}`;
+}
+
+function formatDateTime(value) {
+  if (!value) return '尚未更新';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('zh-TW', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function normalizeTender(item = {}) {
+  return {
+    id: item.id || item.sourceTenderId || item.tenderId || '',
+    sourceTenderId: item.sourceTenderId || item.source_tender_id || item.tenderRef || item.id || '',
+    tenderNo: item.tenderNo || item.tender_no || '',
+    title: item.title || item.tenderName || item.tender_name || '未命名標案',
+    agency: item.agency || item.agencyName || item.agency_name || '未填機關',
+    agencyType: item.agencyType || item.agency_level || '其他機關',
+    region: item.region || '其他',
+    projectType: item.projectType || item.category || '工程',
+    budget: Number(item.budget ?? item.budgetAmount ?? item.budget_amount ?? 0) || 0,
+    estimatedCost: Number(item.estimatedCost ?? item.estimated_cost ?? 0) || 0,
+    deadline: item.deadline || item.deadlineDate || item.deadline_date || '',
+    publishDate: item.publishDate || item.publish_date || '',
+    source: item.source || '政府標案資料',
+    sourceUrl: item.sourceUrl || item.url || '',
+    summary: item.summary || item.description || '公開標案資料，請進一步確認投標資格、履約條件與截止日期。',
+    fitScore: Number(item.fitScore ?? item.score ?? 70) || 70,
+    reason: item.reason || item.matchedReason || item.matched_reason || '依標案欄位整理，請評估地區、預算與施工能力。',
+    updatedAt: item.updatedAt || item.updated_at || ''
+  };
+}
+
+function deadlineInfo(value) {
+  if (!value) return { label: '未提供截止日', key: 'none', days: null };
+  const deadline = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(deadline.getTime())) return { label: '未提供截止日', key: 'none', days: null };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const days = Math.round((deadline.getTime() - today.getTime()) / 86400000);
+
+  if (days < 0) return { label: '已截止', key: 'expired', days };
+  if (days === 0) return { label: '今日截止', key: 'today', days };
+  if (days <= 3) return { label: '3 日內截止', key: 'three', days };
+  if (days <= 7) return { label: '7 日內截止', key: 'seven', days };
+  return { label: '尚可評估', key: 'safe', days };
+}
+
+function tenderKeywordMatches(tender, keywords) {
+  const active = (Array.isArray(keywords) ? keywords : []).filter((item) => item.isActive !== false);
+  const text = [
+    tender.title,
+    tender.agency,
+    tender.region,
+    tender.projectType,
+    tender.summary,
+    tender.tenderNo
+  ].join(' ').toLowerCase();
+
+  return active.filter((item) => {
+    const keyword = String(item.keyword || '').trim().toLowerCase();
+    if (keyword && !text.includes(keyword)) return false;
+    if (item.region && !String(tender.region || '').includes(item.region)) return false;
+    if (item.category && !String(tender.projectType || '').includes(item.category)) return false;
+    if (Number(item.minBudget || 0) > 0 && tender.budget < Number(item.minBudget || 0)) return false;
+    if (Number(item.maxBudget || 0) > 0 && tender.budget > Number(item.maxBudget || 0)) return false;
+    return Boolean(keyword || item.region || item.category || Number(item.minBudget || 0) || Number(item.maxBudget || 0));
+  });
+}
+
+function statusLabel(status) {
+  const map = {
+    not_started: '尚未更新',
+    syncing: '更新中',
+    success: '更新成功',
+    failed: '更新失敗',
+    partial: '更新成功'
+  };
+  return map[status] || '尚未更新';
 }
 
 function getStatusLabel(status) {
@@ -378,9 +471,17 @@ export default function LeadCenterMock({ companyId }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [scoreFilter, setScoreFilter] = useState('all');
+
+  const [tenders, setTenders] = useState([]);
+  const [tenderLoading, setTenderLoading] = useState(true);
+  const [refreshingTenders, setRefreshingTenders] = useState(false);
+  const [radarStatus, setRadarStatus] = useState(null);
+  const [watchKeywords, setWatchKeywords] = useState([]);
+  const [keywordForm, setKeywordForm] = useState(emptyKeywordForm);
 
   const [tenderKeyword, setTenderKeyword] = useState('');
   const [tenderRegion, setTenderRegion] = useState('全部地區');
@@ -407,9 +508,127 @@ export default function LeadCenterMock({ companyId }) {
     }
   }
 
+  async function loadTenderRadar() {
+    if (!companyId) {
+      setTenders(tenderRadarItems.map(normalizeTender));
+      setTenderLoading(false);
+      return;
+    }
+
+    try {
+      setTenderLoading(true);
+      const [tenderResult, keywordRows, statusResult] = await Promise.all([
+        api('/tenders?limit=120').catch(() => ({ items: tenderRadarItems })),
+        api(`/companies/${companyId}/tender-keywords`).catch(() => []),
+        api(`/companies/${companyId}/tender-radar/status`).catch(() => null)
+      ]);
+
+      const rows = Array.isArray(tenderResult)
+        ? tenderResult
+        : Array.isArray(tenderResult?.items)
+          ? tenderResult.items
+          : tenderRadarItems;
+
+      setTenders(rows.map(normalizeTender));
+      setWatchKeywords(Array.isArray(keywordRows) ? keywordRows : []);
+      setRadarStatus(statusResult || null);
+    } catch (err) {
+      setError(err.message || '讀取標案雷達失敗');
+      setTenders(tenderRadarItems.map(normalizeTender));
+    } finally {
+      setTenderLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadLeads();
+    loadTenderRadar();
   }, [companyId]);
+
+  function updateKeywordForm(key, value) {
+    setKeywordForm((old) => ({ ...old, [key]: value }));
+  }
+
+  async function refreshTenders() {
+    try {
+      setRefreshingTenders(true);
+      setError('');
+      setMessage('');
+      setRadarStatus((old) => ({ ...(old || {}), status: 'syncing', running: true }));
+      const result = await api(`/companies/${companyId}/tenders/refresh`, { method: 'POST' });
+      setRadarStatus(result.syncState || null);
+      setMessage('標案資料已完成每日更新。');
+      await loadTenderRadar();
+    } catch (err) {
+      setError(err.message || '標案資料更新失敗，請稍後再試');
+      await loadTenderRadar();
+    } finally {
+      setRefreshingTenders(false);
+    }
+  }
+
+  async function saveKeyword() {
+    if (!String(keywordForm.keyword || '').trim()) {
+      setError('請輸入監控關鍵字');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setError('');
+      const created = await api(`/companies/${companyId}/tender-keywords`, {
+        method: 'POST',
+        body: JSON.stringify({
+          keyword: keywordForm.keyword,
+          region: keywordForm.region,
+          category: keywordForm.category,
+          minBudget: Number(keywordForm.minBudget || 0),
+          maxBudget: Number(keywordForm.maxBudget || 0),
+          isActive: keywordForm.isActive
+        })
+      });
+      setWatchKeywords((old) => [created, ...old]);
+      setKeywordForm(emptyKeywordForm);
+      setMessage('監控關鍵字已新增。');
+    } catch (err) {
+      setError(err.message || '新增監控關鍵字失敗');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleKeyword(item) {
+    try {
+      setError('');
+      const updated = await api(`/companies/${companyId}/tender-keywords/${item.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          keyword: item.keyword,
+          region: item.region,
+          category: item.category,
+          minBudget: item.minBudget,
+          maxBudget: item.maxBudget,
+          isActive: !item.isActive
+        })
+      });
+      setWatchKeywords((old) => old.map((row) => (row.id === item.id ? updated : row)));
+    } catch (err) {
+      setError(err.message || '更新監控關鍵字失敗');
+    }
+  }
+
+  async function deleteKeyword(item) {
+    if (!window.confirm(`確定要刪除「${item.keyword}」監控關鍵字嗎？`)) return;
+
+    try {
+      setError('');
+      await api(`/companies/${companyId}/tender-keywords/${item.id}`, { method: 'DELETE' });
+      setWatchKeywords((old) => old.filter((row) => row.id !== item.id));
+      setMessage('監控關鍵字已刪除。');
+    } catch (err) {
+      setError(err.message || '刪除監控關鍵字失敗');
+    }
+  }
 
   const stats = useMemo(() => {
     const total = leads.length;
@@ -430,7 +649,7 @@ export default function LeadCenterMock({ companyId }) {
   const filteredTenders = useMemo(() => {
     const q = tenderKeyword.trim().toLowerCase();
 
-    return tenderRadarItems.filter((item) => {
+    return tenders.filter((item) => {
       const text = [item.title, item.agency, item.region, item.projectType, item.summary].join(' ').toLowerCase();
 
       const keywordMatched = !q || text.includes(q);
@@ -440,7 +659,23 @@ export default function LeadCenterMock({ companyId }) {
 
       return keywordMatched && regionMatched && agencyMatched && projectMatched;
     });
-  }, [tenderKeyword, tenderRegion, tenderAgencyType, tenderProjectType]);
+  }, [tenders, tenderKeyword, tenderRegion, tenderAgencyType, tenderProjectType]);
+
+  const deadlineSummary = useMemo(() => {
+    return tenders.reduce(
+      (acc, tender) => {
+        const info = deadlineInfo(tender.deadline);
+        const matches = tenderKeywordMatches(tender, watchKeywords);
+        if (info.key === 'today') acc.today += 1;
+        if (info.key === 'today' || info.key === 'three') acc.threeDays += 1;
+        if (['today', 'three', 'seven'].includes(info.key)) acc.sevenDays += 1;
+        if (info.key === 'expired') acc.expired += 1;
+        if (matches.length && ['today', 'three', 'seven'].includes(info.key)) acc.keywordDueSoon += 1;
+        return acc;
+      },
+      { today: 0, threeDays: 0, sevenDays: 0, expired: 0, keywordDueSoon: 0 }
+    );
+  }, [tenders, watchKeywords]);
 
   const filteredLeads = useMemo(() => {
     const q = keyword.trim().toLowerCase();
@@ -509,7 +744,8 @@ export default function LeadCenterMock({ companyId }) {
   }
 
   async function importTenderToLeads(tender) {
-    const exists = leads.some((lead) => lead.tenderId === tender.id || lead.tenderRef === tender.id);
+    const tenderRef = tender.sourceTenderId || tender.tenderNo || tender.id;
+    const exists = leads.some((lead) => lead.tenderId === tenderRef || lead.tenderRef === tenderRef);
 
     if (exists) {
       window.alert('這筆標案已經匯入接案中心。');
@@ -517,8 +753,8 @@ export default function LeadCenterMock({ companyId }) {
     }
 
     const payload = toPayload({
-      tenderId: tender.id,
-      tenderRef: tender.id,
+      tenderId: tenderRef,
+      tenderRef,
       title: tender.title,
       clientName: tender.agency,
       phone: '',
@@ -529,7 +765,7 @@ export default function LeadCenterMock({ companyId }) {
       estimatedAmount: tender.budget,
       estimatedCost: tender.estimatedCost,
       nextAction: `投標截止日：${tender.deadline}`,
-      rawContent: `${tender.summary}\n\n機關：${tender.agency}\n機關類型：${tender.agencyType}\n地區：${tender.region}\n預算：${money(tender.budget)}\n投標截止日：${tender.deadline}\n資料來源：${tender.source}`,
+      rawContent: `${tender.summary}\n\n標案案號：${tender.tenderNo || tenderRef || '未提供'}\n公告日期：${tender.publishDate || '未提供'}\n截止日期：${tender.deadline || '未提供'}\n招標方式：${tender.source || '政府標案資料'}\n機關：${tender.agency}\n機關類型：${tender.agencyType}\n地區：${tender.region}\n預算：${money(tender.budget)}\n來源連結：${tender.sourceUrl || '未提供'}`,
       tenderSource: tender.source,
       status: 'new',
       fitScore: tender.fitScore
@@ -546,6 +782,7 @@ export default function LeadCenterMock({ companyId }) {
         body: JSON.stringify(payload)
       });
       setLeads((old) => [normalizeLead(created), ...old]);
+      setMessage('已匯入接案中心，可繼續追蹤與轉案場。');
       window.alert('已匯入接案中心，可繼續追蹤與轉案場。');
     } catch (err) {
       setError(err.message || '匯入標案失敗');
@@ -666,6 +903,7 @@ export default function LeadCenterMock({ companyId }) {
       </div>
 
       {error && <div className="error">{error}</div>}
+      {message && <div className="notice">{message}</div>}
       {loading && <div className="notice">正在讀取接案中心資料...</div>}
 
       <div className="lead-stats-grid">
@@ -705,13 +943,132 @@ export default function LeadCenterMock({ companyId }) {
         <div className="lead-panel-head">
           <h2>政府 / 地方標案雷達 Beta</h2>
           <p>
-            先以公開標案格式資料展示中央與地方案源，下一階段可正式串接政府電子採購網或開放資料 API。
-            此區塊適合用來吸引工程業測試者：找案、評估、匯入、追蹤、轉案場。
+            每日自動更新政府標案資料，並依監控關鍵字與截止日期提醒可追蹤案源。
+            手動更新可立即重新整理目前資料來源。
           </p>
         </div>
 
         <div className="tender-source-note">
-          資料來源方向：政府電子採購網公開標案資料。正式商用前需確認開放資料授權、欄位格式、快取與 API 穩定性。
+          目前為每日更新 / 手動更新模式，並保留最後更新時間。正式商用前需確認開放資料授權、欄位格式、快取與 API 穩定性。
+        </div>
+
+        <div className="lead-stats-grid">
+          <div className="lead-stat-card">
+            <span>上次更新時間</span>
+            <strong>{formatDateTime(radarStatus?.lastSyncedAt)}</strong>
+            <small>{radarStatus?.updateRecommended ? '建議更新' : '資料仍在每日更新週期內'}</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>下次建議更新</span>
+            <strong>{formatDateTime(radarStatus?.nextSuggestedSyncAt)}</strong>
+            <small>每日更新節奏</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>更新狀態</span>
+            <strong>{statusLabel(refreshingTenders ? 'syncing' : radarStatus?.status)}</strong>
+            <small>{radarStatus?.todayUpdated ? '今日已更新' : '今日尚未更新'}</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>今日截止</span>
+            <strong>{deadlineSummary.today}</strong>
+            <small>需立即評估</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>3 日內截止</span>
+            <strong>{deadlineSummary.threeDays}</strong>
+            <small>含今日截止</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>7 日內截止</span>
+            <strong>{deadlineSummary.sevenDays}</strong>
+            <small>近期可追蹤</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>已截止</span>
+            <strong>{deadlineSummary.expired}</strong>
+            <small>建議略過或查更正公告</small>
+          </div>
+          <div className="lead-stat-card">
+            <span>關鍵字即將截止</span>
+            <strong>{deadlineSummary.keywordDueSoon}</strong>
+            <small>符合監控條件</small>
+          </div>
+        </div>
+
+        <div className="lead-actions" style={{ marginBottom: 16 }}>
+          <button type="button" className="lead-primary-btn" onClick={refreshTenders} disabled={refreshingTenders || saving}>
+            {refreshingTenders ? '更新中...' : '手動更新'}
+          </button>
+          <button type="button" className="lead-soft-btn" onClick={loadTenderRadar} disabled={refreshingTenders}>
+            重新整理狀態
+          </button>
+        </div>
+
+        <div className="lead-panel" style={{ marginBottom: 16 }}>
+          <div className="lead-panel-head">
+            <h2>關鍵字監控</h2>
+            <p>設定工程類型、地區與預算範圍，系統會標記符合條件的標案。</p>
+          </div>
+
+          <div className="lead-form-grid">
+            <label>
+              <span>關鍵字</span>
+              <input value={keywordForm.keyword} onChange={(e) => updateKeywordForm('keyword', e.target.value)} placeholder="例：油漆、水電、防水、空調" />
+            </label>
+            <label>
+              <span>地區</span>
+              <input value={keywordForm.region} onChange={(e) => updateKeywordForm('region', e.target.value)} placeholder="例：台中、彰化、南投" />
+            </label>
+            <label>
+              <span>工程類別</span>
+              <input value={keywordForm.category} onChange={(e) => updateKeywordForm('category', e.target.value)} placeholder="例：防水、弱電、裝修" />
+            </label>
+            <label>
+              <span>最低預算</span>
+              <input type="number" min="0" value={keywordForm.minBudget} onChange={(e) => updateKeywordForm('minBudget', e.target.value)} placeholder="例：500000" />
+            </label>
+            <label>
+              <span>最高預算</span>
+              <input type="number" min="0" value={keywordForm.maxBudget} onChange={(e) => updateKeywordForm('maxBudget', e.target.value)} placeholder="例：3000000" />
+            </label>
+            <label>
+              <span>狀態</span>
+              <select value={keywordForm.isActive ? 'active' : 'inactive'} onChange={(e) => updateKeywordForm('isActive', e.target.value === 'active')}>
+                <option value="active">啟用</option>
+                <option value="inactive">停用</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="lead-actions" style={{ marginTop: 12 }}>
+            <button type="button" className="lead-primary-btn" onClick={saveKeyword} disabled={saving}>
+              新增監控關鍵字
+            </button>
+          </div>
+
+          {watchKeywords.length === 0 ? (
+            <div className="lead-empty" style={{ marginTop: 12 }}>
+              尚未設定監控關鍵字，可新增關鍵字讓系統協助篩選適合標案。
+            </div>
+          ) : (
+            <div className="lead-list" style={{ marginTop: 12 }}>
+              {watchKeywords.map((item) => (
+                <div className="lead-card" key={item.id}>
+                  <div className="lead-card-top">
+                    <div>
+                      <h3>{item.keyword}</h3>
+                      <p>{item.region || '全部地區'}｜{item.category || '全部工程'}｜{money(item.minBudget || 0)} - {Number(item.maxBudget || 0) > 0 ? money(item.maxBudget) : '不限上限'}</p>
+                    </div>
+                    <span className="tender-tag">{item.isActive ? '啟用' : '停用'}</span>
+                  </div>
+                  <div className="lead-actions">
+                    <button type="button" onClick={() => toggleKeyword(item)}>{item.isActive ? '停用' : '啟用'}</button>
+                    <button type="button" className="lead-danger-btn" onClick={() => deleteKeyword(item)}>刪除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="tender-toolbar">
@@ -735,10 +1092,16 @@ export default function LeadCenterMock({ companyId }) {
           </select>
         </div>
 
+        {tenderLoading && <div className="notice">標案雷達資料讀取中...</div>}
+
         <div className="tender-grid">
           {filteredTenders.map((tender) => {
             const level = getScoreLevel(tender.fitScore);
-            const imported = leads.some((lead) => lead.tenderId === tender.id || lead.tenderRef === tender.id);
+            const tenderRef = tender.sourceTenderId || tender.tenderNo || tender.id;
+            const imported = leads.some((lead) => lead.tenderId === tenderRef || lead.tenderRef === tenderRef);
+            const deadline = deadlineInfo(tender.deadline);
+            const matches = tenderKeywordMatches(tender, watchKeywords);
+            const highRelevant = matches.length >= 2 || Number(tender.fitScore || 0) >= 80;
 
             return (
               <article className="tender-card" key={tender.id}>
@@ -758,7 +1121,15 @@ export default function LeadCenterMock({ companyId }) {
                 <div className="tender-meta">
                   <span>{tender.region}</span>
                   <span>{tender.projectType}</span>
-                  <span>截止：{tender.deadline}</span>
+                  <span>截止：{tender.deadline || '未提供'}</span>
+                  <span>{deadline.label}</span>
+                </div>
+
+                <div className="lead-actions" style={{ marginTop: 10 }}>
+                  <span className="tender-tag">{deadline.label}</span>
+                  {matches.length > 0 && <span className="tender-tag">符合關鍵字</span>}
+                  {highRelevant && <span className="tender-tag">高相關</span>}
+                  {deadline.key !== 'expired' && <span className="tender-tag">可追蹤</span>}
                 </div>
 
                 <div className="lead-money-grid">
