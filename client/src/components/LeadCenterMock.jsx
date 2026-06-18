@@ -229,8 +229,10 @@ function formatDateTime(value) {
 function normalizeTender(item = {}) {
   return {
     id: item.id || item.sourceTenderId || item.tenderId || '',
+    referenceCode: item.referenceCode || item.reference_code || '',
     sourceTenderId: item.sourceTenderId || item.source_tender_id || item.tenderRef || item.id || '',
-    tenderNo: item.tenderNo || item.tender_no || '',
+    sourceId: item.sourceId || item.source_id || item.externalId || item.external_id || '',
+    tenderNo: item.tenderNo || item.tender_no || item.caseNo || item.case_no || '',
     title: item.title || item.tenderName || item.tender_name || '未命名標案',
     agency: item.agency || item.agencyName || item.agency_name || '未填機關',
     agencyType: item.agencyType || item.agency_level || '其他機關',
@@ -247,6 +249,47 @@ function normalizeTender(item = {}) {
     reason: item.reason || item.matchedReason || item.matched_reason || '依標案欄位整理，請評估地區、預算與施工能力。',
     updatedAt: item.updatedAt || item.updated_at || ''
   };
+}
+
+function stableTenderHash(value) {
+  let hash = 2166136261;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36).toUpperCase().padStart(7, '0').slice(0, 7);
+}
+
+function caseNumberPart(value) {
+  const text = String(value || '').trim().replace(/^BA-TD-/i, '');
+  if (!text) return '';
+  return text.replace(/\s+/g, '-').replace(/[^0-9A-Za-z_-]/g, '').slice(0, 48);
+}
+
+function getTenderCaseNumber(tender = {}) {
+  const sourceValue =
+    tender.referenceCode ||
+    tender.reference_code ||
+    tender.tenderNo ||
+    tender.tender_no ||
+    tender.caseNo ||
+    tender.case_no ||
+    tender.sourceId ||
+    tender.source_id ||
+    tender.externalId ||
+    tender.external_id ||
+    tender.sourceTenderId ||
+    tender.source_tender_id ||
+    tender.id;
+  const sourcePart = caseNumberPart(sourceValue);
+  if (sourcePart) return `BA-TD-${sourcePart}`;
+  return `BA-TD-${stableTenderHash(`${tender.title || tender.tenderName || ''}|${tender.agency || tender.agencyName || ''}`)}`;
+}
+
+function getGovernmentTenderNo(tender = {}) {
+  const value = tender.tenderNo || tender.tender_no || tender.caseNo || tender.case_no;
+  return String(value || '').trim() || '未提供';
 }
 
 function deadlineInfo(value) {
@@ -746,6 +789,8 @@ export default function LeadCenterMock({ companyId }) {
   async function importTenderToLeads(tender) {
     const tenderRef = tender.sourceTenderId || tender.tenderNo || tender.id;
     const exists = leads.some((lead) => lead.tenderId === tenderRef || lead.tenderRef === tenderRef);
+    const bookAiCaseNumber = getTenderCaseNumber(tender);
+    const governmentTenderNo = getGovernmentTenderNo(tender);
 
     if (exists) {
       window.alert('這筆標案已經匯入接案中心。');
@@ -764,8 +809,8 @@ export default function LeadCenterMock({ companyId }) {
       agencyType: tender.agencyType,
       estimatedAmount: tender.budget,
       estimatedCost: tender.estimatedCost,
-      nextAction: `投標截止日：${tender.deadline}`,
-      rawContent: `${tender.summary}\n\n標案案號：${tender.tenderNo || tenderRef || '未提供'}\n公告日期：${tender.publishDate || '未提供'}\n截止日期：${tender.deadline || '未提供'}\n招標方式：${tender.source || '政府標案資料'}\n機關：${tender.agency}\n機關類型：${tender.agencyType}\n地區：${tender.region}\n預算：${money(tender.budget)}\n來源連結：${tender.sourceUrl || '未提供'}`,
+      nextAction: `投標截止日：${tender.deadline || '未提供'}`,
+      rawContent: `BookAI 案件號碼：${bookAiCaseNumber}\n政府標案案號：${governmentTenderNo}\n機關名稱：${tender.agency || '未提供'}\n標案名稱：${tender.title || '未提供'}\n公告日期：${tender.publishDate || '未提供'}\n截止日期：${tender.deadline || '未提供'}\n預算金額：${money(tender.budget)}\n來源：${tender.source || '政府公開標案資料'}\n來源連結：${tender.sourceUrl || '未提供'}\n\n標案摘要：${tender.summary || '未提供'}\n機關類型：${tender.agencyType || '未提供'}\n地區：${tender.region || '未提供'}`,
       tenderSource: tender.source,
       status: 'new',
       fitScore: tender.fitScore
@@ -1102,6 +1147,8 @@ export default function LeadCenterMock({ companyId }) {
             const deadline = deadlineInfo(tender.deadline);
             const matches = tenderKeywordMatches(tender, watchKeywords);
             const highRelevant = matches.length >= 2 || Number(tender.fitScore || 0) >= 80;
+            const bookAiCaseNumber = getTenderCaseNumber(tender);
+            const governmentTenderNo = getGovernmentTenderNo(tender);
 
             return (
               <article className="tender-card" key={tender.id}>
@@ -1110,6 +1157,10 @@ export default function LeadCenterMock({ companyId }) {
                     <span className="tender-tag">{tender.agencyType}</span>
                     <h3>{tender.title}</h3>
                     <p>{tender.agency}</p>
+                    <div className="tender-case-numbers">
+                      <span><strong>BookAI 案件號碼：</strong>{bookAiCaseNumber}</span>
+                      <span><strong>政府標案案號：</strong>{governmentTenderNo}</span>
+                    </div>
                   </div>
 
                   <div className={`lead-score-badge ${level.key}`}>

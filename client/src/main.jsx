@@ -282,6 +282,13 @@ function money(n) {
   return `NT$ ${Number.isFinite(value) ? value.toLocaleString() : '0'}`;
 }
 
+function safeCopyValue(value, fallback = '-') {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'object') return fallback;
+  const text = String(value).trim();
+  return text && !['undefined', 'null', '[object Object]'].includes(text) ? text : fallback;
+}
+
 async function writeClipboardText(text) {
   const content = String(text ?? '');
 
@@ -3479,6 +3486,7 @@ function JobSites({ companyId, company }) {
   const [editingId, setEditingId] = useState(null);
   const [openActionSiteId, setOpenActionSiteId] = useState(null);
   const [error, setError] = useState('');
+  const [manualCopy, setManualCopy] = useState(null);
 
   const [paymentSite, setPaymentSite] = useState(null);
   const [payments, setPayments] = useState([]);
@@ -4760,13 +4768,13 @@ function JobSites({ companyId, company }) {
     }
 
 
-    const siteName = site.siteName || site.name || '-';
-    const clientName = site.clientName || site.client_name || '-';
-    const clientPhone = site.clientPhone || site.client_phone || '-';
-    const address = site.address || '-';
-    const projectType = site.projectType || site.project_type || '-';
-    const status = site.status || '-';
-    const note = site.note || '-';
+    const siteName = safeCopyValue(site.siteName || site.name);
+    const clientName = safeCopyValue(site.clientName || site.client_name);
+    const clientPhone = safeCopyValue(site.clientPhone || site.client_phone);
+    const address = safeCopyValue(site.address);
+    const projectType = safeCopyValue(site.projectType || site.project_type);
+    const status = safeCopyValue(site.status);
+    const note = safeCopyValue(site.note);
 
     const quoteAmount = numberValue(copyCalc.quoteAmount || site.quoteAmount);
     const subtotalAmount = numberValue(site.subtotalAmount || site.subtotal_amount || quoteAmount);
@@ -4788,7 +4796,7 @@ function JobSites({ companyId, company }) {
     const unpaid = numberValue(copyCalc.unpaid);
     const collectionRate = numberValue(copyCalc.collectionRate);
 
-    let collectionStatus = copyCalc.collectionStatus || '未收款';
+    let collectionStatus = safeCopyValue(copyCalc.collectionStatus, '未收款');
 
     // 新增案場剛建立時，未收款 100% 很正常，不要直接嚇成「風險高」
     if (receivedAmount === 0 && quoteAmount > 0 && ['已報價', '已簽約', '施工中'].includes(status)) {
@@ -4891,11 +4899,12 @@ function JobSites({ companyId, company }) {
 
     if (copied) {
       setError('');
+      setManualCopy(null);
       window.alert(`${label}已複製到剪貼簿`);
     } else {
       const msg = `${label}失敗，請手動複製下方文字。`;
       setError(msg);
-      window.prompt(msg, text);
+      setManualCopy({ label, text });
     }
   }
 
@@ -5021,6 +5030,49 @@ function JobSites({ companyId, company }) {
       />
 
       {error && <div className="notice">⚠️ {error}</div>}
+
+      {manualCopy && (
+        <div className="copy-fallback-backdrop" role="presentation">
+          <div className="copy-fallback-dialog" role="dialog" aria-modal="true" aria-labelledby="copy-fallback-title">
+            <div className="copy-fallback-head">
+              <div>
+                <h2 id="copy-fallback-title">手動複製{manualCopy.label.replace('複製', '')}內容</h2>
+                <p>複製失敗，請全選並手動複製下方完整內容。</p>
+              </div>
+              <button type="button" onClick={() => setManualCopy(null)} aria-label="關閉手動複製視窗">
+                關閉
+              </button>
+            </div>
+            <textarea
+              readOnly
+              value={manualCopy.text}
+              rows={18}
+              autoFocus
+              onFocus={(event) => event.currentTarget.select()}
+            />
+            <div className="copy-fallback-actions">
+              <button
+                type="button"
+                onClick={async () => {
+                  const copied = await writeClipboardText(manualCopy.text);
+                  if (copied) {
+                    setError('');
+                    setManualCopy(null);
+                    window.alert(`${manualCopy.label}已複製到剪貼簿`);
+                  } else {
+                    setError(`${manualCopy.label}失敗，請全選並手動複製下方完整內容。`);
+                  }
+                }}
+              >
+                再次複製
+              </button>
+              <button type="button" onClick={() => setManualCopy(null)}>
+                完成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid">
         <Card title="案場合約 / 報價總額" value={money(totals.quoteAmount)} sub={`${sites.length} 個案場`} />
