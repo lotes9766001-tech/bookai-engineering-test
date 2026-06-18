@@ -2592,6 +2592,240 @@ tr:hover td {
   border-radius: 8px;
 }
 
+/* Beta onboarding and feedback flow */
+.beta-status-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding: 13px 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.beta-status-notice > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.beta-status-notice strong {
+  color: #1e3a8a;
+  font-size: 14px;
+}
+
+.beta-status-notice span {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.beta-status-actions,
+.feedback-support-panel > div,
+.feedback-support-panel a,
+.tester-guide-actions a,
+.primary-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.beta-status-actions {
+  flex: 0 0 auto;
+}
+
+.beta-status-actions button,
+.beta-status-actions a,
+.feedback-support-panel a,
+.tester-guide-actions a {
+  min-height: 38px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.beta-status-actions button {
+  box-shadow: none;
+}
+
+.beta-status-actions a,
+.feedback-support-panel a,
+.tester-guide-actions a {
+  border: 1px solid #bfdbfe;
+  background: #ffffff;
+  color: #1d4ed8;
+}
+
+.beta-guide-card {
+  display: grid;
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  border-radius: 8px;
+}
+
+.beta-guide-card.collapsed {
+  padding-block: 14px;
+}
+
+.beta-guide-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.beta-guide-toggle {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #475569;
+  box-shadow: none;
+}
+
+.beta-guide-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+  counter-reset: beta-step;
+}
+
+.beta-guide-steps li {
+  counter-increment: beta-step;
+}
+
+.beta-guide-steps button {
+  width: 100%;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #334155;
+  box-shadow: none;
+  text-align: left;
+}
+
+.beta-guide-steps button::before {
+  content: counter(beta-step);
+  display: grid;
+  width: 22px;
+  height: 22px;
+  margin-bottom: 8px;
+  place-items: center;
+  border-radius: 5px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+
+.beta-guide-steps button:hover {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.beta-guide-card .tester-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.beta-guide-card .tester-guide-actions button,
+.beta-guide-card .tester-guide-actions a {
+  min-height: 40px;
+}
+
+.feedback-support-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 16px 0;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.feedback-support-panel > div {
+  align-items: flex-start;
+}
+
+.feedback-support-panel svg {
+  flex: 0 0 auto;
+  color: #2563eb;
+}
+
+.feedback-support-panel strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #0f172a;
+}
+
+.feedback-support-panel p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.feedback-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.feedback-contact-field {
+  grid-column: 1 / -1;
+}
+
+.feedback-submit-btn {
+  width: fit-content;
+  min-width: 150px;
+}
+
+@media (max-width: 980px) {
+  .beta-guide-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .beta-status-notice,
+  .feedback-support-panel,
+  .beta-guide-heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .beta-status-actions,
+  .beta-guide-card .tester-guide-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .beta-status-actions button,
+  .beta-status-actions a,
+  .feedback-support-panel a,
+  .beta-guide-card .tester-guide-actions button,
+  .beta-guide-card .tester-guide-actions a,
+  .beta-guide-toggle {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .beta-guide-steps,
+  .feedback-form {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Engineering BI dashboard */
 .engineering-bi {
   display: grid;

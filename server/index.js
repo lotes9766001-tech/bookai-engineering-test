@@ -2349,7 +2349,19 @@ app.post('/api/founder/backup', auth, requireFounder, (req, res) => {
 const adminBillingStatuses = new Set(['trial', 'active', 'expired', 'paused']);
 const adminWebsiteStatuses = new Set(['none', 'planning', 'building', 'live', 'paused']);
 const testerFeedbackStatuses = new Set(['尚未回饋', '已回饋', '需追蹤', '已完成測試']);
-const feedbackCategories = new Set(['操作問題', '介面建議', '功能需求', '錯誤回報', '其他']);
+const feedbackCategories = new Set([
+  '操作卡住',
+  '按鈕無反應',
+  '金額 / 報表異常',
+  '畫面顯示問題',
+  '資料沒有儲存',
+  '建議新增功能',
+  '操作問題',
+  '介面建議',
+  '功能需求',
+  '錯誤回報',
+  '其他'
+]);
 const feedbackStatuses = new Set(['new', 'reviewing', 'resolved', 'ignored']);
 const reviewStatuses = new Set(['pending_review', 'approved', 'rejected', 'suspended', 'founder', 'admin', 'demo']);
 const memberPlans = new Set(['trial', 'starter', 'pro', 'enterprise', 'custom']);
@@ -3959,6 +3971,22 @@ app.get('/api/admin/settings', auth, requireAdmin, async (req, res) => {
   res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
 });
 
+app.get('/api/beta/support', auth, async (req, res) => {
+  try {
+    const key = 'official_line_url';
+    const row = PG_ENABLED
+      ? await pgOne('SELECT value FROM platform_settings WHERE key = $1', [key])
+      : db.prepare('SELECT value FROM platform_settings WHERE key = ?').get(key);
+
+    res.json({
+      officialLineUrl: String(row?.value || '').trim()
+    });
+  } catch (err) {
+    console.error('[beta support] failed', { userId: req.user?.id, code: err.code, message: err.message });
+    res.status(500).json({ error: '封測支援資訊讀取失敗', code: 'DATABASE_ERROR' });
+  }
+});
+
 app.patch('/api/admin/settings', auth, requireAdmin, async (req, res) => {
   const body = req.body || {};
   if (PG_ENABLED) {
@@ -4075,12 +4103,32 @@ app.get('/api/feedbacks/my', auth, company, async (req, res) => {
 
 app.post('/api/feedbacks/create', auth, company, async (req, res) => {
   const body = req.body || {};
-  const message = String(body.message || '').trim();
-  if (!message) return res.status(400).json({ error: '請填寫回饋內容' });
+  const description = String(body.description || body.message || '').trim();
+  const expectedResult = String(body.expectedResult || body.expected_result || '').trim();
+  const actualResult = String(body.actualResult || body.actual_result || '').trim();
+  const contact = String(body.contact || '').trim();
+  const page = String(body.page || '').trim();
+
+  if (!description) return res.status(400).json({ error: '請填寫問題描述' });
+  if (!page) return res.status(400).json({ error: '請填寫所在頁面' });
+  if ((body.expectedResult !== undefined || body.expected_result !== undefined) && !expectedResult) {
+    return res.status(400).json({ error: '請填寫預期結果' });
+  }
+  if ((body.actualResult !== undefined || body.actual_result !== undefined) && !actualResult) {
+    return res.status(400).json({ error: '請填寫實際結果' });
+  }
+
+  const message = expectedResult || actualResult || contact
+    ? [
+        `問題描述：${description}`,
+        `預期結果：${expectedResult || '未提供'}`,
+        `實際結果：${actualResult || '未提供'}`,
+        `聯絡方式：${contact || '未提供'}`
+      ].join('\n')
+    : description;
 
   const category = feedbackCategories.has(body.category) ? body.category : '其他';
   const rating = normalizeRating(body.rating);
-  const page = String(body.page || '').trim();
 
   try {
     let created;

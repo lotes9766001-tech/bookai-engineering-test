@@ -4,10 +4,14 @@ import { createRoot } from 'react-dom/client';
 import {
   BarChart3,
   Building2,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
   FileText,
   Layers,
   LogOut,
   Menu,
+  MessageCircle,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
@@ -888,7 +892,7 @@ function TermsBeta() {
   );
 }
 
-function PendingReviewPage({ user, company, onLogout, onNavigate }) {
+function PendingReviewPage({ user, company, officialLineUrl, onLogout, onNavigate }) {
   return (
     <div className="stack">
       <div className="panel hero-panel">
@@ -902,7 +906,12 @@ function PendingReviewPage({ user, company, onLogout, onNavigate }) {
           <div className="metric-card"><span>目前狀態</span><strong>等待官方審核</strong></div>
         </div>
         <div className="actions">
-          <a className="primary-btn" href="https://lin.ee/pU6X4oP" target="_blank" rel="noreferrer">聯繫官方 LINE</a>
+          {officialLineUrl && (
+            <a className="primary-btn" href={officialLineUrl} target="_blank" rel="noreferrer">
+              <MessageCircle size={17} />
+              聯繫官方 LINE
+            </a>
+          )}
           <button type="button" onClick={() => onNavigate('terms_beta')}>測試會員服務條款</button>
           <button type="button" className="ghost-btn" onClick={onLogout}>登出</button>
         </div>
@@ -950,6 +959,26 @@ function FounderEditionSwitcher({ edition, loading, saving, error, success, coll
   );
 }
 
+function BetaStatusNotice({ officialLineUrl, onFeedback }) {
+  return (
+    <div className="beta-status-notice" role="status">
+      <div>
+        <strong>BookAI 封測版本</strong>
+        <span>功能仍可能依測試回饋調整。若遇到問題，請透過產品回饋或官方 LINE 回報。</span>
+      </div>
+      <div className="beta-status-actions">
+        <button type="button" onClick={onFeedback}>回報問題</button>
+        {officialLineUrl && (
+          <a href={officialLineUrl} target="_blank" rel="noreferrer">
+            <MessageCircle size={16} />
+            官方 LINE
+          </a>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function Shell({ onLogout }) {
   const [me, setMe] = useState(null);
   const [page, setPage] = useState('dashboard');
@@ -963,6 +992,7 @@ function Shell({ onLogout }) {
   const [testEditionSaving, setTestEditionSaving] = useState(false);
   const [testEditionError, setTestEditionError] = useState('');
   const [testEditionSuccess, setTestEditionSuccess] = useState('');
+  const [betaSupport, setBetaSupport] = useState({ officialLineUrl: '' });
 
   useEffect(() => {
     api('/me')
@@ -977,10 +1007,21 @@ function Shell({ onLogout }) {
     localStorage.setItem('bookai_sidebar_collapsed', sidebarCollapsed ? '1' : '0');
   }, [sidebarCollapsed]);
 
+  useEffect(() => {
+    if (!me) return;
+    api('/beta/support')
+      .then((data) => setBetaSupport({ officialLineUrl: data?.officialLineUrl || '' }))
+      .catch(() => setBetaSupport({ officialLineUrl: '' }));
+  }, [me]);
+
   const company = me?.companies?.find((c) => c.id === companyId);
   const userIsAdmin = isAdminUser(me?.user);
   const userIsFounder = isFounderUser(me?.user);
   const needsReview = accountNeedsReview(me?.user, company);
+  const betaActive = userIsFounder || Number(company?.is_tester || 0) === 1;
+  const betaEdition = userIsFounder
+    ? testEdition
+    : isConstructionIndustry(company?.industry) ? 'engineering' : 'commerce';
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
@@ -1212,15 +1253,24 @@ if (!me || !company) {
           />
         )}
 
-        {needsReview && page === 'review_waiting' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
-        {needsReview && page === 'support' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
+        {needsReview && page === 'review_waiting' && <PendingReviewPage user={me.user} company={company} officialLineUrl={betaSupport.officialLineUrl} onLogout={onLogout} onNavigate={setPage} />}
+        {needsReview && page === 'support' && <PendingReviewPage user={me.user} company={company} officialLineUrl={betaSupport.officialLineUrl} onLogout={onLogout} onNavigate={setPage} />}
         {needsReview && page === 'terms_beta' && <TermsBeta />}
+        {!needsReview && betaActive && page !== 'admin' && page !== 'founder' && (
+          <BetaStatusNotice
+            officialLineUrl={betaSupport.officialLineUrl}
+            onFeedback={() => setPage('feedbacks')}
+          />
+        )}
         {!needsReview && page === 'dashboard' && (
           <Dashboard
             companyId={companyId}
             refresh={refresh}
             company={company}
             engineeringMode={isConstructionIndustry(company?.industry) || (userIsFounder && testEdition === 'engineering')}
+            betaActive={betaActive}
+            betaEdition={betaEdition}
+            officialLineUrl={betaSupport.officialLineUrl}
             onNavigate={setPage}
           />
         )}
@@ -1232,7 +1282,7 @@ if (!me || !company) {
         {!needsReview && page === 'payables' && <PayablesManager companyId={companyId} />}
         {!needsReview && page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
         {!needsReview && page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
-        {!needsReview && page === 'feedbacks' && <FeedbackCenter companyId={companyId} />}
+        {!needsReview && page === 'feedbacks' && <FeedbackCenter companyId={companyId} officialLineUrl={betaSupport.officialLineUrl} />}
         {!needsReview && page === 'integrations' && (
           <Integrations
             companyId={companyId}
@@ -1351,28 +1401,92 @@ function PlatformRevenueChart({ rows = [] }) {
   );
 }
 
-function TesterGuideCard({ company, constructionMode, onNavigate }) {
-  const isTester = Number(company?.is_tester || 0) === 1;
-  const steps = constructionMode
-    ? ['查看工程經營總覽', '建立一筆案源', '建立案場與估價明細', '登記案場收款', '檢查材料與成本紀錄', '到產品回饋留下使用感受']
-    : ['查看經營總覽', '建立一筆進貨', '建立一筆銷貨', '查看商品 / 材料庫存是否變動', '檢查收款與報表資訊', '到產品回饋留下使用感受'];
+const betaGuideConfigs = {
+  engineering: {
+    title: '工程版封測快速開始',
+    description: '建議依序測試案場、估價、複製與工程決策流程。',
+    steps: [
+      { label: '建立第一個案場', page: 'jobsites' },
+      { label: '新增估價明細', page: 'jobsites' },
+      { label: '測試報價 / 請款 / 結案複製', page: 'jobsites' },
+      { label: '查看工程 BI', page: 'dashboard' },
+      { label: '進接案中心查看標案雷達', page: 'leads' }
+    ]
+  },
+  commerce: {
+    title: '電商 / 官網版封測快速開始',
+    description: '建議先建立基礎資料，再檢查品牌官網內容與公開呈現。',
+    steps: [
+      { label: '建立商品 / 材料資料', page: 'inventory' },
+      { label: '查看經營總覽', page: 'dashboard' },
+      { label: '進品牌官網後台', page: 'website' },
+      { label: '編輯 Banner / 首頁區塊 / FAQ', page: 'website' },
+      { label: '開啟公開網站或預覽網站', page: 'website' }
+    ]
+  },
+  all: {
+    title: '全功能封測快速開始',
+    description: '依序檢查跨版本核心流程，完成後請留下測試結果。',
+    steps: [
+      { label: '切換工程版與電商版', page: 'dashboard' },
+      { label: '測試案場中心', page: 'jobsites' },
+      { label: '測試品牌官網 CMS', page: 'website' },
+      { label: '測試接案中心', page: 'leads' },
+      { label: '回報問題', page: 'feedbacks' }
+    ]
+  }
+};
+
+function TesterGuideCard({ edition, betaActive, officialLineUrl, onNavigate }) {
+  const guide = betaGuideConfigs[edition] || betaGuideConfigs.commerce;
+  const storageKey = `bookai_beta_guide_collapsed_${edition}`;
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === '1');
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem(storageKey) === '1');
+  }, [storageKey]);
+
+  function toggleCollapsed() {
+    setCollapsed((value) => {
+      localStorage.setItem(storageKey, value ? '0' : '1');
+      return !value;
+    });
+  }
 
   return (
-    <div className={`tester-guide-card ${isTester ? 'tester' : ''}`}>
-      <div>
-        <p className="tester-guide-kicker">{isTester ? '早期體驗指南' : '開始使用 BookAI'}</p>
-        <h2>{isTester ? '建議先完成以下流程，協助你快速熟悉系統' : '建議先完成核心資料流程'}</h2>
-        <p>{isTester ? '請依序使用主要功能，並在產品回饋中留下你的操作感受。' : '先建立進貨、銷貨與庫存資料，經營總覽會更接近實際營運狀態。'}</p>
+    <div className={`tester-guide-card beta-guide-card ${betaActive ? 'tester' : ''} ${collapsed ? 'collapsed' : ''}`}>
+      <div className="beta-guide-heading">
+        <div>
+          <p className="tester-guide-kicker">{betaActive ? '封測操作導引' : '快速開始'}</p>
+          <h2>{guide.title}</h2>
+          {!collapsed && <p>{guide.description}</p>}
+        </div>
+        <button type="button" className="beta-guide-toggle" onClick={toggleCollapsed} aria-expanded={!collapsed}>
+          {collapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+          {collapsed ? '展開' : '收合'}
+        </button>
       </div>
-      <ol>
-        {steps.map((step) => <li key={step}>{step}</li>)}
-      </ol>
-      <div className="tester-guide-actions">
-        <button type="button" onClick={() => onNavigate?.(constructionMode ? 'leads' : 'purchases')}>{constructionMode ? '新增案源' : '新增進貨'}</button>
-        <button type="button" onClick={() => onNavigate?.(constructionMode ? 'jobsites' : 'sales')}>{constructionMode ? '管理案場' : '新增銷貨'}</button>
-        <button type="button" onClick={() => onNavigate?.(constructionMode ? 'jobsites' : 'inventory')}>{constructionMode ? '登記收款' : '查看庫存'}</button>
-        <button type="button" onClick={() => onNavigate?.('feedbacks')}>產品回饋</button>
-      </div>
+      {!collapsed && (
+        <>
+          <ol className="beta-guide-steps">
+            {guide.steps.map((step) => (
+              <li key={step.label}>
+                <button type="button" onClick={() => onNavigate?.(step.page)}>{step.label}</button>
+              </li>
+            ))}
+          </ol>
+          <div className="tester-guide-actions">
+            <button type="button" onClick={() => onNavigate?.(guide.steps[0].page)}>開始測試</button>
+            <button type="button" className="secondary-btn" onClick={() => onNavigate?.('feedbacks')}>回報問題</button>
+            {officialLineUrl && (
+              <a href={officialLineUrl} target="_blank" rel="noreferrer">
+                <MessageCircle size={16} />
+                官方 LINE
+              </a>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1629,7 +1743,7 @@ function EngineeringDashboardCharts({ stats, payments }) {
   );
 }
 
-function Dashboard({ companyId, refresh, company, engineeringMode = false, onNavigate }) {
+function Dashboard({ companyId, refresh, company, engineeringMode = false, betaActive = false, betaEdition = 'commerce', officialLineUrl = '', onNavigate }) {
   const [s, setS] = useState(null);
   const [jobSites, setJobSites] = useState([]);
   const [leads, setLeads] = useState([]);
@@ -1769,7 +1883,7 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, onNav
           </div>
         </div>
 
-        <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
+        <TesterGuideCard edition={betaEdition} betaActive={betaActive} officialLineUrl={officialLineUrl} onNavigate={onNavigate} />
 
         <div className="command-metrics">
           <Card title="工程營收總額" value={money(constructionStats.totalQuote)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
@@ -1844,7 +1958,7 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, onNav
         </div>
       </div>
 
-      <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
+      <TesterGuideCard edition={betaEdition} betaActive={betaActive} officialLineUrl={officialLineUrl} onNavigate={onNavigate} />
 
       <div className="command-metrics">
         <Card title="本月銷貨總額" value={money(s.monthlySales || 0)} />
@@ -1965,13 +2079,15 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, onNav
   );
 }
 
-function FeedbackCenter({ companyId }) {
+function FeedbackCenter({ companyId, officialLineUrl }) {
   const [rows, setRows] = useState([]);
   const [form, setForm] = useState({
-    category: '操作問題',
-    rating: '5',
+    category: '操作卡住',
     page: '',
-    message: ''
+    description: '',
+    expectedResult: '',
+    actualResult: '',
+    contact: ''
   });
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -1997,65 +2113,85 @@ function FeedbackCenter({ companyId }) {
         body: JSON.stringify({
           companyId,
           category: form.category,
-          rating: Number(form.rating),
           page: form.page,
-          message: form.message
+          description: form.description,
+          expectedResult: form.expectedResult,
+          actualResult: form.actualResult,
+          contact: form.contact
         })
       });
-      setForm({ category: '操作問題', rating: '5', page: '', message: '' });
-      setMessage('回饋已送出，BookAI 團隊會依狀態追蹤處理。');
+      setForm({ category: '操作卡住', page: '', description: '', expectedResult: '', actualResult: '', contact: '' });
+      setMessage('問題回報已送出，BookAI 團隊會依回報內容追蹤處理。');
       await load();
     } catch (err) {
-      setError('回饋送出失敗，請稍後再試。');
+      setError(err.message || '問題回報送出失敗，請稍後再試。');
     }
   }
 
   return (
     <section>
-      <Title title="產品回饋" desc="提交使用問題、功能建議與使用回饋。你只能看到自己公司的回饋紀錄。" />
+      <Title title="產品回饋" desc="提交封測問題、實際結果與改善建議。你只能看到自己公司的回饋紀錄。" />
+      <div className="feedback-support-panel">
+        <div>
+          <MessageCircle size={22} aria-hidden="true" />
+          <div>
+            <strong>封測期間需要協助？</strong>
+            <p>可透過產品回饋或 BookAI 官方 LINE 回報。請附上頁面名稱、操作步驟與截圖，方便我們協助排查。</p>
+          </div>
+        </div>
+        {officialLineUrl && (
+          <a href={officialLineUrl} target="_blank" rel="noreferrer">
+            聯繫官方 LINE
+            <ExternalLink size={16} />
+          </a>
+        )}
+      </div>
       {message && <div className="notice">{message}</div>}
       {error && <div className="error">{error}</div>}
 
       <form className="form feedback-form" onSubmit={submit}>
         <label>
-          <span>類別</span>
+          <span>問題類型</span>
           <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
-            <option>操作問題</option>
-            <option>介面建議</option>
-            <option>功能需求</option>
-            <option>錯誤回報</option>
+            <option>操作卡住</option>
+            <option>按鈕無反應</option>
+            <option>金額 / 報表異常</option>
+            <option>畫面顯示問題</option>
+            <option>資料沒有儲存</option>
+            <option>建議新增功能</option>
             <option>其他</option>
           </select>
         </label>
         <label>
-          <span>評分</span>
-          <select value={form.rating} onChange={(e) => setForm({ ...form, rating: e.target.value })}>
-            <option value="5">5 分，非常順手</option>
-            <option value="4">4 分，大致順手</option>
-            <option value="3">3 分，普通</option>
-            <option value="2">2 分，需要改善</option>
-            <option value="1">1 分，明顯卡住</option>
-          </select>
-        </label>
-        <label>
-          <span>目前頁面 / 模組</span>
-          <input value={form.page} onChange={(e) => setForm({ ...form, page: e.target.value })} placeholder="例如：進貨管理、接案中心" />
+          <span>所在頁面</span>
+          <input value={form.page} onChange={(e) => setForm({ ...form, page: e.target.value })} required placeholder="例如：案場中心、品牌官網" />
         </label>
         <label className="feedback-message-field">
-          <span>回饋內容</span>
-          <textarea value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} required placeholder="請描述你遇到的問題、建議或測試感受。" />
+          <span>問題描述</span>
+          <textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} required placeholder="請說明操作步驟，以及問題發生前後的狀況。" />
         </label>
-        <button>送出回饋</button>
+        <label className="feedback-message-field">
+          <span>預期結果</span>
+          <textarea value={form.expectedResult} onChange={(e) => setForm({ ...form, expectedResult: e.target.value })} required placeholder="你原本預期系統應該如何運作？" />
+        </label>
+        <label className="feedback-message-field">
+          <span>實際結果</span>
+          <textarea value={form.actualResult} onChange={(e) => setForm({ ...form, actualResult: e.target.value })} required placeholder="實際看到的畫面、訊息或結果是什麼？" />
+        </label>
+        <label className="feedback-contact-field">
+          <span>聯絡方式（選填）</span>
+          <input value={form.contact} onChange={(e) => setForm({ ...form, contact: e.target.value })} placeholder="LINE ID、電話或方便聯繫的方式" />
+        </label>
+        <button className="feedback-submit-btn">送出問題回報</button>
       </form>
 
       <div className="panel">
         <h2>我的回饋紀錄</h2>
         <Table
-          cols={['時間', '類別', '評分', '頁面', '內容', '狀態', '回覆備註']}
+          cols={['時間', '問題類型', '頁面', '回報內容', '狀態', '回覆備註']}
           rows={rows.map((row) => [
             row.createdAt || '-',
             row.category || '-',
-            `${row.rating || 3} / 5`,
             row.page || '-',
             row.message,
             getFeedbackStatusLabel(row.status),
@@ -8082,6 +8218,12 @@ function AdminConsole() {
             </select>
             <select value={feedbackCategoryFilter} onChange={(e) => setFeedbackCategoryFilter(e.target.value)}>
               <option value="all">全部類別</option>
+              <option value="操作卡住">操作卡住</option>
+              <option value="按鈕無反應">按鈕無反應</option>
+              <option value="金額 / 報表異常">金額 / 報表異常</option>
+              <option value="畫面顯示問題">畫面顯示問題</option>
+              <option value="資料沒有儲存">資料沒有儲存</option>
+              <option value="建議新增功能">建議新增功能</option>
               <option value="操作問題">操作問題</option>
               <option value="介面建議">介面建議</option>
               <option value="功能需求">功能需求</option>
