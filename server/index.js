@@ -8146,6 +8146,37 @@ app.get('/api/companies/:companyId/jobsites', auth, company, async (req, res) =>
   res.json(rows);
 });
 
+app.get('/api/companies/:companyId/jobsites/bi-payments', auth, company, async (req, res) => {
+  if (PG_ENABLED) {
+    try {
+      const rows = await pgAll(`
+        SELECT
+          job_site_id AS "jobSiteId",
+          COALESCE(amount, 0) AS amount,
+          payment_date AS "paymentDate"
+        FROM job_site_payments
+        WHERE company_id = $1
+        ORDER BY payment_date ASC, id ASC
+      `, [req.company.id]);
+      return res.json(rows);
+    } catch (err) {
+      return databaseError(res, req.path, req, err);
+    }
+  }
+
+  const rows = db.prepare(`
+    SELECT
+      job_site_id AS jobSiteId,
+      COALESCE(amount, 0) AS amount,
+      payment_date AS paymentDate
+    FROM job_site_payments
+    WHERE company_id = ?
+    ORDER BY payment_date ASC, id ASC
+  `).all(req.company.id);
+
+  res.json(rows);
+});
+
 app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const {
     siteName,

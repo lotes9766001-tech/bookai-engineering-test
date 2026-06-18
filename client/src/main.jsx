@@ -18,6 +18,21 @@ import {
   WalletCards,
   X
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from 'recharts';
 import { api, setToken, clearToken, getToken, getFounderTestEdition, updateFounderTestEdition } from './lib/api';
 import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
@@ -1200,7 +1215,15 @@ if (!me || !company) {
         {needsReview && page === 'review_waiting' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
         {needsReview && page === 'support' && <PendingReviewPage user={me.user} company={company} onLogout={onLogout} onNavigate={setPage} />}
         {needsReview && page === 'terms_beta' && <TermsBeta />}
-        {!needsReview && page === 'dashboard' && <Dashboard companyId={companyId} refresh={refresh} company={company} onNavigate={setPage} />}
+        {!needsReview && page === 'dashboard' && (
+          <Dashboard
+            companyId={companyId}
+            refresh={refresh}
+            company={company}
+            engineeringMode={isConstructionIndustry(company?.industry) || (userIsFounder && testEdition === 'engineering')}
+            onNavigate={setPage}
+          />
+        )}
         {!needsReview && page === 'leads' && <LeadCenterMock companyId={companyId} isAdmin={userIsAdmin} />}
         {!needsReview && page === 'transactions' && <Transactions companyId={companyId} />}
         {!needsReview && page === 'purchases' && <PurchasesManager companyId={companyId} onNavigate={setPage} />}
@@ -1331,7 +1354,7 @@ function PlatformRevenueChart({ rows = [] }) {
 function TesterGuideCard({ company, constructionMode, onNavigate }) {
   const isTester = Number(company?.is_tester || 0) === 1;
   const steps = constructionMode
-    ? ['查看經營總覽', '建立一筆進貨', '建立一筆銷貨', '查看商品 / 材料庫存是否變動', '使用接案中心與案場中心', '到產品回饋留下使用感受']
+    ? ['查看工程經營總覽', '建立一筆案源', '建立案場與估價明細', '登記案場收款', '檢查材料與成本紀錄', '到產品回饋留下使用感受']
     : ['查看經營總覽', '建立一筆進貨', '建立一筆銷貨', '查看商品 / 材料庫存是否變動', '檢查收款與報表資訊', '到產品回饋留下使用感受'];
 
   return (
@@ -1345,21 +1368,274 @@ function TesterGuideCard({ company, constructionMode, onNavigate }) {
         {steps.map((step) => <li key={step}>{step}</li>)}
       </ol>
       <div className="tester-guide-actions">
-        <button type="button" onClick={() => onNavigate?.('purchases')}>新增進貨</button>
-        <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
-        <button type="button" onClick={() => onNavigate?.('inventory')}>查看庫存</button>
+        <button type="button" onClick={() => onNavigate?.(constructionMode ? 'leads' : 'purchases')}>{constructionMode ? '新增案源' : '新增進貨'}</button>
+        <button type="button" onClick={() => onNavigate?.(constructionMode ? 'jobsites' : 'sales')}>{constructionMode ? '管理案場' : '新增銷貨'}</button>
+        <button type="button" onClick={() => onNavigate?.(constructionMode ? 'jobsites' : 'inventory')}>{constructionMode ? '登記收款' : '查看庫存'}</button>
         <button type="button" onClick={() => onNavigate?.('feedbacks')}>產品回饋</button>
       </div>
     </div>
   );
 }
 
-function Dashboard({ companyId, refresh, company, onNavigate }) {
+function finiteNumber(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function jobSiteAmount(site, ...keys) {
+  const key = keys.find((candidate) => site?.[candidate] !== undefined && site?.[candidate] !== null);
+  return key ? finiteNumber(site[key]) : 0;
+}
+
+function monthKey(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function recentMonths(count = 6) {
+  const now = new Date();
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (count - 1 - index), 1);
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      label: `${date.getMonth() + 1}月`,
+      revenue: 0,
+      collected: 0
+    };
+  });
+}
+
+const engineeringStatusOrder = ['洽談中', '已報價', '已簽約', '施工中', '已完工', '已結案'];
+const engineeringChartColors = ['#2563eb', '#0891b2', '#16a34a', '#b88a2e', '#7c3aed', '#64748b'];
+
+function normalizeJobSiteStatus(value) {
+  const status = String(value || '').trim();
+  if (['洽談中', '洽談', '評估中'].includes(status)) return '洽談中';
+  if (['已報價', '報價中', '待確認'].includes(status)) return '已報價';
+  if (['已簽約', '簽約', '待開工'].includes(status)) return '已簽約';
+  if (['施工中', '進行中', '執行中'].includes(status)) return '施工中';
+  if (['已完工', '完工', '待驗收'].includes(status)) return '已完工';
+  if (['已結案', '結案', 'closed', 'done'].includes(status.toLowerCase())) return '已結案';
+  return '洽談中';
+}
+
+function normalizeWorkType(value) {
+  const text = String(value || '').trim();
+  if (/油漆|塗裝/.test(text)) return '油漆';
+  if (/水電|機電|弱電/.test(text)) return '水電';
+  if (/裝潢|裝修|木作|系統櫃/.test(text)) return '裝潢';
+  if (/防水|抓漏/.test(text)) return '防水';
+  if (/泥作|土木|砌磚|磁磚/.test(text)) return '泥作';
+  return '其他';
+}
+
+function EngineeringChartEmpty({ children = '目前案場資料不足，建立更多案場後即可查看趨勢圖' }) {
+  return (
+    <div className="engineering-chart-empty">
+      <BarChart3 size={28} aria-hidden="true" />
+      <strong>尚無足夠資料</strong>
+      <p>{children}</p>
+    </div>
+  );
+}
+
+function EngineeringDashboardCharts({ stats, payments }) {
+  const sites = stats.sites;
+  const monthlyTrend = recentMonths(6);
+  const monthlyMap = new Map(monthlyTrend.map((row) => [row.key, row]));
+
+  sites.forEach((site) => {
+    const row = monthlyMap.get(monthKey(site.createdAt ?? site.created_at));
+    if (row) row.revenue += jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+  });
+  payments.forEach((payment) => {
+    const row = monthlyMap.get(monthKey(payment.paymentDate ?? payment.payment_date));
+    if (row) row.collected += finiteNumber(payment.amount);
+  });
+
+  const statusCounts = new Map(engineeringStatusOrder.map((status) => [status, 0]));
+  sites.forEach((site) => {
+    const status = normalizeJobSiteStatus(site.status);
+    statusCounts.set(status, (statusCounts.get(status) || 0) + 1);
+  });
+  const statusData = engineeringStatusOrder
+    .map((name) => ({ name, value: statusCounts.get(name) || 0 }))
+    .filter((row) => row.value > 0);
+
+  const workTypeTotals = new Map();
+  sites.forEach((site) => {
+    const name = normalizeWorkType(site.projectType ?? site.project_type);
+    const value = jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+    workTypeTotals.set(name, (workTypeTotals.get(name) || 0) + value);
+  });
+  const workTypeData = [...workTypeTotals.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+
+  const rankedSites = sites
+    .map((site) => {
+      const revenue = jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+      const received = jobSiteAmount(site, 'receivedAmount', 'received_amount');
+      return {
+        id: site.id,
+        name: site.siteName || site.site_name || site.name || '未命名案場',
+        client: site.clientName || site.client_name || '未填客戶',
+        revenue,
+        received,
+        unpaid: Math.max(revenue - received, 0),
+        status: normalizeJobSiteStatus(site.status)
+      };
+    })
+    .sort((a, b) => b.revenue - a.revenue)
+    .slice(0, 5);
+
+  const overdueSites = sites.filter((site) => {
+    const revenue = jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+    const received = jobSiteAmount(site, 'receivedAmount', 'received_amount');
+    return ['已完工', '已結案'].includes(normalizeJobSiteStatus(site.status)) && revenue > received;
+  });
+  const highRiskSites = sites.filter((site) => {
+    const revenue = jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+    const received = jobSiteAmount(site, 'receivedAmount', 'received_amount');
+    return revenue > 0 && received / revenue < 0.5 && !['已結案'].includes(normalizeJobSiteStatus(site.status));
+  });
+  const hasTrendData = monthlyTrend.some((row) => row.revenue > 0 || row.collected > 0);
+
+  return (
+    <div className="engineering-bi">
+      <div className="engineering-bi-grid engineering-bi-grid-wide">
+        <div className="panel engineering-chart-panel">
+          <div className="engineering-panel-head">
+            <div>
+              <h2>月度工程營收 / 收款趨勢</h2>
+              <p>近 6 個月依案場建立月份彙整工程金額，並依實際收款日呈現現金回收節奏。</p>
+            </div>
+            <span className="engineering-panel-tag">近 6 個月</span>
+          </div>
+          {hasTrendData ? (
+            <div className="engineering-chart-canvas">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={monthlyTrend} margin={{ top: 12, right: 8, left: 4, bottom: 0 }}>
+                  <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="label" tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={(value) => `${Math.round(value / 10000)}萬`} tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} width={48} />
+                  <Tooltip formatter={(value) => money(value)} contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8 }} />
+                  <Legend />
+                  <Bar dataKey="revenue" name="工程營收" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={38} />
+                  <Line dataKey="collected" name="實際收款" stroke="#16a34a" strokeWidth={3} dot={{ r: 4, fill: '#16a34a' }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <EngineeringChartEmpty />}
+        </div>
+
+        <div className="panel engineering-chart-panel">
+          <div className="engineering-panel-head">
+            <div>
+              <h2>案場狀態分布</h2>
+              <p>從洽談到結案的案件分布，快速辨識目前工程量集中階段。</p>
+            </div>
+          </div>
+          {statusData.length ? (
+            <div className="engineering-donut-layout">
+              <div className="engineering-chart-canvas donut">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={statusData} dataKey="value" nameKey="name" innerRadius={58} outerRadius={88} paddingAngle={3}>
+                      {statusData.map((row, index) => <Cell key={row.name} fill={engineeringChartColors[index % engineeringChartColors.length]} />)}
+                    </Pie>
+                    <Tooltip formatter={(value) => [`${value} 件`, '案場數']} contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div className="engineering-donut-total"><strong>{sites.length}</strong><span>總案場</span></div>
+              </div>
+              <div className="engineering-chart-legend">
+                {statusData.map((row, index) => (
+                  <div key={row.name}><i style={{ background: engineeringChartColors[index % engineeringChartColors.length] }} /><span>{row.name}</span><strong>{row.value} 件</strong></div>
+                ))}
+              </div>
+            </div>
+          ) : <EngineeringChartEmpty>目前尚無案場狀態資料，新增案場後即可查看分布。</EngineeringChartEmpty>}
+        </div>
+      </div>
+
+      <div className="engineering-bi-grid">
+        <div className="panel engineering-chart-panel">
+          <div className="engineering-panel-head">
+            <div>
+              <h2>工種營收分布</h2>
+              <p>依案場工種彙整簽訂金額，掌握主要營收來源。</p>
+            </div>
+          </div>
+          {workTypeData.length ? (
+            <div className="engineering-chart-canvas">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={workTypeData} layout="vertical" margin={{ top: 6, right: 14, left: 8, bottom: 0 }}>
+                  <CartesianGrid stroke="#e5e7eb" strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" tickFormatter={(value) => `${Math.round(value / 10000)}萬`} tick={{ fill: '#64748b', fontSize: 12 }} axisLine={false} tickLine={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: '#334155', fontSize: 12 }} axisLine={false} tickLine={false} width={44} />
+                  <Tooltip formatter={(value) => money(value)} contentStyle={{ border: '1px solid #e5e7eb', borderRadius: 8 }} />
+                  <Bar dataKey="value" name="工程營收" fill="#0891b2" radius={[0, 4, 4, 0]} maxBarSize={30} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          ) : <EngineeringChartEmpty>案場尚未填寫工種或報價金額，補齊後即可查看營收分布。</EngineeringChartEmpty>}
+        </div>
+
+        <div className="panel engineering-risk-panel">
+          <div className="engineering-panel-head">
+            <div>
+              <h2>應收款 / 收款風險</h2>
+              <p>聚焦未收款、低收款率與完工後仍未收款的案場。</p>
+            </div>
+          </div>
+          <div className="engineering-risk-metrics">
+            <div><span>未收款總額</span><strong>{money(stats.unpaid)}</strong><i className="danger" style={{ width: `${Math.min(100, stats.totalQuote ? stats.unpaid / stats.totalQuote * 100 : 0)}%` }} /></div>
+            <div><span>高風險案場</span><strong>{highRiskSites.length} 件</strong><i className="warning" style={{ width: `${Math.min(100, sites.length ? highRiskSites.length / sites.length * 100 : 0)}%` }} /></div>
+            <div><span>完工未收案場</span><strong>{overdueSites.length} 件</strong><i className="neutral" style={{ width: `${Math.min(100, sites.length ? overdueSites.length / sites.length * 100 : 0)}%` }} /></div>
+            <div><span>整體收款率</span><strong>{stats.collectionRate}%</strong><i className="success" style={{ width: `${Math.min(100, stats.collectionRate)}%` }} /></div>
+          </div>
+          {!sites.length && <EngineeringChartEmpty>目前尚無案場收款資料，新增案場與收款紀錄後即可查看風險。</EngineeringChartEmpty>}
+        </div>
+      </div>
+
+      <div className="panel engineering-ranking-panel">
+        <div className="engineering-panel-head">
+          <div>
+            <h2>Top 案場排行</h2>
+            <p>依工程營收排序，同時顯示未收款，讓高價值與高風險案場一眼可見。</p>
+          </div>
+        </div>
+        {rankedSites.length ? (
+          <div className="engineering-ranking-list">
+            {rankedSites.map((site, index) => {
+              const collectionRate = site.revenue ? Math.round(site.received / site.revenue * 1000) / 10 : 0;
+              return (
+                <div key={site.id || site.name}>
+                  <span className="engineering-rank">{index + 1}</span>
+                  <div className="engineering-rank-name"><strong>{site.name}</strong><small>{site.client}｜{site.status}</small></div>
+                  <div><span>工程營收</span><strong>{money(site.revenue)}</strong></div>
+                  <div><span>未收款</span><strong className={site.unpaid > 0 ? 'risk-value' : ''}>{money(site.unpaid)}</strong></div>
+                  <div><span>收款率</span><strong>{collectionRate}%</strong></div>
+                </div>
+              );
+            })}
+          </div>
+        ) : <EngineeringChartEmpty>目前尚無案場可供排行，建立案場後即可查看重點案件。</EngineeringChartEmpty>}
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ companyId, refresh, company, engineeringMode = false, onNavigate }) {
   const [s, setS] = useState(null);
   const [jobSites, setJobSites] = useState([]);
   const [leads, setLeads] = useState([]);
+  const [jobSitePayments, setJobSitePayments] = useState([]);
   const industry = company?.industry;
-  const constructionMode = isConstructionIndustry(industry);
+  const constructionMode = engineeringMode || isConstructionIndustry(industry);
 
   useEffect(() => {
     let alive = true;
@@ -1371,12 +1647,16 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
         : Promise.resolve([]),
       constructionMode
         ? api(`/companies/${companyId}/leads`).catch(() => [])
+        : Promise.resolve([]),
+      constructionMode
+        ? api(`/companies/${companyId}/jobsites/bi-payments`).catch(() => [])
         : Promise.resolve([])
-    ]).then(([summary, sites, leadRows]) => {
+    ]).then(([summary, sites, leadRows, paymentRows]) => {
       if (!alive) return;
       setS(summary);
       setJobSites(Array.isArray(sites) ? sites : []);
       setLeads(Array.isArray(leadRows) ? leadRows : []);
+      setJobSitePayments(Array.isArray(paymentRows) ? paymentRows : []);
     });
 
     return () => {
@@ -1395,17 +1675,18 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
   const constructionStats = (() => {
     const sites = jobSites || [];
 
-    const totalQuote = sites.reduce((sum, site) => sum + Number(site.quote_amount ?? site.quoteAmount ?? 0), 0);
-    const received = sites.reduce((sum, site) => sum + Number(site.received_amount ?? site.receivedAmount ?? 0), 0);
+    const totalQuote = sites.reduce((sum, site) => sum + jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount'), 0);
+    const received = sites.reduce((sum, site) => sum + jobSiteAmount(site, 'receivedAmount', 'received_amount'), 0);
     const unpaid = Math.max(totalQuote - received, 0);
 
     const totalCost = sites.reduce((sum, site) => {
-      const material = Number(site.material_cost ?? site.materialCost ?? 0);
-      const labor = Number(site.labor_cost ?? site.laborCost ?? 0);
-      const personnel = Number(site.personnel_cost ?? site.personnelCost ?? 0);
-      const outsourced = Number(site.outsourced_cost ?? site.outsourcedCost ?? 0);
-      const misc = Number(site.misc_cost ?? site.miscCost ?? 0);
-      return sum + material + labor + personnel + outsourced + misc;
+      const material = jobSiteAmount(site, 'materialCost', 'material_cost');
+      const estimate = jobSiteAmount(site, 'estimateCostTotal', 'estimate_cost_total');
+      const labor = jobSiteAmount(site, 'laborCost', 'labor_cost');
+      const personnel = jobSiteAmount(site, 'personnelCost', 'personnel_cost');
+      const outsourced = jobSiteAmount(site, 'outsourcedCost', 'outsourced_cost');
+      const misc = jobSiteAmount(site, 'miscCost', 'misc_cost');
+      return sum + estimate + material + labor + personnel + outsourced + misc;
     }, 0);
 
     const profit = totalQuote - totalCost;
@@ -1413,8 +1694,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
     const marginRate = totalQuote ? Math.round((profit / totalQuote) * 1000) / 10 : 0;
 
     const riskSites = sites.filter((site) => {
-      const quote = Number(site.quote_amount ?? site.quoteAmount ?? 0);
-      const paid = Number(site.received_amount ?? site.receivedAmount ?? 0);
+      const quote = jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+      const paid = jobSiteAmount(site, 'receivedAmount', 'received_amount');
       const status = String(site.status || '');
       const siteCollectionRate = quote ? paid / quote : 0;
       return quote > 0 && siteCollectionRate < 0.5 && !['已結案', '結案'].includes(status);
@@ -1435,19 +1716,19 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
   })();
 
   if (constructionMode) {
-    const activeSites = constructionStats.sites.filter((site) => !['已結案', '結案'].includes(String(site.status || ''))).length;
-    const tenderLeads = leads.filter((lead) => String(lead.source || lead.tenderSource || '').includes('標案') || String(lead.agencyType || '').includes('機關')).length;
+    const activeSites = constructionStats.sites.filter((site) => normalizeJobSiteStatus(site.status) !== '已結案').length;
     const priorityLeads = leads.filter((lead) => Number(lead.fitScore ?? lead.fit_score ?? 0) >= 75 && !['lost', 'converted'].includes(String(lead.status || ''))).length;
     const rows = constructionStats.sites.slice(0, 8).map((site) => {
-      const quote = Number(site.quote_amount ?? site.quoteAmount ?? 0);
-      const received = Number(site.received_amount ?? site.receivedAmount ?? 0);
+      const quote = jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount');
+      const received = jobSiteAmount(site, 'receivedAmount', 'received_amount');
       const unpaid = Math.max(quote - received, 0);
-      const material = Number(site.material_cost ?? site.materialCost ?? 0);
-      const labor = Number(site.labor_cost ?? site.laborCost ?? 0);
-      const personnel = Number(site.personnel_cost ?? site.personnelCost ?? 0);
-      const outsourced = Number(site.outsourced_cost ?? site.outsourcedCost ?? 0);
-      const misc = Number(site.misc_cost ?? site.miscCost ?? 0);
-      const cost = material + labor + personnel + outsourced + misc;
+      const material = jobSiteAmount(site, 'materialCost', 'material_cost');
+      const estimate = jobSiteAmount(site, 'estimateCostTotal', 'estimate_cost_total');
+      const labor = jobSiteAmount(site, 'laborCost', 'labor_cost');
+      const personnel = jobSiteAmount(site, 'personnelCost', 'personnel_cost');
+      const outsourced = jobSiteAmount(site, 'outsourcedCost', 'outsourced_cost');
+      const misc = jobSiteAmount(site, 'miscCost', 'misc_cost');
+      const cost = estimate + material + labor + personnel + outsourced + misc;
       const profit = quote - cost;
       const margin = quote ? Math.round((profit / quote) * 1000) / 10 : 0;
       const collection = quote ? Math.round((received / quote) * 1000) / 10 : 0;
@@ -1471,7 +1752,7 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
           <div>
           <p className="command-kicker">{todayText}｜經營總覽</p>
           <h1>{company.name}</h1>
-          <p>今日營運狀態：{constructionStats.unpaid > 0 ? `尚有 ${money(constructionStats.unpaid)} 未收款需要追蹤` : '收款狀況穩定'}。進貨、銷貨、庫存與帳款集中管理。</p>
+          <p>今日工程營運狀態：{constructionStats.unpaid > 0 ? `尚有 ${money(constructionStats.unpaid)} 未收款需要追蹤` : '收款狀況穩定'}。案場、報價、成本與收款集中掌握。</p>
           </div>
           <div className="command-hero-side">
             <div className="command-signal">
@@ -1491,8 +1772,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
         <TesterGuideCard company={company} constructionMode={constructionMode} onNavigate={onNavigate} />
 
         <div className="command-metrics">
-          <Card title="本月銷貨總額" value={money(s.monthlySales || constructionStats.received)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
-          <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} sub={`未付款 ${money(s.unpaidPurchases || 0)}`} />
+          <Card title="工程營收總額" value={money(constructionStats.totalQuote)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
+          <Card title="工程成本總額" value={money(constructionStats.totalCost)} sub="材料、工資、外包與雜支" />
           <Card title="應收未收總額" value={money((s.unpaidSales || 0) + constructionStats.unpaid)} sub="需持續追蹤請款" />
           <Card title="應付未付總額" value={money(s.unpaidPurchases || 0)} sub="待安排付款" />
           <Card title="已收款金額" value={money(s.collectedSales || constructionStats.received || 0)} sub="銷貨與案場收款" />
@@ -1501,6 +1782,8 @@ function Dashboard({ companyId, refresh, company, onNavigate }) {
           <Card title="預估毛利" value={money(constructionStats.profit)} sub={`毛利率 ${constructionStats.marginRate}%`} />
           <Card title="接案中心狀態" value={`${priorityLeads} 件`} sub={`案源總數 ${leads.length} 件`} />
         </div>
+
+        <EngineeringDashboardCharts stats={constructionStats} payments={jobSitePayments} />
 
         <div className="command-layout">
           <div className="panel command-ai-panel">

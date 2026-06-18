@@ -2586,6 +2586,297 @@ tr:hover td {
   }
 }
 
+.engineering-chart-panel,
+.engineering-risk-panel,
+.engineering-ranking-panel {
+  border-radius: 8px;
+}
+
+/* Engineering BI dashboard */
+.engineering-bi {
+  display: grid;
+  gap: 16px;
+}
+
+.engineering-bi-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.engineering-bi-grid-wide {
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, .75fr);
+}
+
+.engineering-chart-panel,
+.engineering-risk-panel,
+.engineering-ranking-panel {
+  min-width: 0;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+}
+
+.engineering-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.engineering-panel-head h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.engineering-panel-head p {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.engineering-panel-tag {
+  flex: 0 0 auto;
+  padding: 6px 9px;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.engineering-chart-canvas {
+  width: 100%;
+  height: 286px;
+  min-height: 286px;
+}
+
+.engineering-chart-canvas.donut {
+  position: relative;
+  height: 230px;
+  min-height: 230px;
+}
+
+.engineering-donut-layout {
+  display: grid;
+  grid-template-columns: minmax(190px, .9fr) minmax(150px, 1fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.engineering-donut-total {
+  position: absolute;
+  inset: 50% auto auto 50%;
+  display: grid;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  pointer-events: none;
+}
+
+.engineering-donut-total strong {
+  color: #0f172a;
+  font-size: 28px;
+}
+
+.engineering-donut-total span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.engineering-chart-legend {
+  display: grid;
+  gap: 10px;
+}
+
+.engineering-chart-legend > div {
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  color: #475569;
+  font-size: 13px;
+}
+
+.engineering-chart-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.engineering-chart-legend strong {
+  color: #0f172a;
+}
+
+.engineering-chart-empty {
+  display: grid;
+  min-height: 230px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  padding: 24px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #94a3b8;
+  text-align: center;
+}
+
+.engineering-chart-empty strong {
+  color: #334155;
+  font-size: 15px;
+}
+
+.engineering-chart-empty p {
+  max-width: 420px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.engineering-risk-metrics {
+  display: grid;
+  gap: 14px;
+}
+
+.engineering-risk-metrics > div {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 11px;
+  overflow: hidden;
+  border-bottom: 4px solid #e5e7eb;
+}
+
+.engineering-risk-metrics span {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.engineering-risk-metrics strong {
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.engineering-risk-metrics i {
+  position: absolute;
+  bottom: -4px;
+  left: 0;
+  height: 4px;
+  max-width: 100%;
+  background: #64748b;
+}
+
+.engineering-risk-metrics i.danger { background: #dc2626; }
+.engineering-risk-metrics i.warning { background: #d97706; }
+.engineering-risk-metrics i.neutral { background: #7c3aed; }
+.engineering-risk-metrics i.success { background: #16a34a; }
+
+.engineering-ranking-list {
+  display: grid;
+}
+
+.engineering-ranking-list > div {
+  display: grid;
+  grid-template-columns: 36px minmax(200px, 1.5fr) repeat(3, minmax(120px, .7fr));
+  align-items: center;
+  gap: 16px;
+  min-height: 72px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.engineering-ranking-list > div:last-child {
+  border-bottom: 0;
+}
+
+.engineering-rank {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.engineering-rank-name {
+  min-width: 0;
+}
+
+.engineering-rank-name strong,
+.engineering-ranking-list > div > div > span,
+.engineering-ranking-list > div > div > strong {
+  display: block;
+}
+
+.engineering-rank-name strong {
+  overflow: hidden;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.engineering-rank-name small,
+.engineering-ranking-list > div > div > span {
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.engineering-ranking-list > div > div > strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.engineering-ranking-list .risk-value {
+  color: #dc2626;
+}
+
+@media (max-width: 1080px) {
+  .engineering-bi-grid,
+  .engineering-bi-grid-wide {
+    grid-template-columns: 1fr;
+  }
+
+  .engineering-ranking-list > div {
+    grid-template-columns: 36px minmax(180px, 1.4fr) repeat(3, minmax(105px, .7fr));
+    min-width: 760px;
+  }
+
+  .engineering-ranking-panel {
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 720px) {
+  .engineering-panel-head {
+    display: block;
+  }
+
+  .engineering-panel-tag {
+    display: inline-block;
+    margin-top: 10px;
+  }
+
+  .engineering-chart-canvas {
+    height: 250px;
+    min-height: 250px;
+  }
+
+  .engineering-donut-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .engineering-chart-legend {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Admin Console readability polish */
 .admin-console {
   color: #1f2937;
@@ -4875,4 +5166,11 @@ tr:hover td {
   button {
     max-width: 100%;
   }
+}
+
+/* Keep engineering BI tool panels compact after legacy theme overrides. */
+.engineering-chart-panel,
+.engineering-risk-panel,
+.engineering-ranking-panel {
+  border-radius: 8px;
 }
