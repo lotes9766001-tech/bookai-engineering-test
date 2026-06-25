@@ -18,6 +18,7 @@ import {
   PlugZap,
   ReceiptText,
   ShieldCheck,
+  Sparkles,
   Users,
   WalletCards,
   X
@@ -40,6 +41,7 @@ import {
 import { api, setToken, clearToken, getToken, getFounderTestEdition, updateFounderTestEdition } from './lib/api';
 import { trackVisit, getTrackingPayload } from './lib/tracking';
 import './styles.css';
+import AiDraftAssistant from './components/AiDraftAssistant.jsx';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
 import PublicSitePage from './pages/PublicSitePage.jsx';
 import WebsiteCmsPage from './pages/WebsiteCmsPage.jsx';
@@ -58,6 +60,7 @@ const featureByPage = {
 
 function getPageFeatureKey(page) {
   if (page === 'founder') return null;
+  if (page === 'ai_draft') return null;
   if (page === 'website') return 'commerce_site';
   return featureByPage[page] || page;
 }
@@ -1065,9 +1068,16 @@ function Shell({ onLogout }) {
   const editionCompanyNav = userIsFounder
     ? editionSourceNav
     : editionSourceNav.filter(([id]) => hasCompanyFeature(company, id));
+  const aiDraftNav = editionCompanyNav.some(([id]) => id === 'ai_draft')
+    ? editionCompanyNav
+    : [
+        ...editionCompanyNav.slice(0, Math.max(1, editionCompanyNav.length - 1)),
+        ['ai_draft', 'AI 草稿助手 Beta', Sparkles],
+        ...editionCompanyNav.slice(Math.max(1, editionCompanyNav.length - 1))
+      ];
   const visibleNav = userIsAdmin
-    ? [...editionCompanyNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
-    : editionCompanyNav;
+    ? [...aiDraftNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
+    : aiDraftNav;
   const founderNav = userIsFounder
     ? [...visibleNav, ['founder', '創辦人營運中心', ShieldCheck]]
     : visibleNav;
@@ -1298,6 +1308,7 @@ if (!me || !company) {
         {!needsReview && page === 'tax' && <Tax companyId={companyId} />}
         {!needsReview && page === 'accountant' && <Accountant companyId={companyId} />}
         {!needsReview && page === 'reports' && <Reports companyId={companyId} company={company} />}
+        {!needsReview && page === 'ai_draft' && <AiDraftAssistant companyId={companyId} />}
         {!needsReview && page === 'settings' && <Settings company={company} />}
         {!needsReview && page === 'website' && <WebsiteCmsPage />}
         {!needsReview && page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}
