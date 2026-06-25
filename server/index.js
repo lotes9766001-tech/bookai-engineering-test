@@ -13,6 +13,7 @@ import { db, initDb, audit as sqliteAudit, DB_PATH, DB_PROVIDER, DATABASE_URL } 
 import { PG_ENABLED, initPostgresDb, getPool, pgAll, pgOne, pgQuery } from './pg-db.js';
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
+import { AI_USE_CASES, generateAiDraft } from './ai-provider.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -11107,6 +11108,87 @@ app.get('/api/companies/:companyId/audit-logs', auth, company, async (req, res) 
   `).all(req.company.id);
 
   res.json(rows);
+});
+
+app.get('/api/ai/use-cases', auth, (req, res) => {
+  res.json({
+    ok: true,
+    useCases: Object.entries(AI_USE_CASES).map(([key, value]) => ({
+      key,
+      label: value.label,
+      purpose: value.purpose,
+      disclaimer: value.disclaimer
+    }))
+  });
+});
+
+app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  const useCase = String(req.body?.useCase || '').trim();
+
+  try {
+    const result = await generateAiDraft({
+      useCase,
+      input: req.body?.input || {},
+      company: req.company,
+      user: req.user
+    });
+
+    audit(
+      req.company.id,
+      req.user.id,
+      'ai_draft_requested',
+      JSON.stringify({
+        useCase,
+        provider: result.provider,
+        status: result.status || (result.ok ? 'ok' : 'disabled'),
+        inputLength: result.inputLength || 0
+      })
+    );
+
+    return res.json({
+      ok: result.ok,
+      useCase: result.useCase,
+      provider: result.provider,
+      mode: result.mode,
+      status: result.status,
+      purpose: result.purpose,
+      disclaimer: result.disclaimer,
+      draft: result.draft,
+      createdAt: result.createdAt
+    });
+  } catch (error) {
+    const status = error.status || 500;
+    const provider = String(process.env.AI_PROVIDER || 'mock').trim().toLowerCase() || 'mock';
+
+    audit(
+      req.company.id,
+      req.user.id,
+      'ai_draft_failed',
+      JSON.stringify({
+        useCase,
+        provider,
+        status: error.code || 'AI_PROVIDER_ERROR',
+        inputLength: String(req.body?.input?.text || '').length
+      })
+    );
+
+    return res.status(status).json({
+      ok: false,
+      useCase,
+      provider,
+      code: error.code || 'AI_PROVIDER_ERROR',
+      error: error.message || 'AI 草稿服務暫時不可用，系統未寫入任何資料。',
+      disclaimer: 'AI 內容僅供輔助判斷，請以實際資料與人工確認為準。',
+      draft: {
+        title: 'AI 草稿產生失敗',
+        summary: '目前無法產生草稿，請稍後再試或改用 mock provider。',
+        items: [],
+        warnings: ['系統未寫入任何正式資料。'],
+        nextSteps: ['人工檢查輸入內容或系統設定。']
+      },
+      createdAt: new Date().toISOString()
+    });
+  }
 });
 
 
