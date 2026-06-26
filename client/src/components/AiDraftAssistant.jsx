@@ -308,6 +308,74 @@ function guidedPlaceholder(task) {
   return placeholders[task?.id] || task?.placeholder || '';
 }
 
+function inputGuidance(task, edition, workflowId) {
+  const businessMode = edition === 'engineering'
+    ? 'engineering'
+    : edition === 'restaurant'
+      ? 'restaurant'
+      : 'commerce';
+
+  const businessGuides = {
+    engineering: {
+      example: '本月新增案場 4 件，總報價 820,000 元，已收款 310,000 元，尚未收款 510,000 元，材料成本約 210,000 元，人工成本約 180,000 元，請整理收款風險、毛利風險與下一步。',
+      help: '可包含案場數、報價金額、收款、成本、追加問題與待辦事項。'
+    },
+    commerce: {
+      example: '本月官網訂單 86 筆，銷售額 238,000 元，熱銷商品為寵物飲水機與寵物外出包，飲水機剩 6 台，外出包剩 3 個，退貨 3 筆，請整理庫存風險、銷售機會與客服改善方向。',
+      help: '可包含訂單數、銷售額、熱銷商品、庫存、退貨原因、客服狀況與社群互動。'
+    },
+    restaurant: {
+      example: '本週營業額約 186,000 元，熱銷餐點為紅燒牛肉麵與麻辣乾拌麵，牛肉成本比上月增加 12%，外送有 4 筆反應湯灑出，請整理食材成本風險、出餐流程問題與活動建議。',
+      help: '可包含營業額、熱銷餐點、食材成本、尖峰時段、客訴與想改善的問題。'
+    }
+  };
+
+  const guides = {
+    estimate: {
+      example: '台中南區 25 坪老公寓油漆，4 樓無電梯，牆面有壁癌與釘孔，需要整理估價草稿，包含可能工項、施工注意事項與報價前需要確認的問題。',
+      help: '可包含地點、坪數、樓層、是否有電梯、施工範圍、現場狀況、材料要求與限制。'
+    },
+    tender: {
+      example: '標案名稱：某國小教室牆面粉刷及天花板修繕工程。預算約 98 萬，截止日 2026/07/05，內容包含牆面粉刷、天花板修補與施工後清潔，請協助整理重點、風險與下一步。',
+      help: '可包含機關、標案名稱、預算、截止日、工程範圍、資格條件與案號。'
+    },
+    'engineering-summary': {
+      example: '北屯區中古屋油漆工程，合約 168,000 元，已收訂金 50,000 元，材料成本約 36,000 元，目前完成批土與底漆，主臥壁癌比預期嚴重，請整理案場摘要、收款風險與下一步。',
+      help: '可包含合約金額、已收款、成本、施工進度、問題與待辦事項。'
+    },
+    'product-copy': {
+      example: '智能靜音寵物飲水機，2.5L 大容量、低噪音、循環活水、可拆洗水箱，適合貓咪、小型犬與多寵家庭，請產生商品標題、賣點、商品描述、FAQ 與 LINE 社群文案。',
+      help: '可包含商品名稱、特色、規格、適用對象、使用情境、主打賣點與注意限制。'
+    },
+    'homepage-copy': {
+      example: 'Mori Pet Life 是小型寵物用品選物品牌，主打實用、安全、簡約設計，目標客群是貓狗飼主與租屋族，請產生官網 Banner、品牌介紹、首頁區塊、FAQ 與 SEO 描述。',
+      help: '可包含品牌名稱、品牌定位、主要商品、目標客群、品牌語氣與主要優勢。'
+    },
+    'faq-social': {
+      example: '寵物外出包新品上市，防潑水、輕量好收納，適合小型犬與貓咪外出使用，請產生 LINE 社群貼文、常見問題與簡短活動文案。',
+      help: '可包含商品特色、活動主題、目標客群、語氣與希望引導的行動。'
+    },
+    'menu-copy': {
+      example: '招牌紅燒牛肉麵，牛腱肉燉煮 3 小時，湯頭使用牛骨、洋蔥、番茄與香料熬煮，口味濃郁但不死鹹，請產生菜單文案、餐點特色、推薦語與外送平台描述。',
+      help: '可包含餐點名稱、口味特色、份量、價格、目標客群與限制。'
+    },
+    'campaign-copy': {
+      example: '平日午餐雙人套餐，週一到週五 11:00 到 14:00，雙人 399 元，包含兩份主餐、兩杯紅茶與一份薯條，請產生活動標題、社群貼文與 LINE 群發文案。',
+      help: '可包含活動名稱、活動時間、優惠內容、目標客群與注意事項。'
+    },
+    'store-copy': {
+      example: '小巷湯咖哩位於台中西區，主打日式湯咖哩，湯底每日熬煮，餐點可選雞腿、豬肉或豆腐，店內木質調、適合朋友聚餐與一人用餐，請產生店家介紹、外送平台描述與 FAQ。',
+      help: '可包含店名、地點、餐點特色、店內風格、目標客群與品牌語氣。'
+    },
+    'monthly-summary': businessGuides[businessMode],
+    'receivable-risk': businessGuides[businessMode],
+    'next-actions': businessGuides[businessMode]
+  };
+
+  if (workflowId === 'business') return businessGuides[businessMode];
+  return guides[task?.id] || null;
+}
+
 function EditionScopeCard({ scope }) {
   if (!scope) return null;
   return (
@@ -669,6 +737,7 @@ export default function AiDraftAssistant({
 
   const draft = result?.draft || null;
   const scope = editionAiScopes[edition] || editionAiScopes.commerce;
+  const guidance = inputGuidance(task, edition, workflow.id);
   const draftTitle = cleanPreviewText(draft?.title || `${task.label}草稿`);
   const draftSummary = cleanPreviewText(draft?.summary || 'BookAI 已整理出可供人工確認的草稿。');
   const warnings = uniqueList(draft?.warnings, ['AI 草稿僅供輔助判斷，請人工確認後再使用。']);
@@ -685,6 +754,7 @@ export default function AiDraftAssistant({
     warnings,
     nextSteps
   });
+  const showShortInputHint = text.trim().length > 0 && text.trim().length < 18;
 
   return (
     <section className="ai-draft-page">
@@ -757,6 +827,20 @@ export default function AiDraftAssistant({
             placeholder={guidedPlaceholder(task)}
           />
         </label>
+
+        {guidance && (
+          <div className="ai-input-guide" aria-live="polite">
+            <span>你可以這樣輸入：</span>
+            <p className="ai-input-example">「{guidance.example}」</p>
+            <p className="ai-input-help">{guidance.help}</p>
+          </div>
+        )}
+
+        {showShortInputHint && (
+          <p className="ai-muted-text">
+            輸入越具體，AI 草稿會越接近可用內容。建議補充名稱、特色、對象、規格、情境或目前想解決的問題。
+          </p>
+        )}
 
         {emptyMessage && <div className="ai-empty-state">{emptyMessage}</div>}
 
