@@ -1308,7 +1308,14 @@ if (!me || !company) {
         {!needsReview && page === 'tax' && <Tax companyId={companyId} />}
         {!needsReview && page === 'accountant' && <Accountant companyId={companyId} />}
         {!needsReview && page === 'reports' && <Reports companyId={companyId} company={company} />}
-        {!needsReview && page === 'ai_draft' && <AiDraftAssistant companyId={companyId} />}
+        {!needsReview && page === 'ai_draft' && (
+          <AiDraftAssistant
+            companyId={companyId}
+            company={company}
+            isFounder={userIsFounder}
+            founderEdition={testEdition}
+          />
+        )}
         {!needsReview && page === 'settings' && <Settings company={company} />}
         {!needsReview && page === 'website' && <WebsiteCmsPage />}
         {!needsReview && page === 'commerce_site' && <CommerceSiteManager companyId={companyId} company={company} />}

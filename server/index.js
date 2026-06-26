@@ -4907,6 +4907,79 @@ function inferProductLine(industry = '') {
   return 'general';
 }
 
+async function getFounderTestEditionForRequest(req) {
+  if (!isFounderEmail(req.user?.email)) return '';
+  try {
+    await ensureFounderTestEditionStorage();
+    const row = PG_ENABLED
+      ? await pgOne(`SELECT test_edition FROM users WHERE id = $1`, [req.user.id])
+      : db.prepare(`SELECT test_edition FROM users WHERE id = ?`).get(req.user.id);
+    return normalizeFounderTestEdition(row?.test_edition) || DEFAULT_FOUNDER_TEST_EDITION;
+  } catch {
+    return DEFAULT_FOUNDER_TEST_EDITION;
+  }
+}
+
+async function getAiEditionForRequest(req) {
+  const founderEdition = await getFounderTestEditionForRequest(req);
+  if (founderEdition) return founderEdition;
+
+  const productLine = String(req.company?.product_line || req.company?.productLine || '').trim().toLowerCase();
+  if (['engineering', 'commerce', 'restaurant', 'food', 'dining', 'beverage', 'all'].includes(productLine)) {
+    if (['food', 'dining', 'beverage'].includes(productLine)) return 'restaurant';
+    return productLine;
+  }
+
+  const industry = String(req.company?.industry_type || req.company?.industry || '').trim().toLowerCase();
+  const inferred = inferProductLine(industry);
+  if (inferred === 'engineering') return 'engineering';
+  if (['restaurant', 'food', 'beverage'].includes(inferred) || ['restaurant', 'food', 'dining', 'beverage'].includes(industry)) return 'restaurant';
+  if (inferred === 'commerce' || ['ecommerce', 'hosted_commerce', 'marketplace', 'social_commerce', 'retail'].includes(industry)) return 'commerce';
+  return 'commerce';
+}
+
+function allowedAiUseCasesForEdition(edition) {
+  if (edition === 'all') {
+    return new Set([
+      'engineering_estimate_draft',
+      'tender_summary',
+      'cms_copy_draft',
+      'commerce_product_copy',
+      'business_summary'
+    ]);
+  }
+  if (edition === 'engineering') {
+    return new Set(['engineering_estimate_draft', 'tender_summary', 'business_summary']);
+  }
+  if (edition === 'restaurant') {
+    return new Set(['commerce_product_copy', 'cms_copy_draft', 'business_summary']);
+  }
+  return new Set(['commerce_product_copy', 'cms_copy_draft', 'business_summary']);
+}
+
+async function requireAiUseCaseAllowed(req, res, next) {
+  const useCase = String(req.body?.useCase || '').trim();
+  const edition = await getAiEditionForRequest(req);
+  const allowed = allowedAiUseCasesForEdition(edition);
+
+  if (!allowed.has(useCase)) {
+    audit(
+      req.company.id,
+      req.user.id,
+      'ai_draft_forbidden',
+      JSON.stringify({ useCase, edition })
+    );
+    return res.status(403).json({
+      ok: false,
+      code: 'AI_USE_CASE_FORBIDDEN',
+      error: '此 AI 功能不適用於目前版本'
+    });
+  }
+
+  req.aiEdition = edition;
+  next();
+}
+
 function purchaseRow(row) {
   const total = erpNumber(row.total, 0);
   const paidAmount = erpNumber(row.paid_amount, 0);
@@ -11122,7 +11195,7 @@ app.get('/api/ai/use-cases', auth, (req, res) => {
   });
 });
 
-app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner', 'admin', 'staff'), requireAiUseCaseAllowed, async (req, res) => {
   const useCase = String(req.body?.useCase || '').trim();
 
   try {
@@ -11139,6 +11212,7 @@ app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner
       'ai_draft_requested',
       JSON.stringify({
         useCase,
+        edition: req.aiEdition || '',
         provider: result.provider,
         status: result.status || (result.ok ? 'ok' : 'disabled'),
         inputLength: result.inputLength || 0
@@ -11152,6 +11226,7 @@ app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner
       mode: result.mode,
       model: result.model,
       status: result.status,
+      edition: req.aiEdition || '',
       purpose: result.purpose,
       disclaimer: result.disclaimer,
       draft: result.draft,
@@ -11167,6 +11242,7 @@ app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner
       'ai_draft_failed',
       JSON.stringify({
         useCase,
+        edition: req.aiEdition || '',
         provider,
         status: error.code || 'AI_PROVIDER_ERROR',
         inputLength: String(req.body?.input?.text || '').length
