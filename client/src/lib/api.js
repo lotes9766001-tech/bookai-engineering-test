@@ -9,7 +9,10 @@ function readableErrorMessage(status, code, fallback) {
     UNAUTHORIZED: '請先登入後再繼續操作。',
     FORBIDDEN: '您目前沒有權限使用此功能。',
     VALIDATION_ERROR: '請確認欄位是否填寫完整。',
-    FREE_BETA_LIMIT_REACHED: '目前採人工審核制，請聯繫 BookAI 官方客服確認開通狀態。'
+    FREE_BETA_LIMIT_REACHED: '目前採人工審核制，請聯繫 BookAI 官方客服確認開通狀態。',
+    AI_PROVIDER_UNAVAILABLE: '本機 AI 模型尚未啟動，請確認 Ollama 是否執行中。',
+    AI_PROVIDER_TIMEOUT: '本機 AI 模型回應逾時，請稍後再試或確認 Ollama 是否正常執行。',
+    AI_MODEL_NOT_FOUND: '找不到指定的本機 AI 模型，請確認 Ollama 模型是否已下載。'
   };
 
   if (code && codeMap[code]) return codeMap[code];

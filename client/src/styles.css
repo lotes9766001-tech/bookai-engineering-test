@@ -372,21 +372,23 @@ th {
   box-shadow: 0 10px 30px #0f172a0b;
 }
 
-.ai-draft-meta {
+.ai-provider-status {
   display: flex;
-  gap: 8px;
+  gap: 10px;
+  align-items: center;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  color: #172033;
 }
 
-.ai-draft-meta span {
-  border: 1px solid #dbe3ef;
-  border-radius: 999px;
-  padding: 5px 9px;
-  background: #f8fafc;
-  color: #475569;
-  font-size: 12px;
-  font-weight: 700;
+.ai-provider-status strong,
+.ai-provider-status span {
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  padding: 7px 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
 }
 
 .ai-draft-result article {
@@ -406,6 +408,36 @@ th {
 .ai-draft-result li {
   margin: 8px 0;
   color: #334155;
+}
+
+.ai-draft-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-draft-summary p,
+.ai-draft-item-card p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.65;
+}
+
+.ai-draft-item-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.ai-draft-item-card strong {
+  color: #172033;
+}
+
+.ai-draft-item-card span {
+  color: #475569;
+  font-size: 13px;
 }
 
 .loading,

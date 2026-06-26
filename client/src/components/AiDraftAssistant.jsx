@@ -11,12 +11,54 @@ const useCaseOptions = [
 
 function renderItem(item, index) {
   if (item && typeof item === 'object') {
-    const text = Object.entries(item)
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(' / ');
+    if (item.workItem) {
+      return (
+        <li key={index} className="ai-draft-item-card">
+          <strong>{item.workItem}</strong>
+          <span>建議單位：{item.unit || '待確認'}</span>
+          <span>建議數量：{item.quantity || '待確認'}</span>
+          {item.note && <p>{item.note}</p>}
+        </li>
+      );
+    }
+
+    if (item.section || item.text) {
+      return (
+        <li key={index} className="ai-draft-item-card">
+          {item.section && <strong>{item.section}</strong>}
+          {renderTextBlocks(item.text || '')}
+        </li>
+      );
+    }
+
+    const text = Object.values(item).filter(Boolean).join(' / ');
     return <li key={index}>{text}</li>;
   }
   return <li key={index}>{String(item || '')}</li>;
+}
+
+function renderTextBlocks(text) {
+  const blocks = String(text || '')
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (!blocks.length) return null;
+  return blocks.map((line, index) => <p key={index}>{line}</p>);
+}
+
+function providerStatusText(result) {
+  const provider = result?.provider || result?.mode || 'unknown';
+  const providerName = provider === 'ollama'
+    ? '本機 AI：Ollama'
+    : provider === 'mock'
+      ? 'Mock AI'
+      : provider === 'disabled'
+        ? 'AI 未啟用'
+        : `AI：${provider}`;
+  const status = result?.status || (result?.ok ? '已完成' : '未完成');
+  const statusLabel = status === 'ok' ? '已完成' : status === 'disabled' ? '未啟用' : status;
+  return [providerName, result?.model, statusLabel].filter(Boolean).join(' · ');
 }
 
 export default function AiDraftAssistant({ companyId }) {
@@ -90,9 +132,8 @@ export default function AiDraftAssistant({ companyId }) {
 
       {result && (
         <div className="ai-draft-result">
-          <div className="ai-draft-meta">
-            <span>{result.provider || result.mode || 'unknown'}</span>
-            <span>{result.status || (result.ok ? 'ok' : 'disabled')}</span>
+          <div className="ai-provider-status">
+            <strong>{providerStatusText(result)}</strong>
             <span>{result.createdAt ? new Date(result.createdAt).toLocaleString('zh-TW') : ''}</span>
           </div>
 
@@ -101,7 +142,7 @@ export default function AiDraftAssistant({ companyId }) {
           {draft && (
             <article>
               <h2>{draft.title}</h2>
-              <p>{draft.summary}</p>
+              <div className="ai-draft-summary">{renderTextBlocks(draft.summary)}</div>
 
               {draft.items?.length > 0 && (
                 <>
