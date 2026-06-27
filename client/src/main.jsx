@@ -1024,7 +1024,7 @@ function Shell({ onLogout }) {
   const betaActive = userIsFounder || Number(company?.is_tester || 0) === 1;
   const betaEdition = userIsFounder
     ? testEdition
-    : isConstructionIndustry(company?.industry) ? 'engineering' : 'commerce';
+    : isConstructionIndustry(company?.industry) ? 'engineering' : isFoodIndustry(company?.industry) ? 'restaurant' : 'commerce';
   const plan = company?.plan || 'business';
   const baseNav = navs[plan] || navs.business;
   const constructionNav = [
@@ -1455,9 +1455,138 @@ const betaGuideConfigs = {
   }
 };
 
-function TesterGuideCard({ edition, betaActive, officialLineUrl, onNavigate }) {
-  const guide = betaGuideConfigs[edition] || betaGuideConfigs.commerce;
-  const storageKey = `bookai_beta_guide_collapsed_${edition}`;
+const onboardingGuideConfigs = {
+  engineering: {
+    kicker: '首次使用引導',
+    title: '歡迎使用 BookAI 工程版',
+    description: '先建立你的第一個案場，BookAI 會協助你整理估價、收款、成本與案場摘要。',
+    primaryAction: '建立案場',
+    primaryPage: 'jobsites',
+    steps: [
+      {
+        id: 'jobsite',
+        label: '建立第一個案場',
+        desc: '記錄工程名稱、地點、業主、狀態與基本資訊。',
+        cta: '建立案場',
+        page: 'jobsites'
+      },
+      {
+        id: 'estimate',
+        label: '新增估價項目',
+        desc: '整理材料、工資、外包與其他成本，避免漏項。',
+        cta: '前往估價',
+        page: 'jobsites'
+      },
+      {
+        id: 'payment',
+        label: '新增收款紀錄',
+        desc: '記錄訂金、期款、尾款，掌握未收款。',
+        cta: '新增收款',
+        page: 'jobsites'
+      },
+      {
+        id: 'feedback',
+        label: '填寫產品回饋',
+        desc: '封測期間請回報卡住的地方與希望新增的功能。',
+        cta: '填寫回饋',
+        page: 'feedbacks'
+      }
+    ],
+    aiAssist: {
+      label: '使用 AI 整理估價說明',
+      cta: '開啟 AI 草稿助手',
+      page: 'ai_draft'
+    }
+  },
+  commerce: {
+    kicker: '首次使用引導',
+    title: '歡迎使用 BookAI 電商版',
+    description: '先建立你的第一個商品或官網內容，BookAI 會協助你整理商品文案、官網首頁與社群草稿。',
+    primaryAction: '建立商品',
+    primaryPage: 'inventory',
+    steps: [
+      {
+        id: 'product',
+        label: '建立第一個商品',
+        desc: '記錄商品名稱、價格、庫存、特色與狀態。',
+        cta: '建立商品',
+        page: 'inventory'
+      },
+      {
+        id: 'website',
+        label: '設定官網首頁',
+        desc: '設定品牌名稱、Banner、首頁區塊與基本介紹。',
+        cta: '設定官網',
+        page: 'website'
+      },
+      {
+        id: 'ai',
+        label: '使用 AI 產生商品 / 官網文案',
+        desc: '用自然語言整理商品標題、賣點、FAQ 或官網首頁文案。',
+        cta: '開啟 AI 草稿助手 Beta',
+        page: 'ai_draft',
+        beta: true
+      },
+      {
+        id: 'feedback',
+        label: '填寫產品回饋',
+        desc: '封測期間請回報卡住的地方與希望新增的功能。',
+        cta: '填寫回饋',
+        page: 'feedbacks'
+      }
+    ]
+  },
+  restaurant: {
+    kicker: '內部規劃中',
+    title: '餐飲版目前為內部規劃中',
+    description: '請聯繫 BookAI 團隊確認測試範圍；本包不開放正式餐飲首次使用引導。',
+    primaryAction: '填寫回饋',
+    primaryPage: 'feedbacks',
+    steps: [
+      {
+        id: 'feedback',
+        label: '聯繫 BookAI 團隊',
+        desc: '確認餐飲版測試範圍後再安排後續流程。',
+        cta: '填寫回饋',
+        page: 'feedbacks'
+      }
+    ]
+  },
+  all: {
+    kicker: 'Founder 測試模式',
+    title: '目前為全功能測試模式',
+    description: '可檢查工程版與電商版 onboarding。實際會員會依版本顯示對應引導。',
+    primaryAction: '檢查工程引導',
+    primaryPage: 'jobsites',
+    steps: [
+      {
+        id: 'engineering',
+        label: '工程版 onboarding',
+        desc: '檢查建立案場、估價、收款與回饋流程。',
+        cta: '前往案場中心',
+        page: 'jobsites'
+      },
+      {
+        id: 'commerce',
+        label: '電商版 onboarding',
+        desc: '檢查建立商品、設定官網、AI 草稿與回饋流程。',
+        cta: '前往商品管理',
+        page: 'inventory'
+      },
+      {
+        id: 'feedback',
+        label: '封測回饋',
+        desc: '記錄測試時發現的阻塞與版本隔離問題。',
+        cta: '填寫回饋',
+        page: 'feedbacks'
+      }
+    ]
+  }
+};
+
+function TesterGuideCard({ edition, betaActive, officialLineUrl, onNavigate, onboardingState = {} }) {
+  const guide = onboardingGuideConfigs[edition] || onboardingGuideConfigs.commerce;
+  const storageKey = `bookai_onboarding_collapsed_${edition}`;
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === '1');
 
   useEffect(() => {
@@ -1471,11 +1600,26 @@ function TesterGuideCard({ edition, betaActive, officialLineUrl, onNavigate }) {
     });
   }
 
+  function getStepStatus(step) {
+    if (onboardingState.completed?.[step.id]) return '已完成';
+    if (onboardingState.nextStepId === step.id) return '建議下一步';
+    if (step.beta) return 'Beta';
+    return '可稍後';
+  }
+
+  function stepStatusClass(step) {
+    const status = getStepStatus(step);
+    if (status === '已完成') return 'done';
+    if (status === 'Beta') return 'beta';
+    if (status === '建議下一步') return 'next';
+    return 'later';
+  }
+
   return (
-    <div className={`tester-guide-card beta-guide-card ${betaActive ? 'tester' : ''} ${collapsed ? 'collapsed' : ''}`}>
+    <div className={`tester-guide-card beta-guide-card onboarding-card ${betaActive ? 'tester' : ''} ${collapsed ? 'collapsed' : ''}`}>
       <div className="beta-guide-heading">
         <div>
-          <p className="tester-guide-kicker">{betaActive ? '封測操作導引' : '快速開始'}</p>
+          <p className="tester-guide-kicker">{guide.kicker}</p>
           <h2>{guide.title}</h2>
           {!collapsed && <p>{guide.description}</p>}
         </div>
@@ -1486,20 +1630,42 @@ function TesterGuideCard({ edition, betaActive, officialLineUrl, onNavigate }) {
       </div>
       {!collapsed && (
         <>
-          <ol className="beta-guide-steps">
-            {guide.steps.map((step) => (
-              <li key={step.label}>
-                <button type="button" onClick={() => onNavigate?.(step.page)}>{step.label}</button>
-              </li>
-            ))}
+          <ol className="beta-guide-steps onboarding-steps">
+            {guide.steps.map((step) => {
+              const status = getStepStatus(step);
+              return (
+                <li key={step.id} className={onboardingState.nextStepId === step.id ? 'is-next' : ''}>
+                  <div className="onboarding-step-main">
+                    <div className="onboarding-step-title-row">
+                      <strong>{step.label}</strong>
+                      <span className={`onboarding-status ${stepStatusClass(step)}`}>{status}</span>
+                    </div>
+                    <p>{step.desc}</p>
+                    <button type="button" onClick={() => onNavigate?.(step.page)}>{step.cta}</button>
+                  </div>
+                </li>
+              );
+            })}
           </ol>
+
+          {guide.aiAssist && (
+            <div className="onboarding-ai-assist">
+              <div>
+                <span>Beta</span>
+                <strong>{guide.aiAssist.label}</strong>
+                <p>AI 只會產生草稿，不會直接寫入正式資料。</p>
+              </div>
+              <button type="button" className="secondary-btn" onClick={() => onNavigate?.(guide.aiAssist.page)}>{guide.aiAssist.cta}</button>
+            </div>
+          )}
+
           <div className="tester-guide-actions">
-            <button type="button" onClick={() => onNavigate?.(guide.steps[0].page)}>開始測試</button>
-            <button type="button" className="secondary-btn" onClick={() => onNavigate?.('feedbacks')}>回報問題</button>
+            <button type="button" onClick={() => onNavigate?.(guide.primaryPage)}>{guide.primaryAction}</button>
+            <button type="button" className="secondary-btn" onClick={() => onNavigate?.('feedbacks')}>填寫回饋</button>
             {officialLineUrl && (
               <a href={officialLineUrl} target="_blank" rel="noreferrer">
                 <MessageCircle size={16} />
-                官方 LINE
+                聯繫 LINE
               </a>
             )}
           </div>
@@ -1517,6 +1683,10 @@ function finiteNumber(value) {
 function jobSiteAmount(site, ...keys) {
   const key = keys.find((candidate) => site?.[candidate] !== undefined && site?.[candidate] !== null);
   return key ? finiteNumber(site[key]) : 0;
+}
+
+function firstIncompleteStep(stepIds, completed) {
+  return stepIds.find((id) => !completed[id]) || '';
 }
 
 function monthKey(value) {
@@ -1766,6 +1936,8 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
   const [jobSites, setJobSites] = useState([]);
   const [leads, setLeads] = useState([]);
   const [jobSitePayments, setJobSitePayments] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [feedbacks, setFeedbacks] = useState([]);
   const industry = company?.industry;
   const constructionMode = engineeringMode || isConstructionIndustry(industry);
 
@@ -1782,13 +1954,19 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
         : Promise.resolve([]),
       constructionMode
         ? api(`/companies/${companyId}/jobsites/bi-payments`).catch(() => [])
-        : Promise.resolve([])
-    ]).then(([summary, sites, leadRows, paymentRows]) => {
+        : Promise.resolve([]),
+      constructionMode
+        ? Promise.resolve([])
+        : api(`/companies/${companyId}/products`).catch(() => []),
+      api(`/feedbacks/my?companyId=${companyId}`).catch(() => [])
+    ]).then(([summary, sites, leadRows, paymentRows, productRows, feedbackRows]) => {
       if (!alive) return;
       setS(summary);
       setJobSites(Array.isArray(sites) ? sites : []);
       setLeads(Array.isArray(leadRows) ? leadRows : []);
       setJobSitePayments(Array.isArray(paymentRows) ? paymentRows : []);
+      setProducts(Array.isArray(productRows) ? productRows : []);
+      setFeedbacks(Array.isArray(feedbackRows) ? feedbackRows : []);
     });
 
     return () => {
@@ -1847,6 +2025,46 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
     };
   })();
 
+  const hasFeedback = feedbacks.length > 0;
+  const hasEstimateData = constructionStats.sites.some((site) => (
+    jobSiteAmount(site, 'estimateCostTotal', 'estimate_cost_total') > 0 ||
+    jobSiteAmount(site, 'totalAmount', 'total_amount', 'quoteAmount', 'quote_amount') > 0
+  ));
+  const hasPaymentData = jobSitePayments.length > 0 || constructionStats.sites.some((site) => (
+    jobSiteAmount(site, 'receivedAmount', 'received_amount') > 0
+  ));
+  const engineeringOnboardingCompleted = {
+    jobsite: constructionStats.sites.length > 0,
+    estimate: hasEstimateData,
+    payment: hasPaymentData,
+    feedback: hasFeedback
+  };
+  const engineeringOnboardingState = {
+    completed: engineeringOnboardingCompleted,
+    nextStepId: firstIncompleteStep(['jobsite', 'estimate', 'payment', 'feedback'], engineeringOnboardingCompleted)
+  };
+  const commerceOnboardingCompleted = {
+    product: products.length > 0,
+    website: false,
+    ai: false,
+    feedback: hasFeedback
+  };
+  const commerceOnboardingState = {
+    completed: commerceOnboardingCompleted,
+    nextStepId: firstIncompleteStep(['product', 'website', 'ai', 'feedback'], commerceOnboardingCompleted)
+  };
+  const allOnboardingState = {
+    completed: {},
+    nextStepId: 'engineering'
+  };
+  const currentOnboardingState = betaEdition === 'all'
+    ? allOnboardingState
+    : betaEdition === 'engineering'
+      ? engineeringOnboardingState
+      : betaEdition === 'restaurant'
+        ? { completed: {}, nextStepId: 'feedback' }
+        : commerceOnboardingState;
+
   if (constructionMode) {
     const activeSites = constructionStats.sites.filter((site) => normalizeJobSiteStatus(site.status) !== '已結案').length;
     const priorityLeads = leads.filter((lead) => Number(lead.fitScore ?? lead.fit_score ?? 0) >= 75 && !['lost', 'converted'].includes(String(lead.status || ''))).length;
@@ -1901,7 +2119,23 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
           </div>
         </div>
 
-        <TesterGuideCard edition={betaEdition} betaActive={betaActive} officialLineUrl={officialLineUrl} onNavigate={onNavigate} />
+        <TesterGuideCard
+          edition={betaEdition}
+          betaActive={betaActive}
+          officialLineUrl={officialLineUrl}
+          onNavigate={onNavigate}
+          onboardingState={currentOnboardingState}
+        />
+
+        {constructionStats.sites.length === 0 && (
+          <div className="onboarding-empty-state">
+            <div>
+              <strong>目前還沒有案場資料</strong>
+              <p>建立第一個案場後，BookAI 會開始整理估價、收款與工程摘要。</p>
+            </div>
+            <button type="button" onClick={() => onNavigate?.('jobsites')}>建立第一個案場</button>
+          </div>
+        )}
 
         <div className="command-metrics">
           <Card title="工程營收總額" value={money(constructionStats.totalQuote)} sub={`案場收款率 ${constructionStats.collectionRate}%`} />
@@ -1976,7 +2210,23 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
         </div>
       </div>
 
-      <TesterGuideCard edition={betaEdition} betaActive={betaActive} officialLineUrl={officialLineUrl} onNavigate={onNavigate} />
+      <TesterGuideCard
+        edition={betaEdition}
+        betaActive={betaActive}
+        officialLineUrl={officialLineUrl}
+        onNavigate={onNavigate}
+        onboardingState={currentOnboardingState}
+      />
+
+      {products.length === 0 && betaEdition !== 'restaurant' && (
+        <div className="onboarding-empty-state">
+          <div>
+            <strong>目前還沒有商品或官網內容</strong>
+            <p>建立第一個商品後，BookAI 可以協助你整理商品文案、官網首頁與社群草稿。</p>
+          </div>
+          <button type="button" onClick={() => onNavigate?.('inventory')}>建立第一個商品</button>
+        </div>
+      )}
 
       <div className="command-metrics">
         <Card title="本月銷貨總額" value={money(s.monthlySales || 0)} />
@@ -3380,6 +3630,15 @@ function Inventory({ companyId, company }) {
           {constructionMode ? '匯出材料 / 工具 CSV' : '匯出庫存 CSV'}
         </button>
 
+
+        {!constructionMode && rows.length === 0 && (
+          <div className="onboarding-empty-state compact">
+            <div>
+              <strong>目前還沒有商品或官網內容</strong>
+              <p>先建立第一個商品，後續可以整理商品文案、庫存與官網展示內容。</p>
+            </div>
+          </div>
+        )}
         <Table
           cols={constructionMode
             ? ['編號', '名稱', '類型', '單位', '單價', '成本', '庫存', '安全庫存', '供應商', '存放位置', '狀態', '備註']
@@ -5933,7 +6192,12 @@ function JobSites({ companyId, company }) {
         {loading ? (
           <div className="notice">案場資料讀取中...</div>
         ) : sites.length === 0 ? (
-          <div className="notice">目前尚無案場，新增第一筆後會正式保存到 SQLite。</div>
+          <div className="onboarding-empty-state compact">
+            <div>
+              <strong>目前還沒有案場資料</strong>
+              <p>建立第一個案場後，BookAI 會開始整理估價、收款與工程摘要。</p>
+            </div>
+          </div>
         ) : (
           <Table
             cols={['案場資訊', '客戶', '工程狀態', '收款進度', '成本毛利', '毛利率', '操作']}
@@ -7129,6 +7393,15 @@ function CommerceSiteManager({ companyId, company }) {
 
       {message && <div className="notice">{message}</div>}
       {error && <div className="error">{error}</div>}
+      {!settings.brandName && !settings.heroTitle && !settings.heroSubtitle && (
+        <div className="onboarding-empty-state compact">
+          <div>
+            <strong>目前尚未設定官網首頁</strong>
+            <p>你可以先設定品牌名稱、Banner 與首頁區塊，建立基本品牌頁面。</p>
+          </div>
+          <button type="button" onClick={() => document.querySelector('.commerce-cms-editor input')?.focus()}>設定官網首頁</button>
+        </div>
+      )}
 
       <div className="commerce-cms-status">
         <div className="commerce-cms-status-card">

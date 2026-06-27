@@ -3326,6 +3326,43 @@ tr:hover td {
   border-radius: 8px;
 }
 
+/* Keep first-use onboarding stable after legacy tester-guide overrides. */
+.tester-guide-card.onboarding-card {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tester-guide-card.onboarding-card .onboarding-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 14px;
+  padding-left: 0;
+}
+
+.tester-guide-card.onboarding-card .onboarding-ai-assist {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1180px) {
+  .tester-guide-card.onboarding-card .onboarding-steps {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .tester-guide-card.onboarding-card {
+    padding: 16px;
+  }
+
+  .tester-guide-card.onboarding-card .onboarding-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .tester-guide-card.onboarding-card .tester-guide-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Beta onboarding and feedback flow */
 .beta-status-notice {
   display: flex;
@@ -3477,6 +3514,171 @@ tr:hover td {
   min-height: 40px;
 }
 
+.onboarding-card {
+  gap: 16px;
+}
+
+.onboarding-steps {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.onboarding-steps li {
+  position: relative;
+  min-height: 100%;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.onboarding-steps li.is-next {
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+
+.onboarding-steps li::before {
+  content: counter(beta-step);
+  display: grid;
+  width: 24px;
+  height: 24px;
+  margin-bottom: 10px;
+  place-items: center;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.onboarding-step-main {
+  display: grid;
+  gap: 10px;
+  min-height: 100%;
+}
+
+.onboarding-step-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.onboarding-step-title-row strong {
+  color: #0f172a;
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.onboarding-step-main p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.onboarding-step-main button {
+  width: fit-content;
+  min-height: 34px;
+  margin-top: auto;
+  padding: 8px 11px;
+  border: 1px solid #dbeafe;
+  border-radius: 7px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.onboarding-step-main button::before {
+  content: none;
+  display: none;
+}
+
+.onboarding-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.onboarding-status.done {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.onboarding-status.next {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.onboarding-status.beta {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.onboarding-ai-assist,
+.onboarding-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.onboarding-ai-assist > div,
+.onboarding-empty-state > div {
+  display: grid;
+  gap: 4px;
+}
+
+.onboarding-ai-assist span {
+  width: fit-content;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.onboarding-ai-assist strong,
+.onboarding-empty-state strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.onboarding-ai-assist p,
+.onboarding-empty-state p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.onboarding-ai-assist button,
+.onboarding-empty-state button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 9px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.onboarding-empty-state.compact {
+  margin-top: 12px;
+  justify-content: flex-start;
+}
+
 .feedback-support-panel {
   display: flex;
   align-items: center;
@@ -3528,6 +3730,10 @@ tr:hover td {
   .beta-guide-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .onboarding-card .onboarding-steps {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
@@ -3539,7 +3745,9 @@ tr:hover td {
   }
 
   .beta-status-actions,
-  .beta-guide-card .tester-guide-actions {
+  .beta-guide-card .tester-guide-actions,
+  .onboarding-ai-assist,
+  .onboarding-empty-state {
     display: grid;
     grid-template-columns: 1fr;
   }
@@ -3549,6 +3757,8 @@ tr:hover td {
   .feedback-support-panel a,
   .beta-guide-card .tester-guide-actions button,
   .beta-guide-card .tester-guide-actions a,
+  .onboarding-ai-assist button,
+  .onboarding-empty-state button,
   .beta-guide-toggle {
     width: 100%;
     justify-content: center;
@@ -3557,6 +3767,34 @@ tr:hover td {
   .beta-guide-steps,
   .feedback-form {
     grid-template-columns: 1fr;
+  }
+
+  .onboarding-card .onboarding-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-card .onboarding-steps li {
+    min-height: auto;
+  }
+
+  .onboarding-card .onboarding-step-title-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .onboarding-card .onboarding-status {
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  .onboarding-card .tester-guide-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-card .tester-guide-actions button,
+  .onboarding-card .tester-guide-actions a,
+  .onboarding-card .onboarding-step-main > button {
+    width: 100%;
   }
 }
 
@@ -4303,6 +4541,131 @@ button.lead-danger-btn {
 
 .tester-guide-actions button {
   white-space: nowrap;
+}
+
+.tester-guide-card.onboarding-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.onboarding-card .beta-guide-heading {
+  order: 1;
+  min-width: 0;
+}
+
+.onboarding-card .beta-guide-heading > div {
+  min-width: 0;
+}
+
+.onboarding-card .beta-guide-heading h2,
+.onboarding-card .beta-guide-heading p {
+  writing-mode: horizontal-tb;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+.onboarding-card .onboarding-steps {
+  order: 2;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr));
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: beta-step;
+}
+
+.onboarding-card .onboarding-steps li {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 188px;
+  height: auto;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #ffffff;
+  writing-mode: horizontal-tb;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.onboarding-card .onboarding-step-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  min-height: 0;
+}
+
+.onboarding-card .onboarding-step-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.onboarding-card .onboarding-step-title-row strong,
+.onboarding-card .onboarding-step-main p {
+  min-width: 0;
+  writing-mode: horizontal-tb;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.onboarding-card .onboarding-step-main > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 36px;
+  margin-top: auto;
+  padding: 8px 12px;
+  white-space: normal;
+  text-align: center;
+}
+
+.onboarding-card .onboarding-status {
+  max-width: 104px;
+  white-space: nowrap;
+}
+
+.onboarding-card .tester-guide-actions {
+  order: 3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.onboarding-card .tester-guide-actions button,
+.onboarding-card .tester-guide-actions a {
+  width: auto;
+  min-width: 128px;
+  justify-content: center;
+  white-space: normal;
+}
+
+.onboarding-card .onboarding-ai-assist {
+  order: 4;
+  width: 100%;
+  min-width: 0;
 }
 
 .feedback-form {
