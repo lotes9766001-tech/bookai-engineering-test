@@ -749,6 +749,10 @@ th {
   margin-top: 18px;
 }
 
+.ai-hidden-legacy {
+  display: none !important;
+}
+
 .ai-draft-result h2 {
   margin: 0 0 8px;
   font-size: 22px;

@@ -360,7 +360,46 @@ function shouldAskForMoreInfo(structure = {}) {
   return !structure.enough;
 }
 
+function shouldAskForMoreDraftInfo(useCase, sanitized = {}, structure = {}) {
+  if (useCase === 'commerce_product_copy' && structure?.mode !== 'restaurant') {
+    return shouldAskForMoreCommerceInfo(useCase, sanitized, structure);
+  }
+  if (useCase === 'cms_copy_draft' && structure?.mode !== 'restaurant') {
+    return shouldAskForMoreCmsInfo(sanitized);
+  }
+  return shouldAskForMoreInfo(structure);
+}
+
+function shouldAskForMoreCommerceInfo(useCase, sanitized = {}, structure = {}) {
+  if (useCase !== 'commerce_product_copy') return false;
+  if (structure?.mode === 'restaurant') return false;
+  const text = cleanText(sanitized.text || '');
+  if (!text || text.length < 18) return true;
+  const hasSpecificName = /商品名稱|品名|名稱|飲水機|外出包|貓砂墊|收納|服飾|配件|保養|食品|3C|PET-|Mori/i.test(text);
+  const hasFeature = /特色|賣點|容量|尺寸|規格|低噪音|靜音|可拆洗|濾芯|水位|材質|適合|使用情境|上班族|多寵|貓|犬|限制|注意/i.test(text);
+  const tooGeneric = /^(寵物用品|商品文案|幫我寫文案|請幫我寫商品文案)[，,。.\s]*$/i.test(text);
+  return tooGeneric || !(hasSpecificName && hasFeature);
+}
+
+function shouldAskForMoreCmsInfo(sanitized = {}) {
+  const text = cleanText(sanitized.text || '');
+  if (!text || text.length < 20) return true;
+  const hasBrand = /品牌|品牌名稱|Mori|摩理|Pet Life|店名/i.test(text);
+  const hasOffer = /商品|服務|定位|飲水機|外出包|貓砂墊|收納|用品|語氣|SEO|Banner/i.test(text);
+  return !(hasBrand && hasOffer);
+}
+
 function buildInsufficientInfoDraft(structure = {}) {
+  const commerceSuggestions = ['商品名稱', '商品特色', '規格 / 尺寸 / 容量', '適用對象', '使用情境', '注意限制'];
+  return {
+    title: '需要補充更多資訊',
+    summary: '目前資訊不足，請補充商品名稱、特色、適用對象、規格、使用情境或主打賣點後再產生草稿。',
+    needsMoreInfo: true,
+    missingInfo: commerceSuggestions,
+    items: commerceSuggestions.map((item) => ({ section: '建議補充', text: item })),
+    warnings: ['資訊不足時，AI 不會推測完整商品文案。', 'AI 不會直接新增、修改、刪除或發布正式資料。'],
+    nextSteps: ['請補充商品名稱、特色、規格、適用對象、使用情境或注意限制。', '補充後再重新產生草稿。']
+  };
   const suggestions = getMissingInfoSuggestions(structure, structure.signals || {});
   return {
     title: '需要補充更多資訊',
@@ -430,7 +469,7 @@ export async function generateAiDraft({ useCase, input = {}, company = {}, user 
       status: 'disabled'
     });
   }
-  if (shouldAskForMoreInfo(structure)) {
+  if (shouldAskForMoreDraftInfo(useCase, sanitized, structure)) {
     return buildResponse({
       ok: true,
       provider: config.provider,
@@ -484,12 +523,35 @@ function buildResponse({ ok, provider, model = '', useCase, useCaseConfig, sanit
     disclaimer: useCaseConfig.disclaimer,
     inputLength: sanitized.originalLength,
     sanitizedInputLength: sanitized.sanitizedLength,
-    draft: normalizeDraft(draft, useCase, useCaseConfig, sanitized),
+    draft: status === 'disabled' ? normalizeDisabledDraft(draft) : normalizeDraft(draft, useCase, useCaseConfig, sanitized),
     createdAt: new Date().toISOString()
   };
 }
 
+function normalizeDisabledDraft(draft = {}) {
+  return {
+    title: 'AI 草稿功能尚未啟用',
+    summary: '目前環境尚未啟用 AI 草稿服務，因此不會產生商品文案、官網文案或社群草稿。',
+    items: [],
+    warnings: Array.isArray(draft.warnings) && draft.warnings.length
+      ? draft.warnings
+      : ['AI_ENABLED 不是 true，因此未呼叫 provider，也未產生草稿內容。', 'AI 不會直接新增、修改、刪除或發布正式資料。'],
+    nextSteps: Array.isArray(draft.nextSteps) && draft.nextSteps.length
+      ? draft.nextSteps
+      : ['請系統管理者在測試環境設定 AI_ENABLED=true。', '雲端測試環境請使用 AI_PROVIDER=mock。'],
+    needsMoreInfo: false,
+    missingInfo: []
+  };
+}
+
 function disabledDraft(useCaseConfig) {
+  return {
+    title: 'AI 草稿功能尚未啟用',
+    summary: '目前環境尚未啟用 AI 草稿服務，因此不會產生商品文案、官網文案或社群草稿。',
+    items: [],
+    warnings: ['AI_ENABLED 不是 true，因此未呼叫 provider，也未產生草稿內容。', 'AI 不會直接新增、修改、刪除或發布正式資料。'],
+    nextSteps: ['請系統管理者在測試環境設定 AI_ENABLED=true。', '雲端測試環境請使用 AI_PROVIDER=mock。']
+  };
   return {
     title: 'AI 草稿助手目前未啟用',
     summary: `此環境已關閉 AI 功能。${useCaseConfig.purpose}`,
@@ -1297,7 +1359,110 @@ function mockProductSocialCopy(context) {
   return '把商品特色整理成好懂文案，發布前再確認規格、價格與庫存。';
 }
 
+function buildCommerceMockDraft(input = '', structure = {}) {
+  const taskId = String(structure?.taskLine || '').toLowerCase();
+  const productName = inferCommerceProductName(input);
+  const isPetWaterFountain = /飲水機|活水|2\.5l|2.5L|靜音|濾芯|水位|貓|犬|寵物/i.test(input);
+  const title = isPetWaterFountain
+    ? '智能靜音寵物飲水機｜2.5L 循環活水，陪毛孩安心喝水'
+    : `${productName}｜日常好用的精選商品`;
+  const benefits = isPetWaterFountain
+    ? ['2.5L 大容量，適合上班族與多寵家庭', '低噪音馬達，夜間使用也不打擾', '可拆洗水箱，日常清潔更方便', '透明水位窗，補水狀態一眼確認', '濾芯可協助過濾毛髮與雜質']
+    : buildGenericCommerceBenefits(input);
+  const description = isPetWaterFountain
+    ? '以日常照顧為出發點，協助飼主提供更乾淨、穩定的流動飲水環境。適合貓咪、小型犬與多寵家庭使用。'
+    : `${productName} 適合重視日常質感與使用便利性的顧客。建議在商品頁補充規格、尺寸、材質、使用方式與注意限制，讓顧客更容易判斷是否適合。`;
+  const faq = isPetWaterFountain
+    ? 'Q：適合貓咪和小型犬使用嗎？\nA：適合，建議依寵物體型、飲水習慣與商品規格評估。\n\nQ：多久需要清洗一次？\nA：建議依使用頻率定期清洗水箱與更換濾芯，並以商品說明為準。'
+    : `Q：${productName} 適合哪些人使用？\nA：適合想提升日常使用便利性、並重視商品規格與使用情境的顧客。\n\nQ：購買前需要注意什麼？\nA：建議確認尺寸、材質、使用方式與保固或售後規則。`;
+  const social = isPetWaterFountain
+    ? '上班不在家，也希望毛孩有乾淨流動的飲水。這款智能靜音寵物飲水機，2.5L 大容量、低噪音、好清洗，適合日常照顧使用。'
+    : `正在找一款更適合日常使用的 ${productName}？這份草稿可整理成商品頁描述、FAQ 與 LINE 社群貼文，發布前請再確認規格、價格與宣稱內容。`;
+  const shortCopy = isPetWaterFountain ? '2.5L 大容量、低噪音、好清洗，讓毛孩日常喝水更穩定。' : `${productName}，讓日常使用更順手。`;
+  const faqSocialMode = /faq|social|line|社群/i.test(taskId);
+
+  return {
+    guidedStructured: true,
+    title: faqSocialMode ? 'FAQ / 社群文案草稿' : '商品文案草稿',
+    summary: faqSocialMode ? '以下是 FAQ、LINE 社群貼文、短文案與注意事項草稿。' : '以下是商品標題、賣點、商品描述、FAQ 與 LINE / 社群文案草稿。',
+    items: faqSocialMode
+      ? [
+        { section: 'FAQ 草稿', text: faq },
+        { section: 'LINE 社群貼文', text: social },
+        { section: '短文案', text: shortCopy },
+        { section: '注意事項', text: '發布前請人工確認商品規格、價格、庫存、適用對象與限制。避免醫療、治療、保健療效或未經證實的效果宣稱。' }
+      ]
+      : [
+        { section: '商品標題建議', text: title },
+        { section: '商品賣點', text: benefits.map((item) => `- ${item}`).join('\n') },
+        { section: '商品描述', text: description },
+        { section: 'FAQ 草稿', text: faq },
+        { section: 'LINE / 社群文案', text: social }
+      ],
+    warnings: ['AI 只產生草稿，不會直接新增、修改、刪除或發布正式資料。', '請人工確認商品規格、價格、庫存、宣稱內容與法規限制。', '請勿宣稱醫療效果、治療疾病或未經證實的保健療效。'],
+    nextSteps: ['人工確認商品規格、價格、庫存與宣稱內容。', '確認無誤後，可複製到商品描述、FAQ 或 LINE 社群文案欄位。', 'AI 不會自動新增商品，也不會自動上架。']
+  };
+}
+
+function buildCmsMockDraft(input = '') {
+  const brandName = /mori|摩理|寵物/i.test(input) ? 'Mori Pet Life 摩理寵物生活' : inferBrandName(input);
+  return {
+    guidedStructured: true,
+    title: '官網文案草稿',
+    summary: '以下是 Banner、品牌介紹、首頁區塊、FAQ 與 SEO 描述草稿。',
+    items: [
+      { section: 'Banner 標題', text: `${brandName}｜陪毛孩過更舒服的日常` },
+      { section: 'Banner 副標', text: '精選寵物飲水機、外出用品與居家收納，兼顧實用、乾淨與日常照顧需求。' },
+      { section: '品牌介紹', text: `${brandName} 是以小型寵物用品為主的選物品牌，重視商品實用性、居家整潔與飼主的日常照顧體驗。` },
+      { section: '首頁區塊文案', text: '從喝水、外出到居家整理，挑選更容易融入生活的寵物用品，讓照顧變得清楚、簡單、有秩序。' },
+      { section: 'FAQ 草稿', text: 'Q：商品適合哪些寵物使用？\nA：請依商品規格、寵物體型與使用習慣評估。\n\nQ：購買前需要注意什麼？\nA：建議確認尺寸、材質、清潔方式與配送規則。' },
+      { section: 'SEO 描述', text: `${brandName} 精選寵物飲水機、外出包、貓砂墊與收納用品，提供溫暖、專業、乾淨的寵物日常選物體驗。` }
+    ],
+    warnings: ['AI 只產生草稿，不會直接寫入 CMS，也不會自動發布官網。', '請人工確認品牌語氣、商品資訊、SEO 描述與聯絡資訊。'],
+    nextSteps: ['人工確認品牌語氣、服務內容與 SEO 描述。', '確認無誤後，可複製到官網 Banner、首頁區塊、FAQ 或 SEO 欄位。', 'AI 不會自動寫入 CMS，也不會自動發布官網。']
+  };
+}
+
+function inferCommerceProductName(input = '') {
+  const named = extractSimpleField(input, ['商品名稱', '品名', '名稱']);
+  if (named) return named;
+  if (/飲水機/i.test(input)) return '智能靜音寵物飲水機';
+  if (/外出包/i.test(input)) return '寵物外出包';
+  if (/貓砂墊/i.test(input)) return '貓砂墊';
+  if (/收納/i.test(input)) return '寵物用品收納盒';
+  return '精選商品';
+}
+
+function inferBrandName(input = '') {
+  return extractSimpleField(input, ['品牌名稱', '品牌', '店名']) || '品牌官網';
+}
+
+function extractSimpleField(input = '', labels = []) {
+  for (const label of labels) {
+    const match = input.match(new RegExp(`${label}\\s*[：:]\\s*([^\\n，,。]+)`));
+    if (match?.[1]) return cleanText(match[1]).slice(0, 50);
+  }
+  return '';
+}
+
+function buildGenericCommerceBenefits(input = '') {
+  const hints = cleanText(input)
+    .split(/[，,。；;\n]/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 4 && !/幫我|文案|商品名稱|品名/.test(item))
+    .slice(0, 5);
+  if (hints.length >= 3) return hints;
+  return ['規格清楚，方便顧客快速判斷是否適合', '適合日常使用情境，降低選購疑慮', '可搭配 FAQ 說明材質、尺寸與注意事項', '適合放入商品頁、官網區塊與社群貼文'];
+}
+
 function guidedMockDraft(useCase, text, structure = {}) {
+  const cleanInput = cleanText(text || '');
+  if (useCase === 'commerce_product_copy' && structure.mode !== 'restaurant') {
+    return buildCommerceMockDraft(cleanInput, structure);
+  }
+  if (useCase === 'cms_copy_draft' && structure.mode !== 'restaurant') {
+    return buildCmsMockDraft(cleanInput);
+  }
   const input = cleanText(text || '');
   const commonWarnings = ['此內容僅為 AI 草稿，尚未寫入正式資料。請人工確認規格、價格、庫存、法規與實際限制後再使用。'];
 
@@ -1480,6 +1645,17 @@ function normalizeDraft(draft, useCase = '', useCaseConfig = {}, sanitized = {})
   }
   if (useCase === 'engineering_estimate_draft') {
     return validateDraftQuality(normalizeEngineeringDraft(draft, useCaseConfig, sanitized), useCase, sanitized);
+  }
+  if (draft?.guidedStructured && useCase === 'commerce_product_copy' && /FAQ\s*\/\s*社群|社群文案/.test(draft.title || '')) {
+    return {
+      title: cleanText(draft.title || 'FAQ / 社群文案草稿').slice(0, 200),
+      summary: cleanText(draft.summary || '以下是 FAQ、LINE 社群貼文、短文案與注意事項草稿。').slice(0, MAX_SUMMARY_LENGTH),
+      items: asArray(draft.items).map((item) => normalizeDraftItem(item, sanitized)).filter(Boolean).slice(0, 6),
+      warnings: dedupeWarnings(Array.isArray(draft.warnings) ? draft.warnings.map((item) => cleanText(item)).filter(Boolean) : []),
+      nextSteps: Array.isArray(draft.nextSteps) ? draft.nextSteps.map((item) => cleanText(item)).filter(Boolean).slice(0, 6) : [],
+      needsMoreInfo: false,
+      missingInfo: []
+    };
   }
   if (draft?.guidedStructured) {
     return validateDraftQuality({
@@ -1718,6 +1894,12 @@ function ensureCommerceMinimumSections(items = [], sanitized = {}) {
 }
 
 function commerceSectionKey(value = '') {
+  const rawSection = normalizeText(value).toLowerCase();
+  if (/商品標題|標題建議|title/.test(rawSection)) return 'title';
+  if (/商品賣點|賣點|selling|benefit/.test(rawSection)) return 'benefits';
+  if (/商品描述|描述|description/.test(rawSection)) return 'description';
+  if (/faq|常見問題/.test(rawSection)) return 'faq';
+  if (/line|社群|貼文|social/.test(rawSection)) return 'social';
   const text = normalizeText(value).toLowerCase();
   if (/商品標題|標題|title/.test(text)) return 'title';
   if (/商品賣點|賣點|selling|benefit/.test(text)) return 'benefits';
@@ -1728,6 +1910,14 @@ function commerceSectionKey(value = '') {
 }
 
 function commerceSectionLabel(key) {
+  const cleanLabels = {
+    title: '商品標題建議',
+    benefits: '商品賣點',
+    description: '商品描述',
+    faq: 'FAQ 草稿',
+    social: 'LINE / 社群文案'
+  };
+  if (cleanLabels[key]) return cleanLabels[key];
   return {
     title: '商品標題建議',
     benefits: '商品賣點',
@@ -1772,11 +1962,13 @@ function validateDraftQuality(draft, useCase = '', sanitized = {}) {
   }
 
   if (useCase === 'commerce_product_copy') {
-    const minimumItems = sanitized?.structure?.mode === 'restaurant'
+    const isFaqSocialDraft = /FAQ\s*\/\s*社群|社群文案/.test(draft.title || '') ||
+      items.some((item) => /注意事項|LINE 社群貼文|短文案/.test(String(item?.section || item?.title || item?.label || '')));
+    const minimumItems = sanitized?.structure?.mode === 'restaurant' || isFaqSocialDraft
       ? items
       : ensureCommerceMinimumSections(items, sanitized);
     const minimumCombined = [title, summary, ...minimumItems.map((item) => Object.values(item).join(' '))].join(' ');
-    const enoughContent = minimumItems.length >= 5 && minimumCombined.length >= 120;
+    const enoughContent = isFaqSocialDraft ? minimumItems.length >= 4 : minimumItems.length >= 5 && minimumCombined.length >= 120;
     if (!enoughContent && sanitized?.structure?.mode !== 'restaurant') return repairLowQualityDraft(useCase);
     return {
       ...draft,
