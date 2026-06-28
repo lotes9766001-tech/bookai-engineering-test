@@ -14,6 +14,8 @@ import { PG_ENABLED, initPostgresDb, getPool, pgAll, pgOne, pgQuery } from './pg
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { AI_USE_CASES, generateAiDraft } from './ai-provider.js';
+import { buildJobSitePatch } from './services/job-sites.js';
+import { buildPatchSet } from './utils/patch.js';
 import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -8525,79 +8527,6 @@ app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner
 });
 
 
-const JOBSITE_UPDATE_FIELDS = [
-  ['siteName', 'name', (value) => String(value || '').trim()],
-  ['siteName', 'site_name', (value) => String(value || '').trim()],
-  ['name', 'name', (value) => String(value || '').trim()],
-  ['name', 'site_name', (value) => String(value || '').trim()],
-  ['clientName', 'client_name', (value) => String(value || '')],
-  ['clientPhone', 'client_phone', (value) => String(value || '')],
-  ['address', 'address', (value) => String(value || '')],
-  ['projectType', 'project_type', (value) => String(value || '')],
-  ['areaPings', 'area_pings', (value) => Number(value || 0)],
-  ['areaPing', 'area_pings', (value) => Number(value || 0)],
-  ['paintAreaPing', 'area_pings', (value) => Number(value || 0)],
-  ['pricePerPing', 'price_per_ping', (value) => Number(value || 0)],
-  ['paintPricePerPing', 'price_per_ping', (value) => Number(value || 0)],
-  ['foodCost', 'food_cost', (value) => Number(value || 0)],
-  ['quoteAmount', 'quote_amount', (value) => Number(value || 0)],
-  ['taxMode', 'tax_mode', (value) => value || 'not_taxed'],
-  ['taxRate', 'tax_rate', (value) => Number(value ?? 0.05)],
-  ['subtotalAmount', 'subtotal_amount', (value) => Number(value || 0)],
-  ['taxAmount', 'tax_amount', (value) => Number(value || 0)],
-  ['totalAmount', 'total_amount', (value) => Number(value || 0)],
-  ['receivedAmount', 'received_amount', (value) => Number(value || 0)],
-  ['materialCost', 'material_cost', (value) => Number(value || 0)],
-  ['laborCost', 'labor_cost', (value) => Number(value || 0)],
-  ['outsourcedCost', 'outsourced_cost', (value) => Number(value || 0)],
-  ['miscCost', 'misc_cost', (value) => Number(value || 0)],
-  ['status', 'status', (value) => value || '已報價'],
-  ['note', 'note', (value) => String(value || '')]
-];
-
-const JOBSITE_NUMERIC_COLUMNS = new Set([
-  'area_pings',
-  'price_per_ping',
-  'food_cost',
-  'quote_amount',
-  'tax_rate',
-  'subtotal_amount',
-  'tax_amount',
-  'total_amount',
-  'received_amount',
-  'material_cost',
-  'labor_cost',
-  'outsourced_cost',
-  'misc_cost'
-]);
-
-function buildJobSitePatch(body = {}) {
-  const updates = new Map();
-
-  for (const [inputKey, column, normalize] of JOBSITE_UPDATE_FIELDS) {
-    if (!Object.prototype.hasOwnProperty.call(body, inputKey)) continue;
-    const rawValue = body[inputKey];
-    if (rawValue === undefined || rawValue === null) continue;
-    if (JOBSITE_NUMERIC_COLUMNS.has(column) && rawValue === '') continue;
-    if ((inputKey === 'taxMode' || inputKey === 'status') && String(rawValue || '').trim() === '') continue;
-
-    const normalized = normalize(rawValue);
-    if (JOBSITE_NUMERIC_COLUMNS.has(column) && !Number.isFinite(normalized)) continue;
-    updates.set(column, normalized);
-  }
-
-  if (updates.has('name') || updates.has('site_name')) {
-    const finalName = String(updates.get('site_name') || updates.get('name') || '').trim();
-    if (!finalName) {
-      return { error: '請輸入案場名稱' };
-    }
-    updates.set('name', finalName);
-    updates.set('site_name', finalName);
-  }
-
-  return { updates };
-}
-
 app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
@@ -8611,9 +8540,7 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
 
   if (PG_ENABLED) {
     try {
-      const entries = Array.from(updates.entries());
-      const setSql = entries.map(([column], index) => `${column} = $${index + 1}`).join(', ');
-      const values = entries.map(([, value]) => value);
+      const { setSql, values } = buildPatchSet(updates, '$');
       const updated = await pgOne(`
         UPDATE job_sites
         SET ${setSql},
@@ -8655,9 +8582,7 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
     }
   }
 
-  const entries = Array.from(updates.entries());
-  const setSql = entries.map(([column]) => `${column} = ?`).join(', ');
-  const values = entries.map(([, value]) => value);
+  const { setSql, values } = buildPatchSet(updates);
   const result = db.prepare(`
     UPDATE job_sites
     SET ${setSql},
