@@ -8525,6 +8525,58 @@ app.post('/api/companies/:companyId/jobsites', auth, company, requireRole('owner
 });
 
 
+const JOBSITE_UPDATE_FIELDS = [
+  ['siteName', 'name', (value) => String(value || '').trim()],
+  ['siteName', 'site_name', (value) => String(value || '').trim()],
+  ['name', 'name', (value) => String(value || '').trim()],
+  ['name', 'site_name', (value) => String(value || '').trim()],
+  ['clientName', 'client_name', (value) => String(value || '')],
+  ['clientPhone', 'client_phone', (value) => String(value || '')],
+  ['address', 'address', (value) => String(value || '')],
+  ['projectType', 'project_type', (value) => String(value || '')],
+  ['areaPings', 'area_pings', (value) => Number(value || 0)],
+  ['areaPing', 'area_pings', (value) => Number(value || 0)],
+  ['paintAreaPing', 'area_pings', (value) => Number(value || 0)],
+  ['pricePerPing', 'price_per_ping', (value) => Number(value || 0)],
+  ['paintPricePerPing', 'price_per_ping', (value) => Number(value || 0)],
+  ['foodCost', 'food_cost', (value) => Number(value || 0)],
+  ['quoteAmount', 'quote_amount', (value) => Number(value || 0)],
+  ['taxMode', 'tax_mode', (value) => value || 'not_taxed'],
+  ['taxRate', 'tax_rate', (value) => Number(value ?? 0.05)],
+  ['subtotalAmount', 'subtotal_amount', (value) => Number(value || 0)],
+  ['taxAmount', 'tax_amount', (value) => Number(value || 0)],
+  ['totalAmount', 'total_amount', (value) => Number(value || 0)],
+  ['receivedAmount', 'received_amount', (value) => Number(value || 0)],
+  ['materialCost', 'material_cost', (value) => Number(value || 0)],
+  ['laborCost', 'labor_cost', (value) => Number(value || 0)],
+  ['outsourcedCost', 'outsourced_cost', (value) => Number(value || 0)],
+  ['miscCost', 'misc_cost', (value) => Number(value || 0)],
+  ['status', 'status', (value) => value || '已報價'],
+  ['note', 'note', (value) => String(value || '')]
+];
+
+function buildJobSitePatch(body = {}) {
+  const updates = new Map();
+
+  for (const [inputKey, column, normalize] of JOBSITE_UPDATE_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(body, inputKey)) continue;
+    const rawValue = body[inputKey];
+    if (rawValue === undefined) continue;
+    updates.set(column, normalize(rawValue));
+  }
+
+  if (updates.has('name') || updates.has('site_name')) {
+    const finalName = String(updates.get('site_name') || updates.get('name') || '').trim();
+    if (!finalName) {
+      return { error: '請輸入案場名稱' };
+    }
+    updates.set('name', finalName);
+    updates.set('site_name', finalName);
+  }
+
+  return { updates };
+}
+
 app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requireRole('owner', 'admin'), async (req, res) => {
   const jobsiteId = Number(req.params.jobsiteId);
 
@@ -8532,69 +8584,21 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
     return res.status(400).json({ error: '缺少 jobsiteId' });
   }
 
-  const {
-    siteName,
-    name,
-    clientName,
-    clientPhone,
-    address,
-    projectType,
-    areaPings,
-    areaPing,
-    paintAreaPing,
-    pricePerPing,
-    paintPricePerPing,
-    foodCost,
-    quoteAmount,
-    receivedAmount,
-    materialCost,
-    laborCost,
-    outsourcedCost,
-    miscCost,
-    taxMode,
-    taxRate,
-    subtotalAmount,
-    taxAmount,
-    totalAmount,
-    status,
-    note
-  } = req.body;
-
-  const finalSiteName = siteName || name || '';
-
-  if (!finalSiteName.trim()) {
-    return res.status(400).json({ error: '請輸入案場名稱' });
-  }
+  const { updates, error } = buildJobSitePatch(req.body || {});
+  if (error) return res.status(400).json({ error });
+  if (!updates.size) return res.status(400).json({ error: '沒有可更新的案場欄位' });
 
   if (PG_ENABLED) {
     try {
+      const entries = Array.from(updates.entries());
+      const setSql = entries.map(([column], index) => `${column} = $${index + 1}`).join(', ');
+      const values = entries.map(([, value]) => value);
       const updated = await pgOne(`
         UPDATE job_sites
-        SET name = $1,
-            site_name = $2,
-            client_name = $3,
-            client_phone = $4,
-            address = $5,
-            project_type = $6,
-            area_pings = $7,
-            price_per_ping = $8,
-            food_cost = $9,
-            quote_amount = $10,
-            tax_mode = $11,
-            tax_rate = $12,
-            subtotal_amount = $13,
-            tax_amount = $14,
-            total_amount = $15,
-            received_amount = $16,
-            material_cost = $17,
-            labor_cost = $18,
-            outsourced_cost = $19,
-            misc_cost = $20,
-            status = $21,
-            note = $22,
+        SET ${setSql},
             updated_at = CURRENT_TIMESTAMP
-        WHERE id = $23
-          AND company_id = $24
+        WHERE id = $${values.length + 1}
+          AND company_id = $${values.length + 2}
         RETURNING
           id,
           company_id AS "companyId",
@@ -8621,32 +8625,7 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
           COALESCE(note, '') AS note,
           created_at AS "createdAt",
           updated_at AS "updatedAt"
-      `, [
-        finalSiteName.trim(),
-        finalSiteName.trim(),
-        clientName || '',
-        clientPhone || '',
-        address || '',
-        projectType || '',
-        Number(areaPings ?? areaPing ?? paintAreaPing ?? 0),
-        Number(pricePerPing ?? paintPricePerPing ?? 0),
-        Number(foodCost || 0),
-        Number(quoteAmount || totalAmount || 0),
-        taxMode || 'not_taxed',
-        Number(taxRate ?? 0.05),
-        Number(subtotalAmount ?? quoteAmount ?? totalAmount ?? 0),
-        Number(taxAmount || 0),
-        Number(totalAmount ?? quoteAmount ?? 0),
-        Number(receivedAmount || 0),
-        Number(materialCost || 0),
-        Number(laborCost || 0),
-        Number(outsourcedCost || 0),
-        Number(miscCost || 0),
-        status || '已報價',
-        note || '',
-        jobsiteId,
-        req.company.id
-      ]);
+      `, [...values, jobsiteId, req.company.id]);
       if (!updated) return res.status(404).json({ error: '找不到此案場，或你沒有權限修改' });
       audit(req.company.id, req.user.id, 'jobsite_updated', String(jobsiteId));
       return res.json(updated);
@@ -8655,60 +8634,16 @@ app.patch('/api/companies/:companyId/jobsites/:jobsiteId', auth, company, requir
     }
   }
 
+  const entries = Array.from(updates.entries());
+  const setSql = entries.map(([column]) => `${column} = ?`).join(', ');
+  const values = entries.map(([, value]) => value);
   const result = db.prepare(`
     UPDATE job_sites
-    SET
-      name = ?,
-      site_name = ?,
-      client_name = ?,
-      client_phone = ?,
-      address = ?,
-      project_type = ?,
-      area_pings = ?,
-      price_per_ping = ?,
-      food_cost = ?,
-      quote_amount = ?,
-      tax_mode = ?,
-      tax_rate = ?,
-      subtotal_amount = ?,
-      tax_amount = ?,
-      total_amount = ?,
-      received_amount = ?,
-      material_cost = ?,
-      labor_cost = ?,
-      outsourced_cost = ?,
-      misc_cost = ?,
-      status = ?,
-      note = ?,
+    SET ${setSql},
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
       AND company_id = ?
-  `).run(
-    finalSiteName.trim(),
-    finalSiteName.trim(),
-    clientName || '',
-    clientPhone || '',
-    address || '',
-    projectType || '',
-    Number(areaPings ?? areaPing ?? paintAreaPing ?? 0),
-    Number(pricePerPing ?? paintPricePerPing ?? 0),
-    Number(foodCost || 0),
-    Number(quoteAmount || totalAmount || 0),
-    taxMode || 'not_taxed',
-    Number(taxRate ?? 0.05),
-    Number(subtotalAmount ?? quoteAmount ?? totalAmount ?? 0),
-    Number(taxAmount || 0),
-    Number(totalAmount ?? quoteAmount ?? 0),
-    Number(receivedAmount || 0),
-    Number(materialCost || 0),
-    Number(laborCost || 0),
-    Number(outsourcedCost || 0),
-    Number(miscCost || 0),
-    status || '已報價',
-    note || '',
-    jobsiteId,
-    req.company.id
-  );
+  `).run(...values, jobsiteId, req.company.id);
 
   if (result.changes === 0) {
     return res.status(404).json({

@@ -1068,12 +1068,19 @@ function Shell({ onLogout }) {
   const editionCompanyNav = userIsFounder
     ? editionSourceNav
     : editionSourceNav.filter(([id]) => hasCompanyFeature(company, id));
-  const aiDraftNav = editionCompanyNav.some(([id]) => id === 'ai_draft')
-    ? editionCompanyNav
-    : [
+  const commerceIntegrationNav = isCommerceIndustry(company?.industry) && !isConstructionIndustry(company?.industry) && !editionCompanyNav.some(([id]) => id === 'integrations')
+    ? [
         ...editionCompanyNav.slice(0, Math.max(1, editionCompanyNav.length - 1)),
-        ['ai_draft', 'AI 草稿助手 Beta', Sparkles],
+        ['integrations', '平台串接', PlugZap],
         ...editionCompanyNav.slice(Math.max(1, editionCompanyNav.length - 1))
+      ]
+    : editionCompanyNav;
+  const aiDraftNav = commerceIntegrationNav.some(([id]) => id === 'ai_draft')
+    ? commerceIntegrationNav
+    : [
+        ...commerceIntegrationNav.slice(0, Math.max(1, commerceIntegrationNav.length - 1)),
+        ['ai_draft', 'AI 草稿助手 Beta', Sparkles],
+        ...commerceIntegrationNav.slice(Math.max(1, commerceIntegrationNav.length - 1))
       ];
   const visibleNav = userIsAdmin
     ? [...aiDraftNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
@@ -1298,6 +1305,7 @@ if (!me || !company) {
             companyId={companyId}
             company={company}
             onSync={() => setRefresh((x) => x + 1)}
+            onNavigate={setPage}
           />
         )}
         {!needsReview && page === 'invoices' && <Invoices companyId={companyId} />}
@@ -3132,15 +3140,48 @@ function Transactions({ companyId }) {
   );
 }
 
-function Integrations({ companyId, company, onSync }) {
+function Integrations({ companyId, company, onSync, onNavigate }) {
   const [rows, setRows] = useState([]);
   const industry = company?.industry;
+  const commercePlanningOnly = isCommerceIndustry(industry) && !isConstructionIndustry(industry);
 
   const load = () => api(`/companies/${companyId}/integrations`).then(setRows);
 
   useEffect(() => {
+    if (commercePlanningOnly) {
+      setRows([]);
+      return;
+    }
     load();
-  }, [companyId]);
+  }, [companyId, commercePlanningOnly]);
+
+  if (commercePlanningOnly) {
+    return (
+      <section>
+        <Title
+          title="平台串接 Beta"
+          desc="此功能規劃用於集中管理未來的官方 LINE、社群賣場、電商平台、金流與物流資料。"
+        />
+
+        <div className="notice">
+          試營運期間暫不進行正式外部串接，避免誤寫入或同步錯誤資料。
+        </div>
+
+        <div className="grid">
+          <Card title="官方 LINE 串接" value="規劃中" sub="未啟用正式訊息同步或發送" />
+          <Card title="電商平台訂單同步" value="規劃中" sub="未串接 Shopee、Shopify 或其他正式平台" />
+          <Card title="金流 / 物流資料整合" value="規劃中" sub="未串接正式金流、物流或出貨流程" />
+          <Card title="社群銷售資料整理" value="規劃中" sub="試營運期間僅收集需求與流程回饋" />
+        </div>
+
+        <div className="row-actions" style={{ marginTop: 12 }}>
+          <button type="button" onClick={() => onNavigate?.('feedbacks')}>
+            回報串接需求
+          </button>
+        </div>
+      </section>
+    );
+  }
 
   const allowedCategories = getAllowedIntegrationCategories(industry);
   const visibleRows = rows.filter((p) => allowedCategories.includes(p.category));
@@ -4049,6 +4090,10 @@ function JobSites({ companyId, company }) {
     );
   }
 
+  function cleanEstimateUnit(unit) {
+    return String(unit || '').trim();
+  }
+
   const estimateTemplates = {
     '油漆工程': [
       ['牆面 / 天花施作坪數', 0, '坪', 1200, 0, '主項'],
@@ -4352,6 +4397,11 @@ function JobSites({ companyId, company }) {
       setError('請先輸入估價項目名稱，再加入明細列表。');
       return;
     }
+    const unit = cleanEstimateUnit(estimateDraft.unit);
+    if (!unit) {
+      setError('請輸入自訂單位');
+      return;
+    }
 
     setEstimateItems((old) => [
       ...old,
@@ -4360,7 +4410,7 @@ function JobSites({ companyId, company }) {
         itemCategory: estimateDraft.itemCategory || '加項',
         itemName: estimateDraft.itemName || '',
         quantity: estimateDraft.quantity,
-        unit: estimateDraft.unit || '',
+        unit,
         unitPrice: estimateDraft.unitPrice,
         unitCost: estimateDraft.unitCost,
         note: estimateDraft.note || '',
@@ -4442,6 +4492,7 @@ function JobSites({ companyId, company }) {
     const usableItems = estimateItems
       .map((item, index) => ({
         ...item,
+        unit: cleanEstimateUnit(item.unit),
         sortOrder: index + 1,
         quantity: estimateQuantity(item),
         unitPrice: estimateUnitPrice(item),
@@ -4459,6 +4510,11 @@ function JobSites({ companyId, company }) {
           item.amount > 0
         )
       );
+
+    if (usableItems.some((item) => !cleanEstimateUnit(item.unit))) {
+      setError('請輸入自訂單位');
+      throw new Error('請輸入自訂單位');
+    }
 
     for (const item of usableItems) {
       await jobSiteRequest(`/companies/${companyId}/jobsites/${jobsiteId}/estimate-items`, {
@@ -4609,7 +4665,7 @@ function JobSites({ companyId, company }) {
 
       if (editingId) {
         await jobSiteRequest(`/companies/${companyId}/jobsites/${editingId}`, {
-          method: 'PUT',
+          method: 'PATCH',
           body: JSON.stringify(payload)
         });
       } else {
@@ -4655,6 +4711,30 @@ function JobSites({ companyId, company }) {
       laborCost: numberValue(data.laborCost ?? data.labor_cost),
       outsourcedCost: numberValue(data.outsourcedCost ?? data.outsourced_cost),
       miscCost: numberValue(data.miscCost ?? data.misc_cost),
+      status: data.status || '已報價',
+      note: data.note || ''
+    };
+  }
+
+  function normalizeJobSiteEditPayload(data) {
+    return {
+      siteName: data.siteName || '',
+      clientName: data.clientName || '',
+      clientPhone: data.clientPhone || '',
+      address: data.address || '',
+      projectType: data.projectType || '',
+      quoteAmount: numberValue(data.quoteAmount ?? data.totalAmount),
+      taxMode: data.taxMode ?? 'not_taxed',
+      taxRate: numberValue(data.taxRate ?? 0.05),
+      subtotalAmount: numberValue(data.subtotalAmount ?? data.quoteAmount ?? data.totalAmount),
+      taxAmount: numberValue(data.taxAmount ?? 0),
+      totalAmount: numberValue(data.totalAmount ?? data.quoteAmount),
+      receivedAmount: numberValue(data.receivedAmount),
+      materialCost: numberValue(data.materialCost),
+      laborCost: numberValue(data.laborCost),
+      outsourcedCost: numberValue(data.outsourcedCost),
+      miscCost: numberValue(data.miscCost),
+      foodCost: numberValue(data.foodCost),
       status: data.status || '已報價',
       note: data.note || ''
     };
@@ -4749,23 +4829,12 @@ function JobSites({ companyId, company }) {
       return;
     }
 
-    const summary = getEstimateSummary();
-
     try {
       setSaving(true);
       setError('');
 
-      const payload = normalizePayload({
-        ...form,
-        quoteAmount: summary.totalAmount,
-        subtotalAmount: summary.subtotalAmount,
-        taxAmount: summary.taxAmount,
-        totalAmount: summary.totalAmount,
-        laborCost: summary.laborCost,
-        status: form.status || '已報價'
-      });
-
       if (editingId) {
+        const payload = normalizeJobSiteEditPayload(form);
         const updated = await jobSiteRequest(`/companies/${companyId}/jobsites/${editingId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload)
@@ -4779,6 +4848,16 @@ function JobSites({ companyId, company }) {
 
         setEditingId(null);
       } else {
+        const summary = getEstimateSummary();
+        const payload = normalizePayload({
+          ...form,
+          quoteAmount: summary.totalAmount,
+          subtotalAmount: summary.subtotalAmount,
+          taxAmount: summary.taxAmount,
+          totalAmount: summary.totalAmount,
+          laborCost: summary.laborCost,
+          status: form.status || '已報價'
+        });
         const created = await jobSiteRequest(`/companies/${companyId}/jobsites`, {
           method: 'POST',
           body: JSON.stringify(payload)
@@ -4827,11 +4906,17 @@ function JobSites({ companyId, company }) {
       address: site.address || '',
       projectType: site.projectType || '油漆工程',
       quoteAmount: numberValue(site.quoteAmount),
+      taxMode: site.taxMode || site.tax_mode || 'not_taxed',
+      taxRate: numberValue(site.taxRate ?? site.tax_rate ?? 0.05),
+      subtotalAmount: numberValue(site.subtotalAmount ?? site.subtotal_amount ?? site.quoteAmount),
+      taxAmount: numberValue(site.taxAmount ?? site.tax_amount),
+      totalAmount: numberValue(site.totalAmount ?? site.total_amount ?? site.quoteAmount),
       receivedAmount: numberValue(site.receivedAmount),
       materialCost: numberValue(site.materialCost),
       laborCost: numberValue(site.laborCost),
       outsourcedCost: numberValue(site.outsourcedCost),
       miscCost: numberValue(site.miscCost),
+      foodCost: numberValue(site.foodCost ?? site.food_cost),
       status: site.status || '已報價',
       note: site.note || ''
     });
@@ -4971,6 +5056,11 @@ function JobSites({ companyId, company }) {
       setEstimateError('請輸入估價項目名稱。');
       return;
     }
+    const unit = cleanEstimateUnit(estimateItemForm.unit);
+    if (!unit) {
+      setEstimateError('請輸入自訂單位');
+      return;
+    }
 
     try {
       setEstimateLoading(true);
@@ -4981,7 +5071,7 @@ function JobSites({ companyId, company }) {
         itemCategory: estimateItemForm.itemCategory || '加項',
         itemName: estimateItemForm.itemName || '',
         quantity: numberValue(estimateItemForm.quantity),
-        unit: estimateItemForm.unit || '',
+        unit,
         unitPrice: numberValue(estimateItemForm.unitPrice),
         costAmount: numberValue(estimateItemForm.quantity) * numberValue(estimateItemForm.unitCost),
         note: estimateItemForm.note || '',
@@ -5820,6 +5910,8 @@ function JobSites({ companyId, company }) {
         <h2>接案估價表</h2>
         <div className="notice">
           這裡只需要填一次。BookAI 會依「工種估價明細」自動加總報價、成本、稅額、毛利、毛利率與收款率；確認後可直接新增到下方「案場總覽」。
+          <br />
+          若材料、工資、外包與雜支已列入下方估價明細，請勿在上方重複填寫。
         </div>
 
         <div className="grid">
@@ -5921,6 +6013,8 @@ function JobSites({ companyId, company }) {
 
               <div className="notice">
                 {getEstimateTemplateTip(form.projectType)}
+                <br />
+                完整明細估價建議將材料、工資、外包與加項全部列在下方，上方快速成本欄位可填 0。
                 <br />
                 估價明細是「對客戶報價」；額外材料費、工資、外包費、交通 / 雜支是內部成本。若材料成本已填在明細內，請勿在額外材料費重複填入。伙食費保留為內部參考，不計入核心毛利。
               </div>
@@ -6098,6 +6192,10 @@ function JobSites({ companyId, company }) {
                 <Card title="預估毛利" value={money(summary.profit)} sub="未稅金額 - 核心成本" />
                 <Card title="伙食費" value={money(summary.foodCost)} sub="內部參考，不計入核心毛利" />
               </div>
+
+              <div className="notice" style={{ marginTop: 12 }}>
+                核心成本 = 明細成本 + 上方快速成本欄位。請確認沒有重複填寫。
+              </div>
             </div>
           );
         })()}
@@ -6132,6 +6230,10 @@ function JobSites({ companyId, company }) {
                 <Card title="已收款" value={money(receivedAmount)} sub={`收款率 ${collectionRate}%`} />
                 <Card title="未收款" value={money(unpaid)} sub="後續需追蹤請款" />
                 <Card title="伙食費" value={money(summary.foodCost)} sub="內部參考，不計入核心毛利" />
+              </div>
+
+              <div className="notice" style={{ marginTop: 12 }}>
+                提醒：若工資、材料、外包費已填入估價明細，請勿再於上方快速成本欄位重複填寫，避免核心成本被加總兩次。
               </div>
 
               <div className="notice" style={{ marginTop: 12 }}>
