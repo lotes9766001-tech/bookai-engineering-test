@@ -33,36 +33,53 @@ const resourceLabels = {
   faqs: 'FAQ'
 };
 
-const statusOptions = ['draft', 'published', 'hidden'];
-const sectionTypes = ['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom'];
-const sectionTypeLabels = {
-  hero: '主視覺',
-  brand_story: '品牌故事',
-  feature: '精選特色',
-  promotion: '活動資訊',
-  product_highlight: '商品亮點',
-  custom: '品牌亮點'
-};
-const inquiryStatuses = ['new', 'read', 'replied', 'archived'];
-const assetModules = ['logo', 'favicon', 'banner', 'home_section', 'product', 'post', 'general'];
-const moduleLabels = {
-  logo: 'Logo',
-  favicon: 'Favicon',
-  banner: 'Banner',
-  home_section: '首頁區塊',
-  product: '商品',
-  post: '文章',
-  general: '通用'
-};
+const statusOptions = [
+  ['draft', '草稿'],
+  ['published', '已發布'],
+  ['hidden', '隱藏']
+];
+
+const sectionTypeOptions = [
+  ['custom', '品牌亮點'],
+  ['feature', '精選特色'],
+  ['promotion', '活動資訊'],
+  ['story', '品牌故事'],
+  ['brand_story', '品牌故事'],
+  ['product_highlight', '商品展示'],
+  ['hero', '主視覺']
+];
+
+const inquiryStatusOptions = [
+  ['new', '新詢問'],
+  ['read', '已讀'],
+  ['replied', '已回覆'],
+  ['archived', '已封存']
+];
+
+const assetModuleOptions = [
+  ['logo', 'Logo'],
+  ['favicon', '網站小圖示'],
+  ['banner', 'Banner'],
+  ['home_section', '首頁區塊'],
+  ['product', '商品'],
+  ['post', '文章'],
+  ['general', '通用素材']
+];
+
 const resourceEmptyText = {
-  banners: '尚未新增 Banner。請先建立首頁主視覺，公開網站首頁會優先顯示第一筆啟用 Banner。',
-  'home-sections': '尚未新增首頁區塊。可加入品牌故事、服務特色或促銷資訊。',
-  products: '尚未新增商品。新增商品並設為已發布後，才會出現在公開網站。',
-  posts: '尚未新增文章。新增文章並設為已發布後，才會出現在最新消息。',
-  faqs: '尚未新增 FAQ。常見問題可降低顧客詢問成本。',
-  inquiries: '目前尚無聯絡詢問。公開網站送出的表單會出現在這裡。',
-  assets: '目前尚無素材。可先新增圖片 URL，再套用到 Logo、Banner、商品或文章封面。'
+  banners: '目前尚無 Banner。你可以新增首頁主視覺，讓顧客一進站就看見品牌重點。',
+  'home-sections': '目前尚無首頁區塊。你可以新增品牌故事、精選特色或活動資訊。',
+  products: '目前尚無官網商品。你可以新增商品展示內容，狀態設為草稿後再發布。',
+  posts: '目前尚無文章。你可以新增品牌消息、選物指南或活動公告，讓官網內容更完整。',
+  faqs: '目前尚無 FAQ。你可以新增常見問題，協助顧客快速了解商品、出貨與服務方式。',
+  inquiries: '目前尚無聯絡詢問。公開網站表單送出後，詢問紀錄會顯示在這裡。',
+  assets: '目前尚無素材。你可以先建立常用圖片 URL，方便套用到 Logo、Banner、商品與文章。'
 };
+
+const publicStatuses = new Map(statusOptions);
+const sectionTypeLabels = new Map(sectionTypeOptions);
+const inquiryStatusLabels = new Map(inquiryStatusOptions);
+const assetModuleLabels = new Map(assetModuleOptions);
 
 function nextSortOrder(items = []) {
   const max = Math.max(0, ...items.map((item) => Number(item.sortOrder ?? item.sort_order ?? 0) || 0));
@@ -103,26 +120,21 @@ function getStatusBadgeClass(status) {
   if (status === 'published') return 'website-chip website-chip-published';
   if (status === 'draft') return 'website-chip website-chip-draft';
   if (status === 'hidden') return 'website-chip website-chip-hidden';
-  if (status === 'active') return 'website-chip website-chip-active';
-  if (status === 'inactive') return 'website-chip website-chip-inactive';
+  if (status === 'active' || status === 'enabled') return 'website-chip website-chip-active';
+  if (status === 'inactive' || status === 'disabled') return 'website-chip website-chip-inactive';
   return 'website-chip';
 }
 
 function getStatusLabel(status) {
   const labels = {
-    published: '已發布',
-    draft: '草稿',
-    hidden: '隱藏',
+    ...Object.fromEntries(statusOptions),
+    ...Object.fromEntries(inquiryStatusOptions),
     active: '啟用',
     inactive: '停用',
     enabled: '啟用',
-    disabled: '停用',
-    new: '新詢問',
-    read: '已讀',
-    replied: '已回覆',
-    archived: '已封存'
+    disabled: '停用'
   };
-  return labels[status] || status;
+  return labels[status] || status || '-';
 }
 
 function getOptionValue(option) {
@@ -183,7 +195,7 @@ function ImagePreview({ src }) {
   }, [src]);
 
   if (!src) return <div className="website-image-empty">尚未輸入圖片 URL</div>;
-  if (failed) return <div className="website-image-empty">圖片無法預覽</div>;
+  if (failed) return <div className="website-image-empty">圖片無法載入，請確認網址是否完整</div>;
   return <img className="website-image-preview" src={src} alt="" onError={() => setFailed(true)} />;
 }
 
@@ -195,7 +207,7 @@ function ImageUrlField({ label, value, onChange, assets = [], module = 'general'
       <label className="website-field">
         <span>{label}</span>
         <input value={value || ''} placeholder="https://example.com/image.jpg" onChange={(e) => onChange(e.target.value)} />
-        <small>請貼上完整圖片網址，包含 https:// 開頭；若網址有 ?text= 等參數也會完整保存。</small>
+        <small>請貼上完整圖片網址，包含 https:// 開頭；若網址包含 ?text= 這類參數也會完整保存。</small>
       </label>
       <div className="website-image-tools">
         <select
@@ -205,7 +217,7 @@ function ImageUrlField({ label, value, onChange, assets = [], module = 'general'
             if (e.target.value) onChange(e.target.value);
           }}
         >
-          <option value="">{filteredAssets.length ? '從素材管理套用圖片 URL' : '目前無可用素材'}</option>
+          <option value="">{filteredAssets.length ? '從素材管理選擇圖片網址' : '目前沒有可選素材'}</option>
           {filteredAssets.map((asset) => (
             <option key={asset.id} value={asset.fileUrl}>{asset.fileName || asset.fileUrl}</option>
           ))}
@@ -250,7 +262,7 @@ export default function WebsiteCmsPage() {
         assets: Array.isArray(assets) ? assets : []
       });
     } catch (err) {
-      setError(err.message || '品牌官網資料載入失敗');
+      setError(err.message || '官網資料載入失敗。');
     } finally {
       setLoading(false);
     }
@@ -260,51 +272,39 @@ export default function WebsiteCmsPage() {
     loadAll();
   }, []);
 
-  const overview = useMemo(() => ({
-    banners: resources.banners.length,
-    sections: resources['home-sections'].length,
-    products: resources.products.length,
-    productsPublished: resources.products.filter((p) => p.status === 'published').length,
-    productsDraft: resources.products.filter((p) => p.status === 'draft').length,
-    productsHidden: resources.products.filter((p) => p.status === 'hidden').length,
-    posts: resources.posts.length,
-    postsPublished: resources.posts.filter((p) => p.status === 'published').length,
-    postsDraft: resources.posts.filter((p) => p.status === 'draft').length,
-    postsHidden: resources.posts.filter((p) => p.status === 'hidden').length,
-    faqs: resources.faqs.length,
-    newInquiries: resources.inquiries.filter((item) => item.status === 'new').length
-  }), [resources]);
-
   async function run(action, successText) {
     setSaving(true);
-    setError('');
     setMessage('');
+    setError('');
     try {
       await action();
-      await loadAll();
       setMessage(successText);
+      await loadAll();
     } catch (err) {
-      setError(err.message || '操作失敗');
+      setError(err.message || '操作失敗，請稍後再試。');
     } finally {
       setSaving(false);
     }
   }
 
+  const commonProps = { resources, assets: resources.assets, saving, run };
+
   return (
-    <div className="website-cms-page">
-      <section className="website-hero">
+    <section className="website-cms-page">
+      <div className="website-hero">
         <div>
-          <span className="website-kicker">Website CMS</span>
-          <h1>品牌官網</h1>
-          <p>管理品牌網站內容、首頁展示、商品資訊與顧客詢問。</p>
+          <span className="website-kicker">官網後台</span>
+          <h1>品牌官網管理</h1>
+          <p>管理網站設定、首頁內容、商品展示、文章、FAQ 與聯絡詢問。所有狀態值仍維持系統原本資料格式，只在畫面上轉為繁體中文。</p>
         </div>
         <div className="website-preview-card">
-          <span>後台預覽連結</span>
-          <strong>/site-preview/{settings?.siteSlug || 'your-brand'}</strong>
+          <span>預覽網址</span>
+          <strong>/site-preview/{settings?.siteSlug || 'brand-slug'}</strong>
+          <p>預覽模式可供後台檢查，不會送出聯絡表單。</p>
         </div>
-      </section>
+      </div>
 
-      <div className="website-tabs" role="tablist" aria-label="品牌官網管理">
+      <div className="website-tabs" role="tablist" aria-label="官網後台分頁">
         {tabs.map(([id, label]) => (
           <button key={id} type="button" className={activeTab === id ? 'active' : ''} onClick={() => setActiveTab(id)}>
             {label}
@@ -312,478 +312,496 @@ export default function WebsiteCmsPage() {
         ))}
       </div>
 
-      {message && <div className="website-success">{message}</div>}
-      {error && <div className="website-error">{error}</div>}
-
+      {message && <div className="website-alert success">{message}</div>}
+      {error && <div className="website-alert error">{error}</div>}
       {loading ? (
-        <div className="website-empty">品牌官網資料載入中...</div>
+        <div className="website-loading">官網資料載入中...</div>
       ) : (
         <>
-          {activeTab === 'overview' && <WebsiteOverview settings={settings} overview={overview} onNavigate={setActiveTab} />}
-          {activeTab === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} assets={resources.assets} saving={saving} onSave={() => run(() => saveWebsiteSettings(settings), '網站設定已儲存，可使用預覽網站確認前台呈現。')} />}
+          {activeTab === 'overview' && <WebsiteOverview settings={settings} resources={resources} />}
+          {activeTab === 'settings' && (
+            <SettingsPanel
+              settings={settings}
+              saving={saving}
+              onSave={(payload) => run(() => saveWebsiteSettings(payload), '網站設定已儲存。')}
+            />
+          )}
           {['banners', 'home-sections', 'products', 'posts', 'faqs'].includes(activeTab) && (
             <ResourcePanel
               resource={activeTab}
-              items={resources[activeTab] || []}
-              assets={resources.assets}
-              saving={saving}
-              onCreate={(payload) => run(() => createWebsiteResource(activeTab, payload), `${resourceLabels[activeTab]}已新增，請確認狀態與排序。`)}
-              onUpdate={(id, payload) => run(() => updateWebsiteResource(activeTab, id, payload), `${resourceLabels[activeTab]}已更新。`)}
-              onDelete={(id) => run(() => deleteWebsiteResource(activeTab, id), `${resourceLabels[activeTab]}已刪除。`)}
+              items={resources[activeTab]}
+              {...commonProps}
             />
           )}
-          {activeTab === 'inquiries' && <InquiriesPanel items={resources.inquiries} saving={saving} onStatus={(id, status) => run(() => updateWebsiteInquiryStatus(id, status), '詢問狀態已更新。')} />}
+          {activeTab === 'inquiries' && (
+            <InquiriesPanel
+              inquiries={resources.inquiries}
+              saving={saving}
+              onStatusChange={(id, status) => run(() => updateWebsiteInquiryStatus(id, status), '詢問狀態已更新。')}
+            />
+          )}
           {activeTab === 'assets' && (
             <AssetsPanel
-              items={resources.assets}
+              assets={resources.assets}
               saving={saving}
-              onCreate={(payload) => run(() => createWebsiteAsset(payload), '素材已新增，可在圖片欄位選擇套用。')}
-              onDelete={(id) => run(() => deleteWebsiteAsset(id), '素材紀錄已刪除。')}
+              run={run}
             />
           )}
         </>
       )}
+    </section>
+  );
+}
+
+function WebsiteOverview({ settings, resources }) {
+  const previewUrl = settings?.siteSlug ? `/site-preview/${encodeURIComponent(settings.siteSlug)}` : null;
+  const cards = [
+    ['網站名稱', settings?.siteName || '-'],
+    ['品牌名稱', settings?.brandName || '-'],
+    ['公開網址代號', settings?.siteSlug || '-'],
+    ['發布狀態', getStatusLabel(settings?.status || 'draft')],
+    ['Banner 數量', `${resources.banners.length} 筆`],
+    ['首頁區塊數量', `${resources['home-sections'].length} 筆`],
+    ['商品數量', `${resources.products.length} 筆`],
+    ['文章數量', `${resources.posts.length} 筆`],
+    ['FAQ 數量', `${resources.faqs.length} 筆`],
+    ['新詢問', `${resources.inquiries.filter((item) => item.status === 'new').length} 筆`]
+  ];
+
+  const publishedProducts = resources.products.filter((item) => item.status === 'published').length;
+  const draftProducts = resources.products.filter((item) => item.status === 'draft').length;
+  const hiddenProducts = resources.products.filter((item) => item.status === 'hidden').length;
+  const publishedPosts = resources.posts.filter((item) => item.status === 'published').length;
+  const draftPosts = resources.posts.filter((item) => item.status === 'draft').length;
+  const hiddenPosts = resources.posts.filter((item) => item.status === 'hidden').length;
+
+  return (
+    <div className="website-overview">
+      <div className="website-stat-grid">
+        {cards.map(([label, value]) => (
+          <article className="website-stat-card" key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </article>
+        ))}
+      </div>
+
+      <div className="website-overview-grid">
+        <article className="website-panel">
+          <h2>公開網址</h2>
+          {previewUrl ? (
+            <a className="website-url" href={previewUrl} target="_blank" rel="noreferrer">{previewUrl}</a>
+          ) : (
+            <p>請先在網站設定建立公開網址代號。</p>
+          )}
+        </article>
+        <article className="website-panel">
+          <h2>商品數量</h2>
+          <strong className="website-big-number">{resources.products.length}</strong>
+          <div className="website-status-list">
+            <span>已發布 {publishedProducts}</span>
+            <span>草稿 {draftProducts}</span>
+            <span>隱藏 {hiddenProducts}</span>
+          </div>
+        </article>
+        <article className="website-panel">
+          <h2>文章數量</h2>
+          <strong className="website-big-number">{resources.posts.length}</strong>
+          <div className="website-status-list">
+            <span>已發布 {publishedPosts}</span>
+            <span>草稿 {draftPosts}</span>
+            <span>隱藏 {hiddenPosts}</span>
+          </div>
+        </article>
+      </div>
     </div>
   );
 }
 
-function WebsiteOverview({ settings, overview, onNavigate }) {
-  const previewUrl = settings?.siteSlug ? `/site-preview/${encodeURIComponent(settings.siteSlug)}` : null;
-  const publicUrl = settings?.siteSlug ? `/site/${encodeURIComponent(settings.siteSlug)}` : null;
-  const cards = [
-    ['網站名稱', settings?.siteName || '尚未設定網站名稱'],
-    ['品牌名稱', settings?.brandName || '尚未設定品牌名稱'],
-    ['site_slug', settings?.siteSlug || '尚未設定 site_slug'],
-    ['發布狀態', settings?.isPublished ? '✓ 已發布' : '○ 未發布'],
-    ['公開網址', publicUrl ? publicUrl : '(請先設定 site_slug)'],
-    ['Banner 數量', overview.banners],
-    ['首頁區塊數量', overview.sections],
-    ['商品數量', overview.products, [`已發布 ${overview.productsPublished}`, `草稿 ${overview.productsDraft}`, `隱藏 ${overview.productsHidden}`]],
-    ['文章數量', overview.posts, [`已發布 ${overview.postsPublished}`, `草稿 ${overview.postsDraft}`, `隱藏 ${overview.postsHidden}`]],
-    ['FAQ 數量', overview.faqs],
-    ['新聯絡詢問', overview.newInquiries]
-  ];
-  const checklist = [
-    !settings?.siteName && ['settings', '尚未設定網站名稱'],
-    !settings?.siteSlug && ['settings', '尚未設定 site_slug'],
-    overview.banners === 0 && ['banners', '尚未新增 Banner'],
-    overview.products === 0 && ['products', '尚未新增商品'],
-    overview.posts === 0 && ['posts', '尚未新增文章'],
-    overview.faqs === 0 && ['faqs', '尚未新增 FAQ']
-  ].filter(Boolean);
+function SettingsPanel({ settings, saving, onSave }) {
+  const [form, setForm] = useState(settings || {});
+
+  useEffect(() => {
+    setForm(settings || {});
+  }, [settings]);
+
+  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
 
   return (
-    <section className="website-panel">
-      <div className="website-panel-head">
-        <div>
-          <h2>官網總覽</h2>
-          <p>這裡可以管理你的品牌官網內容，資料會依登入公司自動隔離。</p>
-        </div>
-        <div className="website-overview-actions">
-          {previewUrl && (
-            <a href={previewUrl} target="_blank" rel="noreferrer" className="website-link-btn">預覽網站</a>
-          )}
-          {settings?.isPublished && publicUrl && (
-            <a href={publicUrl} target="_blank" rel="noreferrer" className="website-link-btn">開啟公開網站</a>
-          )}
-          <button type="button" onClick={() => onNavigate('settings')}>編輯網站設定</button>
-        </div>
-      </div>
-      <div className="website-metric-grid">
-        {cards.map(([label, value, details]) => (
-          <div key={label} className="website-metric-card">
-            <span>{label}</span>
-            <strong>{value}</strong>
-            {Array.isArray(details) && (
-              <div className="website-metric-details">
-                {details.map((item) => <small key={item}>{item}</small>)}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      {checklist.length > 0 && (
-        <div className="website-next-steps">
-          <h3>建議完成項目</h3>
-          <div>
-            {checklist.map(([tab, text]) => (
-              <button key={text} type="button" onClick={() => onNavigate(tab)}>{text}</button>
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function SettingsPanel({ settings, setSettings, assets, saving, onSave }) {
-  const update = (key, value) => setSettings({ ...(settings || {}), [key]: value });
-
-  return (
-    <section className="website-panel">
+    <form className="website-panel" onSubmit={(e) => {
+      e.preventDefault();
+      onSave(form);
+    }}>
       <div className="website-panel-head">
         <div>
           <h2>網站設定</h2>
-          <p>設定品牌識別、聯絡資訊、SEO 與發布狀態。儲存後可立即用預覽網站確認。</p>
+          <p>設定品牌官網的公開網址、品牌資訊、社群連結與 SEO 文字。</p>
         </div>
-        <button type="button" disabled={saving} onClick={onSave}>{saving ? '儲存中...' : '儲存網站設定'}</button>
+        <button className="primary" type="submit" disabled={saving}>{saving ? '儲存中...' : '儲存設定'}</button>
       </div>
+
       <div className="website-form-grid">
-        <TextField label="site_slug" value={settings?.siteSlug} onChange={(v) => update('siteSlug', v)} hint="公開網址會使用 /site/site_slug，建議使用英文、數字或短橫線。" />
-        <TextField label="網站名稱" value={settings?.siteName} onChange={(v) => update('siteName', v)} hint="顯示於前台頁面標題與 SEO 預設值。" />
-        <TextField label="品牌名稱" value={settings?.brandName} onChange={(v) => update('brandName', v)} hint="顯示於前台導覽與頁尾。" />
-        <ImageUrlField label="Logo URL" value={settings?.logoUrl} onChange={(v) => update('logoUrl', v)} assets={assets} module="logo" />
-        <ImageUrlField label="Favicon URL" value={settings?.faviconUrl} onChange={(v) => update('faviconUrl', v)} assets={assets} module="favicon" />
-        <TextField label="主色" type="color" value={settings?.primaryColor || '#2563eb'} onChange={(v) => update('primaryColor', v)} />
-        <TextField label="輔色" type="color" value={settings?.secondaryColor || '#0f172a'} onChange={(v) => update('secondaryColor', v)} />
-        <TextField label="聯絡 Email" value={settings?.contactEmail} onChange={(v) => update('contactEmail', v)} />
-        <TextField label="聯絡電話" value={settings?.contactPhone} onChange={(v) => update('contactPhone', v)} />
-        <TextField label="LINE URL" value={settings?.lineUrl} onChange={(v) => update('lineUrl', v)} />
-        <TextField label="Facebook URL" value={settings?.facebookUrl} onChange={(v) => update('facebookUrl', v)} />
-        <TextField label="Instagram URL" value={settings?.instagramUrl} onChange={(v) => update('instagramUrl', v)} />
-        <TextField label="地址" value={settings?.address} onChange={(v) => update('address', v)} />
-        <TextField label="SEO 標題" value={settings?.seoTitle} onChange={(v) => update('seoTitle', v)} />
-        <TextField label="SEO 描述" value={settings?.seoDescription} onChange={(v) => update('seoDescription', v)} textarea hint="簡短描述品牌、商品或服務內容，公開網站會用於首頁文案 fallback。" />
+        <TextField label="公開網址代號" value={form.siteSlug} onChange={(value) => update('siteSlug', value)} placeholder="mori-pet-life" hint="公開網址會使用 /site/site_slug，建議使用英文、數字或短橫線。" />
+        <TextField label="網站名稱" value={form.siteName} onChange={(value) => update('siteName', value)} placeholder="Mori Pet Life 官方網站" />
+        <TextField label="品牌名稱" value={form.brandName} onChange={(value) => update('brandName', value)} placeholder="Mori Pet Life" />
+        <ImageUrlField label="Logo 圖片網址" value={form.logoUrl} onChange={(value) => update('logoUrl', value)} module="logo" />
+        <ImageUrlField label="網站小圖示網址" value={form.faviconUrl} onChange={(value) => update('faviconUrl', value)} module="favicon" />
+        <TextField label="主色" value={form.primaryColor} onChange={(value) => update('primaryColor', value)} placeholder="#1f6f5b" />
+        <TextField label="輔色" value={form.secondaryColor} onChange={(value) => update('secondaryColor', value)} placeholder="#f4efe6" />
+        <TextField label="聯絡 Email" value={form.contactEmail} onChange={(value) => update('contactEmail', value)} placeholder="hello@example.com" />
+        <TextField label="聯絡電話" value={form.contactPhone} onChange={(value) => update('contactPhone', value)} placeholder="02-1234-5678" />
+        <TextField label="LINE 連結" value={form.lineUrl} onChange={(value) => update('lineUrl', value)} placeholder="https://line.me/..." />
+        <TextField label="Facebook 連結" value={form.facebookUrl} onChange={(value) => update('facebookUrl', value)} placeholder="https://facebook.com/..." />
+        <TextField label="Instagram 連結" value={form.instagramUrl} onChange={(value) => update('instagramUrl', value)} placeholder="https://instagram.com/..." />
+        <TextField label="地址" value={form.address} onChange={(value) => update('address', value)} placeholder="台北市..." />
+        <TextField label="SEO 標題" value={form.seoTitle} onChange={(value) => update('seoTitle', value)} placeholder="品牌名稱 | 官方網站" />
+        <TextField label="SEO 描述" value={form.seoDescription} onChange={(value) => update('seoDescription', value)} textarea placeholder="用 1-2 句話描述品牌、商品與服務特色。" />
+        <SelectField label="發布狀態" value={form.status || 'draft'} onChange={(value) => update('status', value)} options={statusOptions} />
       </div>
-      <div className="website-form-section">
-        <h3>發布狀態</h3>
-        <p className="website-form-hint">{settings?.isPublished ? '✓ 已發布：消費者可以從公開網址瀏覽你的網站' : '○ 未發布：公開網址會顯示「網站尚未開放」'}</p>
-        <SwitchField label="發布網站" checked={settings?.isPublished} onChange={(v) => update('isPublished', v)} />
-      </div>
-    </section>
+    </form>
   );
 }
 
-function ResourcePanel({ resource, items, assets, saving, onCreate, onUpdate, onDelete }) {
-  const [form, setForm] = useState(() => emptyForm(resource, items));
-  const [editingId, setEditingId] = useState(null);
-  const label = resourceLabels[resource];
+function ResourcePanel({ resource, items, assets, saving, run }) {
+  const label = resourceLabels[resource] || '內容';
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(emptyForm(resource, items));
 
   useEffect(() => {
+    setEditing(null);
     setForm(emptyForm(resource, items));
-    setEditingId(null);
   }, [resource, items]);
 
-  function edit(item) {
-    setEditingId(item.id);
-    setForm(normalizeForm(resource, item));
-  }
-
-  async function submit(e) {
-    e.preventDefault();
-    if (editingId) await onUpdate(editingId, form);
-    else await onCreate(form);
-    setEditingId(null);
+  const reset = () => {
+    setEditing(null);
     setForm(emptyForm(resource, items));
+  };
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    if (editing) {
+      await run(() => updateWebsiteResource(resource, editing.id, form), `${label}已更新。`);
+    } else {
+      await run(() => createWebsiteResource(resource, form), `${label}已新增。`);
+    }
+    reset();
   }
 
-  function remove(id) {
-    if (!window.confirm(`確定要刪除此${label}？`)) return;
-    onDelete(id);
+  async function handleDelete(item) {
+    if (!window.confirm(`確定要刪除這筆${label}嗎？`)) return;
+    await run(() => deleteWebsiteResource(resource, item.id), `${label}已刪除。`);
   }
 
   return (
-    <section className="website-panel">
-      <div className="website-panel-head">
-        <div>
-          <h2>{label}管理</h2>
-          <p>新增、編輯、排序與控制顯示狀態。公開網站只會顯示已發布或啟用的內容。</p>
+    <div className="website-resource-layout">
+      <form className="website-panel" onSubmit={handleSubmit}>
+        <div className="website-panel-head">
+          <div>
+            <h2>{editing ? `編輯${label}` : `新增${label}`}</h2>
+            <p>請填寫顧客看得懂的內容；系統狀態值會保留原資料格式，只在畫面上顯示中文。</p>
+          </div>
+          <div className="website-actions">
+            {editing && <button type="button" className="secondary" onClick={reset}>取消編輯</button>}
+            <button className="primary" type="submit" disabled={saving}>{saving ? '儲存中...' : editing ? '更新內容' : `新增${label}`}</button>
+          </div>
         </div>
-      </div>
-      <form className="website-editor" onSubmit={submit}>
         <ResourceFields resource={resource} form={form} setForm={setForm} assets={assets} />
-        <div className="website-editor-actions">
-          <button type="submit" disabled={saving}>{saving ? '處理中...' : editingId ? '儲存修改' : `新增${label}`}</button>
-          {editingId && <button type="button" className="website-secondary-btn" onClick={() => { setEditingId(null); setForm(emptyForm(resource, items)); }}>取消編輯</button>}
-        </div>
       </form>
-      <ResourceTable resource={resource} items={items} onEdit={edit} onDelete={remove} />
-    </section>
+
+      <ResourceTable
+        resource={resource}
+        items={items}
+        onEdit={(item) => {
+          setEditing(item);
+          setForm(normalizeForm(resource, item));
+        }}
+        onDelete={handleDelete}
+      />
+    </div>
   );
 }
 
 function ResourceFields({ resource, form, setForm, assets }) {
-  const update = (key, value) => setForm({ ...form, [key]: value });
+  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
   if (resource === 'banners') {
     return (
       <div className="website-form-grid">
-        <TextField label="標題" value={form.title} onChange={(v) => update('title', v)} />
-        <TextField label="副標" value={form.subtitle} onChange={(v) => update('subtitle', v)} />
-        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} assets={assets} module="banner" />
-        <TextField label="按鈕文字" value={form.buttonText} onChange={(v) => update('buttonText', v)} />
-        <TextField label="按鈕連結" value={form.buttonUrl} onChange={(v) => update('buttonUrl', v)} />
-        <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
-        <SwitchField label="啟用" checked={form.isActive} onChange={(v) => update('isActive', v)} />
+        <TextField label="標題" value={form.title} onChange={(value) => update('title', value)} placeholder="陪牠一起過更好的日常" />
+        <TextField label="副標" value={form.subtitle} onChange={(value) => update('subtitle', value)} textarea placeholder="用一句話說明品牌主張或本期活動。" />
+        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="banner" />
+        <TextField label="按鈕文字" value={form.buttonText} onChange={(value) => update('buttonText', value)} placeholder="查看商品" />
+        <TextField label="按鈕連結" value={form.buttonUrl} onChange={(value) => update('buttonUrl', value)} placeholder="/products" />
+        <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
+        <SwitchField label="啟用" checked={form.isActive} onChange={(value) => update('isActive', value)} />
       </div>
     );
   }
+
   if (resource === 'home-sections') {
     return (
       <div className="website-form-grid">
-        <SelectField
-          label="區塊類型"
-          value={form.sectionType}
-          onChange={(v) => update('sectionType', v)}
-          options={sectionTypes.map((type) => [type, sectionTypeLabels[type] || type])}
-        />
-        <TextField label="標題" value={form.title} onChange={(v) => update('title', v)} />
-        <TextField label="副標" value={form.subtitle} onChange={(v) => update('subtitle', v)} />
-        <TextField label="內容" value={form.content} onChange={(v) => update('content', v)} textarea />
-        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} assets={assets} module="home_section" />
-        <TextField label="按鈕文字" value={form.buttonText} onChange={(v) => update('buttonText', v)} />
-        <TextField label="按鈕連結" value={form.buttonUrl} onChange={(v) => update('buttonUrl', v)} />
-        <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
-        <SwitchField label="啟用" checked={form.isActive} onChange={(v) => update('isActive', v)} />
+        <SelectField label="區塊類型" value={form.sectionType} onChange={(value) => update('sectionType', value)} options={sectionTypeOptions} />
+        <TextField label="標題" value={form.title} onChange={(value) => update('title', value)} placeholder="品牌亮點" />
+        <TextField label="副標" value={form.subtitle} onChange={(value) => update('subtitle', value)} placeholder="讓顧客快速理解你的特色。" />
+        <TextField label="內容" value={form.content} onChange={(value) => update('content', value)} textarea placeholder="可輸入品牌故事、活動說明、服務特色或商品介紹。" />
+        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="home_section" />
+        <TextField label="按鈕文字" value={form.buttonText} onChange={(value) => update('buttonText', value)} placeholder="了解更多" />
+        <TextField label="按鈕連結" value={form.buttonUrl} onChange={(value) => update('buttonUrl', value)} placeholder="/products" />
+        <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
+        <SwitchField label="啟用" checked={form.isActive} onChange={(value) => update('isActive', value)} />
       </div>
     );
   }
+
   if (resource === 'products') {
     return (
       <div className="website-form-grid">
-        <TextField label="商品名稱" value={form.name} onChange={(v) => update('name', v)} />
-        <TextField label="slug" value={form.slug} onChange={(v) => update('slug', v)} />
-        <TextField label="簡短描述" value={form.shortDescription} onChange={(v) => update('shortDescription', v)} />
-        <TextField label="完整描述" value={form.description} onChange={(v) => update('description', v)} textarea />
-        <TextField label="價格" type="number" value={form.price} onChange={(v) => update('price', v)} />
-        <TextField label="比較價" type="number" value={form.compareAtPrice} onChange={(v) => update('compareAtPrice', v)} />
-        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(v) => update('imageUrl', v)} assets={assets} module="product" />
-        <TextField label="分類" value={form.category} onChange={(v) => update('category', v)} />
-        <SelectField label="狀態" value={form.status} onChange={(v) => update('status', v)} options={statusOptions} />
-        <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
-        <SwitchField label="精選商品" checked={form.isFeatured} onChange={(v) => update('isFeatured', v)} />
+        <TextField label="商品名稱" value={form.name} onChange={(value) => update('name', value)} placeholder="智能寵物飲水機" />
+        <TextField label="商品網址代號" value={form.slug} onChange={(value) => update('slug', value)} placeholder="smart-pet-water-fountain" hint="建議使用英文、數字或短橫線，例如 smart-pet-water-fountain。" />
+        <TextField label="簡短描述" value={form.shortDescription} onChange={(value) => update('shortDescription', value)} textarea placeholder="顯示在商品列表的一段簡短介紹。" />
+        <TextField label="完整描述" value={form.description} onChange={(value) => update('description', value)} textarea placeholder="補充商品特色、規格、使用情境與注意事項。" />
+        <TextField label="價格" type="number" value={form.price} onChange={(value) => update('price', value)} />
+        <TextField label="比較價" type="number" value={form.compareAtPrice} onChange={(value) => update('compareAtPrice', value)} />
+        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="product" />
+        <TextField label="分類" value={form.category} onChange={(value) => update('category', value)} placeholder="一般商品" />
+        <SelectField label="狀態" value={form.status} onChange={(value) => update('status', value)} options={statusOptions} />
+        <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
+        <SwitchField label="精選商品" checked={form.isFeatured} onChange={(value) => update('isFeatured', value)} />
       </div>
     );
   }
+
   if (resource === 'posts') {
     return (
       <div className="website-form-grid">
-        <TextField label="標題" value={form.title} onChange={(v) => update('title', v)} />
-        <TextField label="slug" value={form.slug} onChange={(v) => update('slug', v)} />
-        <TextField label="摘要" value={form.summary} onChange={(v) => update('summary', v)} />
-        <TextField label="內容" value={form.content} onChange={(v) => update('content', v)} textarea />
-        <ImageUrlField label="封面圖 URL" value={form.coverImageUrl} onChange={(v) => update('coverImageUrl', v)} assets={assets} module="post" />
-        <TextField label="分類" value={form.category} onChange={(v) => update('category', v)} />
-        <SelectField label="狀態" value={form.status} onChange={(v) => update('status', v)} options={statusOptions} />
-        <TextField label="發布時間" value={form.publishedAt} onChange={(v) => update('publishedAt', v)} placeholder="2026-06-15T10:00:00Z" />
+        <TextField label="標題" value={form.title} onChange={(value) => update('title', value)} placeholder="新品上市公告" />
+        <TextField label="文章網址代號" value={form.slug} onChange={(value) => update('slug', value)} placeholder="new-arrival" hint="建議使用英文、數字或短橫線，方便形成文章網址。" />
+        <TextField label="摘要" value={form.summary} onChange={(value) => update('summary', value)} textarea placeholder="顯示在最新消息列表的一段摘要。" />
+        <TextField label="內容" value={form.content} onChange={(value) => update('content', value)} textarea placeholder="輸入品牌消息、選物指南或活動公告內容。" />
+        <ImageUrlField label="封面圖片 URL" value={form.coverImageUrl} onChange={(value) => update('coverImageUrl', value)} assets={assets} module="post" />
+        <TextField label="分類" value={form.category} onChange={(value) => update('category', value)} placeholder="品牌消息" />
+        <SelectField label="狀態" value={form.status} onChange={(value) => update('status', value)} options={statusOptions} />
+        <TextField label="發布時間" type="datetime-local" value={form.publishedAt} onChange={(value) => update('publishedAt', value)} />
       </div>
     );
   }
-  return (
-    <div className="website-form-grid">
-      <TextField label="問題" value={form.question} onChange={(v) => update('question', v)} />
-      <TextField label="回答" value={form.answer} onChange={(v) => update('answer', v)} textarea />
-      <TextField label="分類" value={form.category} onChange={(v) => update('category', v)} />
-      <TextField label="排序" type="number" value={form.sortOrder} onChange={(v) => update('sortOrder', v)} />
-      <SwitchField label="啟用" checked={form.isActive} onChange={(v) => update('isActive', v)} />
-    </div>
-  );
+
+  if (resource === 'faqs') {
+    return (
+      <div className="website-form-grid">
+        <TextField label="問題" value={form.question} onChange={(value) => update('question', value)} placeholder="多久可以收到商品？" />
+        <TextField label="回答" value={form.answer} onChange={(value) => update('answer', value)} textarea placeholder="請用顧客能理解的方式回答。" />
+        <TextField label="分類" value={form.category} onChange={(value) => update('category', value)} placeholder="出貨與付款" />
+        <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
+        <SwitchField label="啟用" checked={form.isActive} onChange={(value) => update('isActive', value)} />
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function ResourceTable({ resource, items, onEdit, onDelete }) {
-  if (!items.length) return <div className="website-empty">{resourceEmptyText[resource] || '目前尚無資料，請先新增內容。'}</div>;
+  const label = resourceLabels[resource] || '內容';
+  if (!items.length) {
+    return <div className="website-panel website-empty-state">{resourceEmptyText[resource] || `目前尚無${label}。`}</div>;
+  }
+
   return (
-    <div className="website-table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>主要內容</th>
-            <th>狀態</th>
-            <th>排序 / 分類</th>
-            <th>更新時間</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((item) => (
-            <tr key={item.id}>
-              <td>
-                <strong>{item.title || item.name || item.question || '-'}</strong>
-                <small>{item.slug || item.subtitle || item.summary || item.shortDescription || item.answer || ''}</small>
-              </td>
-              <td>
-                <span className={getStatusBadgeClass(item.status || (item.isActive ? 'active' : 'inactive'))}>
-                  {getStatusLabel(item.status || (item.isActive ? 'active' : 'inactive'))}
-                </span>
-              </td>
-              <td>
-                <span className="website-sort-line">{item.sortOrder ?? '-'}</span>
-                {item.category && <small>{item.category}</small>}
-                {resource === 'home-sections' && item.sectionType && <small>{sectionTypeLabels[item.sectionType] || item.sectionType}</small>}
-              </td>
-              <td>{formatDate(item.updatedAt || item.createdAt)}</td>
-              <td>
-                <div className="website-row-actions">
-                  <button type="button" onClick={() => onEdit(item)}>編輯內容</button>
-                  <button type="button" className="website-danger-btn" onClick={() => onDelete(item.id)}>刪除紀錄</button>
-                </div>
-              </td>
+    <div className="website-panel website-table-panel">
+      <div className="website-panel-head">
+        <h2>{label}列表</h2>
+        <span>{items.length} 筆</span>
+      </div>
+      <div className="website-table-wrap">
+        <table className="website-table">
+          <thead>
+            <tr>
+              <th>主要內容</th>
+              <th>狀態 / 類型</th>
+              <th>排序 / 分類</th>
+              <th>更新時間</th>
+              <th>操作</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items.map((item) => {
+              const title = item.title || item.name || item.question || '未命名內容';
+              const detail = item.subtitle || item.summary || item.shortDescription || item.answer || item.slug || '';
+              const image = item.imageUrl || item.coverImageUrl;
+              const status = item.status || (item.isActive ? 'enabled' : 'disabled');
+              return (
+                <tr key={item.id}>
+                  <td>
+                    <div className="website-table-main">
+                      {image && <ImagePreview src={image} />}
+                      <div>
+                        <strong>{title}</strong>
+                        {detail && <small>{item.slug && detail === item.slug ? `網址代號：${detail}` : detail}</small>}
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    {resource === 'home-sections' ? (
+                      <span className="website-chip">{sectionTypeLabels.get(item.sectionType) || '品牌亮點'}</span>
+                    ) : (
+                      <span className={getStatusBadgeClass(status)}>{getStatusLabel(status)}</span>
+                    )}
+                  </td>
+                  <td>
+                    <div className="website-table-meta">
+                      {item.sortOrder !== undefined && <span>排序 {item.sortOrder}</span>}
+                      {item.category && <span>{item.category}</span>}
+                    </div>
+                  </td>
+                  <td>{formatDate(item.updatedAt || item.createdAt)}</td>
+                  <td>
+                    <div className="website-row-actions">
+                      <button type="button" className="secondary" onClick={() => onEdit(item)}>編輯內容</button>
+                      <button type="button" className="danger" onClick={() => onDelete(item)}>刪除紀錄</button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-function AssetsPanel({ items, saving, onCreate, onDelete }) {
-  const [form, setForm] = useState({ fileUrl: '', fileName: '', fileType: 'image', fileSize: 0, module: 'general' });
-  const [copyMessage, setCopyMessage] = useState('');
+function AssetsPanel({ assets, saving, run }) {
+  const [form, setForm] = useState({ fileName: '', fileUrl: '', fileType: 'image', fileSize: '', module: 'general' });
 
-  async function submit(e) {
+  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  async function handleSubmit(e) {
     e.preventDefault();
-    await onCreate(form);
-    setForm({ fileUrl: '', fileName: '', fileType: 'image', fileSize: 0, module: 'general' });
+    await run(() => createWebsiteAsset(form), '素材已新增。');
+    setForm({ fileName: '', fileUrl: '', fileType: 'image', fileSize: '', module: 'general' });
   }
 
-  function remove(id) {
-    if (!window.confirm('確定要刪除此素材紀錄？')) return;
-    onDelete(id);
-  }
-
-  async function copyUrl(url) {
-    const text = String(url || '');
-
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
-      await navigator.clipboard.writeText(text);
-      setCopyMessage('圖片 URL 已複製');
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = text;
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.left = '-9999px';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-
-      let copied = false;
-      try {
-        copied = document.execCommand('copy');
-      } catch {
-        copied = false;
-      } finally {
-        document.body.removeChild(textarea);
-      }
-
-      if (copied) {
-        setCopyMessage('圖片 URL 已複製');
-      } else {
-        setCopyMessage('圖片 URL 複製失敗，請手動複製');
-        window.prompt('請複製圖片 URL', text);
-      }
-    }
+  async function handleDelete(asset) {
+    if (!window.confirm('確定要刪除這筆素材嗎？')) return;
+    await run(() => deleteWebsiteAsset(asset.id), '素材已刪除。');
   }
 
   return (
-    <section className="website-panel">
-      <div className="website-panel-head">
-        <div>
-          <h2>素材管理</h2>
-          <p>管理品牌官網可重複套用的圖片 URL 素材。此版本只紀錄 URL，不會上傳檔案。</p>
+    <div className="website-resource-layout">
+      <form className="website-panel" onSubmit={handleSubmit}>
+        <div className="website-panel-head">
+          <div>
+            <h2>新增素材</h2>
+            <p>保存常用圖片或檔案網址，後續可套用在 Logo、Banner、首頁區塊、商品或文章。</p>
+          </div>
+          <button className="primary" type="submit" disabled={saving}>{saving ? '儲存中...' : '新增素材'}</button>
         </div>
-      </div>
-      <form className="website-editor" onSubmit={submit}>
         <div className="website-form-grid">
-          <ImageUrlField label="圖片 URL" value={form.fileUrl} onChange={(v) => setForm({ ...form, fileUrl: v })} assets={[]} />
-          <TextField label="檔名" value={form.fileName} onChange={(v) => setForm({ ...form, fileName: v })} hint="可用於辨識素材，例如 hero-banner.jpg。" />
-          <TextField label="檔案類型" value={form.fileType} onChange={(v) => setForm({ ...form, fileType: v })} placeholder="image/png" hint="可填 image/png、image/jpeg 或 image/webp。" />
-          <TextField label="檔案大小" type="number" value={form.fileSize} onChange={(v) => setForm({ ...form, fileSize: v })} hint="可留 0；目前僅作紀錄用途。" />
-          <SelectField label="用途 module" value={form.module} onChange={(v) => setForm({ ...form, module: v })} options={assetModules} />
-        </div>
-        <div className="website-editor-actions">
-          <button type="submit" disabled={saving}>{saving ? '新增中...' : '新增圖片素材'}</button>
+          <TextField label="素材名稱" value={form.fileName} onChange={(value) => update('fileName', value)} placeholder="首頁主視覺圖片" />
+          <TextField label="素材 URL" value={form.fileUrl} onChange={(value) => update('fileUrl', value)} placeholder="https://example.com/image.jpg" hint="請貼上完整網址，包含 https:// 開頭。" />
+          <TextField label="類型" value={form.fileType} onChange={(value) => update('fileType', value)} placeholder="image" />
+          <TextField label="檔案大小" value={form.fileSize} onChange={(value) => update('fileSize', value)} placeholder="120 KB" />
+          <SelectField label="用途" value={form.module} onChange={(value) => update('module', value)} options={assetModuleOptions} />
         </div>
       </form>
 
-      {copyMessage && <div className="website-success">{copyMessage}</div>}
-
-      {!items.length ? (
-        <div className="website-empty">{resourceEmptyText.assets}</div>
-      ) : (
-        <div className="website-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>預覽</th>
-                <th>素材</th>
-                <th>用途</th>
-                <th>類型 / 大小</th>
-                <th>建立時間</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td><ImagePreview src={item.fileUrl} /></td>
-                  <td>
-                    <strong>{item.fileName || '-'}</strong>
-                    <small>{item.fileUrl}</small>
-                  </td>
-                  <td><span className="website-chip">{moduleLabels[item.module] || item.module || '通用'}</span></td>
-                  <td>{item.fileType || '-'} / {Number(item.fileSize || 0).toLocaleString()} bytes</td>
-                  <td>{formatDate(item.createdAt)}</td>
-                  <td>
-                    <div className="website-row-actions">
-                      <button type="button" onClick={() => copyUrl(item.fileUrl)}>複製圖片 URL</button>
-                      <button type="button" className="website-danger-btn" onClick={() => remove(item.id)}>刪除素材</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="website-panel website-table-panel">
+        <div className="website-panel-head">
+          <h2>素材列表</h2>
+          <span>{assets.length} 筆</span>
         </div>
-      )}
-    </section>
+        {!assets.length ? (
+          <div className="website-empty-state">{resourceEmptyText.assets}</div>
+        ) : (
+          <div className="website-table-wrap">
+            <table className="website-table">
+              <thead>
+                <tr>
+                  <th>預覽</th>
+                  <th>素材資訊</th>
+                  <th>用途</th>
+                  <th>類型與大小</th>
+                  <th>建立時間</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {assets.map((asset) => (
+                  <tr key={asset.id}>
+                    <td><ImagePreview src={asset.fileUrl} /></td>
+                    <td>
+                      <strong>{asset.fileName || '未命名素材'}</strong>
+                      <small className="website-url">{asset.fileUrl}</small>
+                    </td>
+                    <td>{assetModuleLabels.get(asset.module) || '通用素材'}</td>
+                    <td>{asset.fileType || '-'} {asset.fileSize ? ` / ${asset.fileSize}` : ''}</td>
+                    <td>{formatDate(asset.createdAt)}</td>
+                    <td>
+                      <div className="website-row-actions">
+                        <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(asset.fileUrl)}>複製網址</button>
+                        <button type="button" className="danger" onClick={() => handleDelete(asset)}>刪除紀錄</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
-function InquiriesPanel({ items, saving, onStatus }) {
+function InquiriesPanel({ inquiries, saving, onStatusChange }) {
+  const sorted = useMemo(() => [...inquiries].sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)), [inquiries]);
+
+  if (!sorted.length) {
+    return <div className="website-panel website-empty-state">{resourceEmptyText.inquiries}<br />預覽模式下不會建立詢問紀錄。</div>;
+  }
+
   return (
-    <section className="website-panel">
+    <div className="website-panel website-table-panel">
       <div className="website-panel-head">
         <div>
           <h2>聯絡詢問</h2>
-          <p>查看品牌官網送出的詢問並更新處理狀態。預覽模式不會建立詢問紀錄。</p>
+          <p>公開網站表單送出後，詢問紀錄會顯示在這裡。</p>
         </div>
+        <span>{sorted.length} 筆</span>
       </div>
-      {!items.length ? (
-        <div className="website-empty">{resourceEmptyText.inquiries}</div>
-      ) : (
-        <div className="website-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>聯絡人</th>
-                <th>訊息</th>
-                <th>來源</th>
-                <th>狀態</th>
-                <th>建立時間</th>
+      <div className="website-table-wrap">
+        <table className="website-table">
+          <thead>
+            <tr>
+              <th>姓名 / 聯絡方式</th>
+              <th>詢問內容</th>
+              <th>來源頁面</th>
+              <th>狀態</th>
+              <th>建立時間</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((item) => (
+              <tr key={item.id}>
+                <td>
+                  <strong>{item.name || '-'}</strong>
+                  <small>{item.email || '-'} {item.phone ? ` / ${item.phone}` : ''}</small>
+                </td>
+                <td>{item.message || '-'}</td>
+                <td>{item.sourcePath || '-'}</td>
+                <td>
+                  <select value={item.status || 'new'} disabled={saving} onChange={(e) => onStatusChange(item.id, e.target.value)}>
+                    {inquiryStatusOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                  </select>
+                </td>
+                <td>{formatDate(item.createdAt)}</td>
               </tr>
-            </thead>
-            <tbody>
-              {items.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <strong>{item.name || '-'}</strong>
-                    <small>{item.email || '-'} / {item.phone || '-'}</small>
-                  </td>
-                  <td>{item.message}</td>
-                  <td>{item.sourcePage || '-'}</td>
-                  <td>
-                    <select value={item.status || 'new'} disabled={saving} onChange={(e) => onStatus(item.id, e.target.value)}>
-                      {inquiryStatuses.map((status) => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
-                    </select>
-                  </td>
-                  <td>{formatDate(item.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }

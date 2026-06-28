@@ -26,7 +26,7 @@ function parsePublicSitePath(pathname) {
 
 function money(value) {
   const amount = Number(value || 0);
-  if (!amount) return '歡迎洽詢';
+  if (!amount) return '價格請洽詢';
   return `NT$ ${amount.toLocaleString('zh-TW')}`;
 }
 
@@ -114,12 +114,12 @@ function PublicLogo({ src, brandName }) {
 
 function PublicSiteShell({ slug, site, preview, children }) {
   const settings = site?.settings || {};
-  const brandName = settings.brandName || settings.siteName || 'Brand Website';
+  const brandName = settings.brandName || settings.siteName || '品牌官網';
   const nav = [
     ['首頁', publicPath(slug, '', preview)],
-    ['商品', publicPath(slug, '/products', preview)],
-    ['文章', publicPath(slug, '/posts', preview)],
-    ['FAQ', publicPath(slug, '/faq', preview)],
+    ['精選商品', publicPath(slug, '/products', preview)],
+    ['最新消息', publicPath(slug, '/posts', preview)],
+    ['常見問題', publicPath(slug, '/faq', preview)],
     ['聯絡我們', publicPath(slug, '/contact', preview)]
   ];
 
@@ -146,7 +146,7 @@ function PublicSiteShell({ slug, site, preview, children }) {
       <footer className="public-site-footer">
         <div>
           <strong>{brandName}</strong>
-          <p>{settings.seoDescription || '以 BookAI 建立的品牌展示網站。'}</p>
+          <p>{settings.seoDescription || '由 BookAI 協助建立品牌官網，集中展示商品、內容與聯絡方式。'}</p>
         </div>
         <div className="public-site-footer-links">
           {settings.contactEmail && <a href={`mailto:${settings.contactEmail}`}>{settings.contactEmail}</a>}
@@ -155,7 +155,7 @@ function PublicSiteShell({ slug, site, preview, children }) {
           {settings.facebookUrl && <a href={settings.facebookUrl} target="_blank" rel="noreferrer">Facebook</a>}
           {settings.instagramUrl && <a href={settings.instagramUrl} target="_blank" rel="noreferrer">Instagram</a>}
           {settings.address && <span>{settings.address}</span>}
-          <small>Powered by BookAI</small>
+          <small>由 BookAI 提供網站技術</small>
         </div>
       </footer>
     </div>
@@ -166,180 +166,184 @@ function PublicNotice({ title, message }) {
   return (
     <div className="public-site public-site-notice-page">
       <div className="public-site-notice">
-        <span>BookAI Website</span>
+        <span>BookAI 品牌官網</span>
         <h1>{title}</h1>
         <p>{message}</p>
-        <a href="/">回到 BookAI</a>
+        <a href="/">返回 BookAI</a>
       </div>
     </div>
   );
 }
 
-function EmptyState({ children }) {
+function EmptyState({ title, message }) {
   return (
     <div className="public-site-empty">
-      <strong>{children}</strong>
-      <span>請稍後再回來查看，或透過聯絡表單詢問品牌團隊。</span>
+      <strong>{title}</strong>
+      {message && <span>{message}</span>}
     </div>
   );
 }
 
-function ProductCard({ slug, product, preview }) {
+function ProductCard({ slug, preview, product }) {
   return (
     <article className="public-site-card">
       <PublicImage src={product.imageUrl} alt={product.name} />
       <div>
         {product.category && <span className="public-site-chip">{product.category}</span>}
         <h3>{product.name}</h3>
-        <p>{product.shortDescription || product.description || '歡迎聯絡我們了解更多資訊。'}</p>
+        <p>{product.shortDescription || product.description || '品牌尚未補充商品描述。'}</p>
         <strong>{money(product.price)}</strong>
-        <a className="public-site-link" href={publicPath(slug, `/products/${product.slug}`, preview)}>查看詳情</a>
+        <a className="public-site-link" href={publicPath(slug, `/products/${encodeURIComponent(product.slug)}`, preview)}>查看商品</a>
       </div>
     </article>
   );
 }
 
-function PostCard({ slug, post, preview }) {
+function PostCard({ slug, preview, post }) {
   return (
     <article className="public-site-card">
       <PublicImage src={post.coverImageUrl} alt={post.title} />
       <div>
-        {post.category && <span className="public-site-chip">{post.category}</span>}
+        <span className="public-site-chip">{post.category || '最新消息'}</span>
         <h3>{post.title}</h3>
-        <p>{post.summary || '閱讀品牌最新消息與專業內容。'}</p>
+        <p>{post.summary || '品牌尚未補充文章摘要。'}</p>
         <small>{formatDate(post.publishedAt || post.createdAt)}</small>
-        <a className="public-site-link" href={publicPath(slug, `/posts/${post.slug}`, preview)}>閱讀更多</a>
+        <a className="public-site-link" href={publicPath(slug, `/posts/${encodeURIComponent(post.slug)}`, preview)}>閱讀文章</a>
       </div>
     </article>
   );
 }
 
-function PublicHome({ slug, site, products, posts, preview }) {
+function PublicHome({ slug, preview, site, products, posts }) {
   const settings = site.settings || {};
   const banners = site.banners || [];
   const sections = site.homeSections || [];
   const faqs = site.faqs || [];
-  const hero = banners[0] || {};
+  const hero = banners[0];
   const brandName = settings.brandName || settings.siteName || '品牌官網';
-  const featuredProducts = products.filter((item) => item.isFeatured).concat(products.filter((item) => !item.isFeatured)).slice(0, 3);
-  const latestPosts = posts.slice(0, 3);
+  const featuredProducts = products.filter((item) => item.isFeatured).slice(0, 3);
+  const visibleProducts = (featuredProducts.length ? featuredProducts : products).slice(0, 3);
+  const visiblePosts = posts.slice(0, 3);
+  const visibleFaqs = faqs.slice(0, 4);
 
   return (
     <>
       <section className="public-site-hero">
         <div>
-          <span>{settings.siteName || 'Brand Website'}</span>
-          <h1>{hero.title || brandName}</h1>
-          <p>{hero.subtitle || settings.seoDescription || '探索品牌商品、服務內容與最新消息。'}</p>
+          <span>{brandName}</span>
+          <h1>{hero?.title || settings.seoTitle || brandName}</h1>
+          <p>{hero?.subtitle || settings.seoDescription || '用品牌官網展示商品、故事與服務資訊。'}</p>
           <div className="public-site-actions">
-            <a href={publicPath(slug, '/products', preview)}>{hero.buttonText || '查看商品'}</a>
-            <a href={hero.buttonUrl || publicPath(slug, '/contact', preview)} className="secondary">聯絡我們</a>
+            <a href={publicPath(slug, hero?.buttonUrl || '/products', preview)}>{hero?.buttonText || '查看商品'}</a>
+            <a className="secondary" href={publicPath(slug, '/contact', preview)}>聯絡我們</a>
           </div>
         </div>
-        <PublicImage src={hero.imageUrl || settings.logoUrl} alt={brandName} />
+        <PublicImage src={hero?.imageUrl || settings.logoUrl} alt={hero?.title || brandName} />
       </section>
 
-      <section className="public-site-section">
-        <div className="public-site-section-head">
-          <span>Brand Story</span>
-          <h2>品牌亮點</h2>
-        </div>
-        {sections.length ? (
+      {sections.length > 0 && (
+        <section className="public-site-section">
+          <div className="public-site-section-head">
+            <span>品牌故事</span>
+            <h2>品牌亮點</h2>
+          </div>
           <div className="public-site-section-grid">
             {sections.map((section) => (
-              <article key={section.id || section.title} className="public-site-feature">
+              <article className="public-site-feature" key={section.id}>
                 <PublicImage src={section.imageUrl} alt={section.title} />
                 <div>
                   <h3>{section.title}</h3>
-                  <p>{section.subtitle || section.content}</p>
-                  {section.buttonUrl && <a className="public-site-link" href={section.buttonUrl}>{section.buttonText || '了解更多'}</a>}
+                  {section.subtitle && <strong>{section.subtitle}</strong>}
+                  {textParagraphs(section.content).map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+                  {section.buttonText && section.buttonUrl && <a className="public-site-link" href={publicPath(slug, section.buttonUrl, preview)}>{section.buttonText}</a>}
                 </div>
               </article>
             ))}
           </div>
-        ) : (
-          <EmptyState>目前尚無首頁區塊</EmptyState>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="public-site-section soft">
         <div className="public-site-section-head">
-          <span>Products</span>
-          <h2>精選商品</h2>
-          <a href={publicPath(slug, '/products', preview)}>全部商品</a>
+          <span>精選商品</span>
+          <h2>推薦商品</h2>
+          <a href={publicPath(slug, '/products', preview)}>查看全部商品</a>
         </div>
-        {featuredProducts.length ? (
+        {visibleProducts.length ? (
           <div className="public-site-card-grid">
-            {featuredProducts.map((product) => <ProductCard key={product.id || product.slug} slug={slug} product={product} preview={preview} />)}
+            {visibleProducts.map((product) => <ProductCard key={product.id} slug={slug} preview={preview} product={product} />)}
           </div>
         ) : (
-          <EmptyState>目前尚無商品展示</EmptyState>
+          <EmptyState title="目前尚無商品" message="品牌尚未發布商品，請稍後再回來查看。" />
         )}
       </section>
 
       <section className="public-site-section">
         <div className="public-site-section-head">
-          <span>News</span>
-          <h2>最新文章</h2>
-          <a href={publicPath(slug, '/posts', preview)}>全部文章</a>
+          <span>最新消息</span>
+          <h2>品牌文章</h2>
+          <a href={publicPath(slug, '/posts', preview)}>查看全部文章</a>
         </div>
-        {latestPosts.length ? (
+        {visiblePosts.length ? (
           <div className="public-site-card-grid">
-            {latestPosts.map((post) => <PostCard key={post.id || post.slug} slug={slug} post={post} preview={preview} />)}
+            {visiblePosts.map((post) => <PostCard key={post.id} slug={slug} preview={preview} post={post} />)}
           </div>
         ) : (
-          <EmptyState>目前尚無最新消息</EmptyState>
+          <EmptyState title="目前尚無最新文章" message="歡迎稍後回來查看品牌消息與選物指南。" />
         )}
       </section>
 
       <section className="public-site-section soft">
         <div className="public-site-section-head">
-          <span>FAQ</span>
-          <h2>常見問題</h2>
-          <a href={publicPath(slug, '/faq', preview)}>查看 FAQ</a>
+          <span>常見問題</span>
+          <h2>顧客常見問題</h2>
+          <a href={publicPath(slug, '/faq', preview)}>查看全部 FAQ</a>
         </div>
-        {faqs.length ? (
+        {visibleFaqs.length ? (
           <div className="public-site-faq-list">
-            {faqs.slice(0, 4).map((faq) => (
-              <details key={faq.id || faq.question} open>
+            {visibleFaqs.map((faq) => (
+              <details key={faq.id} open>
                 <summary>{faq.question}</summary>
                 <p>{faq.answer}</p>
               </details>
             ))}
           </div>
         ) : (
-          <EmptyState>目前尚無常見問題</EmptyState>
+          <EmptyState title="目前尚無 FAQ" message="品牌尚未建立常見問題。" />
         )}
       </section>
 
       <section className="public-site-cta">
-        <h2>想了解更多？</h2>
-        <p>{preview ? '預覽模式可檢查表單畫面，但不會建立詢問紀錄。' : '留下需求，我們會盡快與您聯繫。'}</p>
-        <a href={publicPath(slug, '/contact', preview)}>聯絡我們</a>
+        <h2>想了解商品或合作方式？</h2>
+        <p>留下需求後，品牌團隊會再與你聯繫。</p>
+        <a href={publicPath(slug, '/contact', preview)}>前往聯絡表單</a>
       </section>
     </>
   );
 }
 
-function PublicProductsPage({ slug, products, preview }) {
+function PublicProductsPage({ slug, preview, products }) {
   return (
     <section className="public-site-section public-site-page-section">
       <div className="public-site-section-head">
-        <span>Products</span>
+        <span>精選商品</span>
         <h1>商品展示</h1>
       </div>
       {products.length ? (
         <div className="public-site-card-grid">
-          {products.map((product) => <ProductCard key={product.id || product.slug} slug={slug} product={product} preview={preview} />)}
+          {products.map((product) => <ProductCard key={product.id} slug={slug} preview={preview} product={product} />)}
         </div>
       ) : (
-        <EmptyState>目前尚無商品展示</EmptyState>
+        <EmptyState title="目前尚無商品" message="品牌尚未發布商品，請稍後再回來查看。" />
       )}
     </section>
   );
 }
 
-function PublicProductDetail({ slug, product, preview }) {
+function PublicProductDetail({ slug, preview, product }) {
+  if (!product) {
+    return <EmptyState title="找不到這個商品" message="商品可能尚未發布或網址不正確。" />;
+  }
   return (
     <section className="public-site-detail">
       <PublicImage src={product.imageUrl} alt={product.name} />
@@ -347,44 +351,41 @@ function PublicProductDetail({ slug, product, preview }) {
         {product.category && <span className="public-site-chip">{product.category}</span>}
         <h1>{product.name}</h1>
         <strong>{money(product.price)}</strong>
-        {product.compareAtPrice > 0 && <small>原參考價 {money(product.compareAtPrice)}</small>}
-        {textParagraphs(product.description || product.shortDescription).map((line) => <p key={line}>{line}</p>)}
-        <a className="public-site-primary-link" href={publicPath(slug, `/contact?product=${encodeURIComponent(product.name || '')}`, preview)}>詢問此商品</a>
+        {Number(product.compareAtPrice || 0) > Number(product.price || 0) && <small>比較價 {money(product.compareAtPrice)}</small>}
+        {textParagraphs(product.description || product.shortDescription).map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
+        <a className="public-site-primary-link" href={publicPath(slug, '/contact', preview)}>詢問這項商品</a>
       </div>
     </section>
   );
 }
 
-function PublicPostsPage({ slug, posts, preview }) {
+function PublicPostsPage({ slug, preview, posts }) {
   return (
     <section className="public-site-section public-site-page-section">
       <div className="public-site-section-head">
-        <span>News</span>
-        <h1>最新消息</h1>
+        <span>最新消息</span>
+        <h1>品牌文章</h1>
       </div>
       {posts.length ? (
         <div className="public-site-card-grid">
-          {posts.map((post) => <PostCard key={post.id || post.slug} slug={slug} post={post} preview={preview} />)}
+          {posts.map((post) => <PostCard key={post.id} slug={slug} preview={preview} post={post} />)}
         </div>
       ) : (
-        <EmptyState>目前尚無最新消息</EmptyState>
+        <EmptyState title="目前尚無最新文章" message="歡迎稍後回來查看品牌消息與選物指南。" />
       )}
     </section>
   );
 }
 
 function PublicPostDetail({ post }) {
+  if (!post) return <EmptyState title="找不到這篇文章" message="文章可能尚未發布或網址不正確。" />;
   return (
     <article className="public-site-article">
-      <div>
-        {post.category && <span className="public-site-chip">{post.category}</span>}
-        <h1>{post.title}</h1>
-        <p>{post.summary}</p>
-        <small>{formatDate(post.publishedAt || post.createdAt)}</small>
-      </div>
       <PublicImage src={post.coverImageUrl} alt={post.title} />
+      <span className="public-site-chip">{post.category || '最新消息'} {formatDate(post.publishedAt || post.createdAt)}</span>
+      <h1>{post.title}</h1>
       <div className="public-site-article-body">
-        {textParagraphs(post.content || post.summary).map((line) => <p key={line}>{line}</p>)}
+        {textParagraphs(post.content || post.summary).map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
       </div>
     </article>
   );
@@ -394,51 +395,49 @@ function PublicFaqPage({ faqs }) {
   return (
     <section className="public-site-section public-site-page-section">
       <div className="public-site-section-head">
-        <span>FAQ</span>
-        <h1>常見問題</h1>
+        <span>常見問題</span>
+        <h1>FAQ</h1>
       </div>
       {faqs.length ? (
         <div className="public-site-faq-list">
           {faqs.map((faq) => (
-            <details key={faq.id || faq.question} open>
+            <details key={faq.id} open>
               <summary>{faq.question}</summary>
-              {faq.category && <span>{faq.category}</span>}
               <p>{faq.answer}</p>
             </details>
           ))}
         </div>
       ) : (
-        <EmptyState>目前尚無常見問題</EmptyState>
+        <EmptyState title="目前尚無 FAQ" message="品牌尚未建立常見問題。" />
       )}
     </section>
   );
 }
 
-function PublicContactPage({ slug, site, preview }) {
+function PublicContactPage({ slug, preview, site }) {
   const settings = site.settings || {};
   const [form, setForm] = useState({ name: '', email: '', phone: '', message: '' });
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
 
-  async function submit(event) {
-    event.preventDefault();
+  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setNotice('');
+    setError('');
     if (preview) {
-      setSuccess('預覽模式不會送出詢問。');
+      setNotice('預覽模式下不會建立詢問紀錄。');
       return;
     }
     setSaving(true);
-    setError('');
-    setSuccess('');
     try {
-      await createPublicInquiry(slug, {
-        ...form,
-        sourcePage: window.location.pathname
-      });
-      setSuccess('已送出，我們會盡快與您聯繫。');
+      await createPublicInquiry(slug, { ...form, sourcePath: window.location.pathname });
+      setNotice('詢問已送出，品牌團隊會再與你聯繫。');
       setForm({ name: '', email: '', phone: '', message: '' });
     } catch (err) {
-      setError(err.message || '送出失敗，請稍後再試。');
+      setError(err.message || '詢問送出失敗，請稍後再試。');
     } finally {
       setSaving(false);
     }
@@ -447,161 +446,131 @@ function PublicContactPage({ slug, site, preview }) {
   return (
     <section className="public-site-contact">
       <div>
-        <span>Contact</span>
-        <h1>聯絡我們</h1>
-        <p>{preview ? '目前為預覽模式，送出按鈕不會建立後台詢問紀錄。' : '歡迎留下需求、商品詢問或合作訊息。'}</p>
+        <span>聯絡我們</span>
+        <h1>與品牌團隊聯繫</h1>
+        <p>若想了解商品、出貨、合作或客製需求，請留下聯絡資訊。</p>
         <dl>
           {settings.contactEmail && <><dt>Email</dt><dd><a href={`mailto:${settings.contactEmail}`}>{settings.contactEmail}</a></dd></>}
           {settings.contactPhone && <><dt>電話</dt><dd><a href={`tel:${settings.contactPhone}`}>{settings.contactPhone}</a></dd></>}
-          {settings.lineUrl && <><dt>LINE</dt><dd><a href={settings.lineUrl} target="_blank" rel="noreferrer">加入 LINE</a></dd></>}
-          {settings.facebookUrl && <><dt>Facebook</dt><dd><a href={settings.facebookUrl} target="_blank" rel="noreferrer">Facebook</a></dd></>}
-          {settings.instagramUrl && <><dt>Instagram</dt><dd><a href={settings.instagramUrl} target="_blank" rel="noreferrer">Instagram</a></dd></>}
+          {settings.lineUrl && <><dt>LINE</dt><dd><a href={settings.lineUrl} target="_blank" rel="noreferrer">前往 LINE</a></dd></>}
           {settings.address && <><dt>地址</dt><dd>{settings.address}</dd></>}
         </dl>
+        {preview && <p>預覽模式：此表單不會送出，也不會建立詢問紀錄。</p>}
       </div>
-
-      <form onSubmit={submit}>
+      <form onSubmit={handleSubmit}>
         <label>
           <span>姓名</span>
-          <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <input value={form.name} onChange={(e) => update('name', e.target.value)} placeholder="請輸入姓名" required />
         </label>
         <label>
           <span>Email</span>
-          <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+          <input type="email" value={form.email} onChange={(e) => update('email', e.target.value)} placeholder="hello@example.com" required />
         </label>
         <label>
           <span>電話</span>
-          <input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          <input value={form.phone} onChange={(e) => update('phone', e.target.value)} placeholder="請輸入聯絡電話" />
         </label>
         <label>
           <span>詢問內容</span>
-          <textarea required value={form.message} onChange={(e) => setForm({ ...form, message: e.target.value })} />
+          <textarea value={form.message} onChange={(e) => update('message', e.target.value)} placeholder="請簡述想了解的商品或服務。" required />
         </label>
+        {notice && <div className="public-site-form-success">{notice}</div>}
         {error && <div className="public-site-form-error">{error}</div>}
-        {success && <div className="public-site-form-success">{success}</div>}
-        <button type="submit" disabled={saving}>{saving ? '送出中...' : preview ? '預覽模式不送出' : '送出詢問'}</button>
+        <button type="submit" disabled={saving}>{preview ? '預覽模式不送出' : saving ? '送出中...' : '送出詢問'}</button>
       </form>
     </section>
   );
 }
 
 export default function PublicSitePage() {
-  const route = useMemo(() => parsePublicSitePath(window.location.pathname), []);
-  const [site, setSite] = useState(null);
-  const [products, setProducts] = useState([]);
-  const [posts, setPosts] = useState([]);
-  const [faqs, setFaqs] = useState([]);
-  const [detail, setDetail] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const route = parsePublicSitePath(window.location.pathname);
+  const [state, setState] = useState({ loading: true, error: '', site: null, products: [], posts: [], faqs: [], detail: null });
 
   useEffect(() => {
-    if (!route) return;
-    let alive = true;
-
+    let active = true;
     async function load() {
-      setLoading(true);
-      setError('');
-      setDetail(null);
+      if (!route) {
+        setState({ loading: false, error: '網址格式不正確。', site: null, products: [], posts: [], faqs: [], detail: null });
+        return;
+      }
+      setState((prev) => ({ ...prev, loading: true, error: '' }));
       try {
+        let data;
         if (route.preview) {
-          const previewData = await getPreviewData();
-          if (!alive) return;
-          const settings = previewData.site?.settings || {};
-          if (settings.siteSlug && settings.siteSlug !== route.slug) {
-            throw new Error('預覽網址與目前網站 site_slug 不一致');
-          }
-          setSite(previewData.site);
-          document.title = settings.seoTitle || settings.brandName || settings.siteName || '品牌官網預覽';
-
-          if (route.section === 'home') {
-            setProducts(previewData.products);
-            setPosts(previewData.posts);
-            setFaqs(previewData.site.faqs);
-          } else if (route.section === 'products' && route.detailSlug) {
-            setDetail(findBySlug(previewData.products, route.detailSlug));
-          } else if (route.section === 'products') {
-            setProducts(previewData.products);
-          } else if (route.section === 'posts' && route.detailSlug) {
-            setDetail(findBySlug(previewData.posts, route.detailSlug));
-          } else if (route.section === 'posts') {
-            setPosts(previewData.posts);
-          } else if (route.section === 'faq') {
-            setFaqs(previewData.site.faqs);
-          }
-          return;
+          data = await getPreviewData();
+        } else {
+          const site = await getPublicSite(route.slug);
+          const [products, posts, faqs] = await Promise.all([
+            getPublicProducts(route.slug),
+            getPublicPosts(route.slug),
+            getPublicFaqs(route.slug)
+          ]);
+          data = { site, products, posts, faqs };
         }
 
-        const nextSite = await getPublicSite(route.slug);
-        if (!alive) return;
-        setSite(nextSite);
+        let detail = null;
+        if (route.section === 'products' && route.detailSlug) {
+          detail = route.preview ? findBySlug(data.products, route.detailSlug) : await getPublicProduct(route.slug, route.detailSlug);
+        }
+        if (route.section === 'posts' && route.detailSlug) {
+          detail = route.preview ? findBySlug(data.posts, route.detailSlug) : await getPublicPost(route.slug, route.detailSlug);
+        }
 
-        const settings = nextSite?.settings || {};
-        document.title = settings.seoTitle || settings.brandName || settings.siteName || '品牌官網';
-
-        if (route.section === 'home') {
-          const [nextProducts, nextPosts] = await Promise.all([
-            getPublicProducts(route.slug).catch(() => []),
-            getPublicPosts(route.slug).catch(() => [])
-          ]);
-          if (!alive) return;
-          setProducts(Array.isArray(nextProducts) ? nextProducts : []);
-          setPosts(Array.isArray(nextPosts) ? nextPosts : []);
-          setFaqs(Array.isArray(nextSite?.faqs) ? nextSite.faqs : []);
-        } else if (route.section === 'products' && route.detailSlug) {
-          setDetail(await getPublicProduct(route.slug, route.detailSlug));
-        } else if (route.section === 'products') {
-          const nextProducts = await getPublicProducts(route.slug);
-          if (!alive) return;
-          setProducts(Array.isArray(nextProducts) ? nextProducts : []);
-        } else if (route.section === 'posts' && route.detailSlug) {
-          setDetail(await getPublicPost(route.slug, route.detailSlug));
-        } else if (route.section === 'posts') {
-          const nextPosts = await getPublicPosts(route.slug);
-          if (!alive) return;
-          setPosts(Array.isArray(nextPosts) ? nextPosts : []);
-        } else if (route.section === 'faq') {
-          const nextFaqs = await getPublicFaqs(route.slug);
-          if (!alive) return;
-          setFaqs(Array.isArray(nextFaqs) ? nextFaqs : []);
+        if (active) {
+          setState({
+            loading: false,
+            error: '',
+            site: data.site,
+            products: data.products || [],
+            posts: data.posts || [],
+            faqs: data.site?.faqs || data.faqs || [],
+            detail
+          });
         }
       } catch (err) {
-        if (!alive) return;
-        setError(err.status === 403 ? '網站尚未開放' : err.message || '網站不存在或尚未開放');
-      } finally {
-        if (alive) setLoading(false);
+        if (active) {
+          setState({ loading: false, error: err.message || '網站資料載入失敗。', site: null, products: [], posts: [], faqs: [], detail: null });
+        }
       }
     }
-
     load();
     return () => {
-      alive = false;
+      active = false;
     };
-  }, [route]);
+  }, [route?.slug, route?.section, route?.detailSlug, route?.preview]);
 
-  if (!route) return <PublicNotice title="網站不存在" message="請確認網址是否正確，或回到 BookAI 後台取得正確的公開網址。" />;
-  if (loading) return <PublicNotice title="載入中" message="正在載入品牌官網內容，請稍候。" />;
-  if (error) return <PublicNotice title={error} message={error === '網站尚未開放' ? '此網站尚未發布，請稍後再試。' : '請確認網站網址，或稍後再試。'} />;
-  if (!site) return <PublicNotice title="網站不存在" message="請確認網址是否正確。" />;
+  const content = useMemo(() => {
+    if (!route) return <PublicNotice title="找不到網站" message="請確認品牌官網網址是否正確。" />;
+    if (state.loading) return <PublicNotice title="網站載入中" message="正在讀取品牌官網內容。" />;
+    if (state.error) return <PublicNotice title="網站無法顯示" message={state.error} />;
+    if (!state.site) return <PublicNotice title="找不到網站" message="品牌官網尚未建立或尚未發布。" />;
 
-  let content = null;
-  if (route.section === 'home') {
-    content = <PublicHome slug={route.slug} site={site} products={products} posts={posts} preview={route.preview} />;
-  } else if (route.section === 'products' && route.detailSlug) {
-    content = detail ? <PublicProductDetail slug={route.slug} product={detail} preview={route.preview} /> : <EmptyState>找不到商品</EmptyState>;
-  } else if (route.section === 'products') {
-    content = <PublicProductsPage slug={route.slug} products={products} preview={route.preview} />;
-  } else if (route.section === 'posts' && route.detailSlug) {
-    content = detail ? <PublicPostDetail post={detail} /> : <EmptyState>找不到文章</EmptyState>;
-  } else if (route.section === 'posts') {
-    content = <PublicPostsPage slug={route.slug} posts={posts} preview={route.preview} />;
-  } else if (route.section === 'faq') {
-    content = <PublicFaqPage faqs={faqs} />;
-  } else if (route.section === 'contact') {
-    content = <PublicContactPage slug={route.slug} site={site} preview={route.preview} />;
-  } else {
-    content = <EmptyState>網站不存在或尚未開放</EmptyState>;
-  }
+    if (route.section === 'products' && route.detailSlug) {
+      return <PublicProductDetail slug={route.slug} preview={route.preview} product={state.detail} />;
+    }
+    if (route.section === 'products') {
+      return <PublicProductsPage slug={route.slug} preview={route.preview} products={state.products} />;
+    }
+    if (route.section === 'posts' && route.detailSlug) {
+      return <PublicPostDetail post={state.detail} />;
+    }
+    if (route.section === 'posts') {
+      return <PublicPostsPage slug={route.slug} preview={route.preview} posts={state.posts} />;
+    }
+    if (route.section === 'faq') {
+      return <PublicFaqPage faqs={state.faqs} />;
+    }
+    if (route.section === 'contact') {
+      return <PublicContactPage slug={route.slug} preview={route.preview} site={state.site} />;
+    }
+    return <PublicHome slug={route.slug} preview={route.preview} site={state.site} products={state.products} posts={state.posts} />;
+  }, [route, state]);
 
-  return <PublicSiteShell slug={route.slug} site={site} preview={route.preview}>{content}</PublicSiteShell>;
+  if (!route || state.loading || state.error || !state.site) return content;
+
+  return (
+    <PublicSiteShell slug={route.slug} site={state.site} preview={route.preview}>
+      {content}
+    </PublicSiteShell>
+  );
 }

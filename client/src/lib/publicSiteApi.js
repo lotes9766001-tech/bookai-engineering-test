@@ -13,7 +13,7 @@ async function publicRequest(path, options = {}) {
       headers
     });
   } catch {
-    const error = new Error('連線異常，請稍後再試。');
+    const error = new Error('網站資料連線失敗，請稍後再試。');
     error.status = 0;
     throw error;
   }
@@ -27,7 +27,7 @@ async function publicRequest(path, options = {}) {
   }
 
   if (!response.ok) {
-    const error = new Error(body?.error || '資料暫時無法載入。');
+    const error = new Error(body?.error || '網站資料載入失敗。');
     error.status = response.status;
     throw error;
   }

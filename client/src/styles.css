@@ -5550,6 +5550,88 @@ tr:hover td {
   overflow-wrap: anywhere;
 }
 
+.website-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.website-stat-card {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #f8fafc;
+  overflow-wrap: anywhere;
+}
+
+.website-stat-card span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.website-stat-card strong,
+.website-big-number {
+  display: block;
+  margin-top: 8px;
+  color: var(--brand-blue);
+  font-size: 24px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.website-overview-grid,
+.website-resource-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.website-overview-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.website-status-list,
+.website-table-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.website-status-list span,
+.website-table-meta span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.website-empty-state {
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.website-table-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.website-table-main .website-image-preview,
+.website-table-main .website-image-empty {
+  width: 72px;
+  height: 48px;
+  flex: 0 0 auto;
+}
+
+.website-url {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .website-metric-details {
   display: flex;
   flex-wrap: wrap;
