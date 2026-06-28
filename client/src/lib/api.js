@@ -16,11 +16,15 @@ function readableErrorMessage(status, code, fallback) {
     AI_USE_CASE_FORBIDDEN: '此 AI 功能不適用於目前版本。'
   };
 
+  const rawFallback = String(fallback || '').trim();
+  const unsafeFallback = !rawFallback ||
+    /failed to fetch|networkerror|syntaxerror|typeerror|referenceerror|undefined|null|\[object Object\]|select |insert |update |delete |database_url|jwt_secret|stack|trace/i.test(rawFallback);
+
   if (code && codeMap[code]) return codeMap[code];
   if (status === 401) return codeMap.UNAUTHORIZED;
   if (status === 403) return codeMap.FORBIDDEN;
   if (status >= 500) return codeMap.DATABASE_ERROR;
-  return fallback || '操作未完成，請稍後再試。';
+  return unsafeFallback ? '操作未完成，請確認欄位後再試。' : rawFallback;
 }
 
 export function setToken(token) {

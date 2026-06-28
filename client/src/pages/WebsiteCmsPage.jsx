@@ -82,7 +82,8 @@ const inquiryStatusLabels = new Map(inquiryStatusOptions);
 const assetModuleLabels = new Map(assetModuleOptions);
 
 function nextSortOrder(items = []) {
-  const max = Math.max(0, ...items.map((item) => Number(item.sortOrder ?? item.sort_order ?? 0) || 0));
+  const rows = Array.isArray(items) ? items : [];
+  const max = Math.max(0, ...rows.map((item) => Number(item.sortOrder ?? item.sort_order ?? 0) || 0));
   return max + 1;
 }
 
@@ -97,9 +98,9 @@ function emptyForm(resource, items = []) {
 }
 
 function formatDate(value) {
-  if (!value) return '-';
+  if (!value) return '尚未設定';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
+  if (Number.isNaN(date.getTime())) return '尚未設定';
   return date.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 }
 
@@ -355,25 +356,33 @@ export default function WebsiteCmsPage() {
 
 function WebsiteOverview({ settings, resources }) {
   const previewUrl = settings?.siteSlug ? `/site-preview/${encodeURIComponent(settings.siteSlug)}` : null;
+  const rows = {
+    banners: Array.isArray(resources?.banners) ? resources.banners : [],
+    'home-sections': Array.isArray(resources?.['home-sections']) ? resources['home-sections'] : [],
+    products: Array.isArray(resources?.products) ? resources.products : [],
+    posts: Array.isArray(resources?.posts) ? resources.posts : [],
+    faqs: Array.isArray(resources?.faqs) ? resources.faqs : [],
+    inquiries: Array.isArray(resources?.inquiries) ? resources.inquiries : []
+  };
   const cards = [
     ['網站名稱', settings?.siteName || '-'],
     ['品牌名稱', settings?.brandName || '-'],
     ['公開網址代號', settings?.siteSlug || '-'],
     ['發布狀態', getStatusLabel(settings?.status || 'draft')],
-    ['Banner 數量', `${resources.banners.length} 筆`],
-    ['首頁區塊數量', `${resources['home-sections'].length} 筆`],
-    ['商品數量', `${resources.products.length} 筆`],
-    ['文章數量', `${resources.posts.length} 筆`],
-    ['FAQ 數量', `${resources.faqs.length} 筆`],
-    ['新詢問', `${resources.inquiries.filter((item) => item.status === 'new').length} 筆`]
+    ['Banner 數量', `${rows.banners.length} 筆`],
+    ['首頁區塊數量', `${rows['home-sections'].length} 筆`],
+    ['商品數量', `${rows.products.length} 筆`],
+    ['文章數量', `${rows.posts.length} 筆`],
+    ['FAQ 數量', `${rows.faqs.length} 筆`],
+    ['新詢問', `${rows.inquiries.filter((item) => item.status === 'new').length} 筆`]
   ];
 
-  const publishedProducts = resources.products.filter((item) => item.status === 'published').length;
-  const draftProducts = resources.products.filter((item) => item.status === 'draft').length;
-  const hiddenProducts = resources.products.filter((item) => item.status === 'hidden').length;
-  const publishedPosts = resources.posts.filter((item) => item.status === 'published').length;
-  const draftPosts = resources.posts.filter((item) => item.status === 'draft').length;
-  const hiddenPosts = resources.posts.filter((item) => item.status === 'hidden').length;
+  const publishedProducts = rows.products.filter((item) => item.status === 'published').length;
+  const draftProducts = rows.products.filter((item) => item.status === 'draft').length;
+  const hiddenProducts = rows.products.filter((item) => item.status === 'hidden').length;
+  const publishedPosts = rows.posts.filter((item) => item.status === 'published').length;
+  const draftPosts = rows.posts.filter((item) => item.status === 'draft').length;
+  const hiddenPosts = rows.posts.filter((item) => item.status === 'hidden').length;
 
   return (
     <div className="website-overview">

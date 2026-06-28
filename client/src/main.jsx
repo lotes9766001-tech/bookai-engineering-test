@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState } from 'react';
+import React, { Component, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   BarChart3,
@@ -74,9 +74,9 @@ function hasCompanyFeature(company, page) {
 }
 
 function formatDate(value) {
-  if (!value) return '-';
+  if (!value) return '尚未設定';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
+  if (Number.isNaN(date.getTime())) return '尚未設定';
   return date.toLocaleString('zh-TW', {
     year: 'numeric',
     month: '2-digit',
@@ -269,6 +269,24 @@ const engineeringEditionNav = [
   ['settings', '公司設定', Building2]
 ];
 
+const restaurantEditionNav = [
+  ['dashboard', '經營總覽', BarChart3],
+  ['purchases', '進貨管理', WalletCards],
+  ['sales', '銷貨管理', WalletCards],
+  ['receivables', '應收帳款', WalletCards],
+  ['payables', '應付帳款', WalletCards],
+  ['suppliers', '供應商管理', Users],
+  ['customers', '客戶管理', Users],
+  ['transactions', '收支管理', WalletCards],
+  ['invoices', '發票中心', FileText],
+  ['vouchers', '電子憑證', ReceiptText],
+  ['inventory', '商品 / 材料庫存', Package],
+  ['pos_integrations', 'POS 串接', PlugZap],
+  ['reports', '經營報表', BarChart3],
+  ['feedbacks', '產品回饋', FileText],
+  ['settings', '公司設定', Building2]
+];
+
 function mergeNavItems(...groups) {
   const seen = new Set();
   return groups.flat().filter(([id]) => {
@@ -281,7 +299,8 @@ function mergeNavItems(...groups) {
 function getFounderEditionNav(currentNav, edition) {
   if (edition === 'commerce') return commerceEditionNav;
   if (edition === 'engineering') return engineeringEditionNav;
-  return mergeNavItems(currentNav, commerceEditionNav, engineeringEditionNav);
+  if (edition === 'restaurant') return restaurantEditionNav;
+  return mergeNavItems([['integrations', '整合中心', PlugZap]], currentNav, commerceEditionNav, restaurantEditionNav, engineeringEditionNav);
 }
 
 function getPlatformName(key) {
@@ -295,7 +314,7 @@ function getIndustryName(key) {
 function rate(part, total) {
   const totalNumber = Number(total || 0);
   const partNumber = Number(part || 0);
-  if (!Number.isFinite(totalNumber) || !Number.isFinite(partNumber) || totalNumber === 0) return '0%';
+  if (!Number.isFinite(totalNumber) || !Number.isFinite(partNumber) || totalNumber === 0) return '—';
   return `${Math.round((partNumber / totalNumber) * 1000) / 10}%`;
 }
 
@@ -452,7 +471,7 @@ function getBillingStatusLabel(status) {
     active: '正式使用中',
     expired: '已到期',
     paused: '暫停使用',
-    free_beta: '免費封閉測試',
+    free_beta: '免費試營運',
     internal: '內部管理',
     unpaid: '未付款',
     paid: '已付款',
@@ -510,11 +529,11 @@ function getReviewStatusLabel(status) {
     approved: '已通過',
     rejected: '已拒絕',
     suspended: '已停權',
-    demo: 'Demo 測試',
+    demo: '試營運展示',
     waitlist: '候補名單',
     active: '使用中',
     inactive: '未啟用',
-    closed_beta: '封閉測試',
+    closed_beta: '試營運',
     free_beta: '免費測試',
     pending: '待處理',
     failed: '失敗',
@@ -530,7 +549,7 @@ function getBetaStatusLabel(status) {
     pending_review: '等待審核',
     active: '測試中',
     approved: '測試中',
-    demo: 'Demo 測試',
+    demo: '試營運展示',
     waitlist: '候補',
     suspended: '已停權',
     rejected: '已拒絕',
@@ -543,7 +562,7 @@ function getBetaStatusLabel(status) {
 
 function getAdminBillingStatusLabel(status) {
   const map = {
-    free_beta: '免費封閉測試',
+    free_beta: '免費試營運',
     internal: '內部管理',
     unpaid: '未付款',
     paid: '已付款',
@@ -559,8 +578,8 @@ function getAdminBillingStatusLabel(status) {
 
 function getPlanDisplayLabel(plan) {
   const map = {
-    closed_beta: '封閉測試',
-    trial: '封閉測試',
+    closed_beta: '試營運',
+    trial: '試營運',
     starter: '入門版',
     pro: '專業版',
     business: '商務版',
@@ -885,7 +904,7 @@ function TermsBeta() {
         <p>歡迎申請使用 BookAI 測試服務。BookAI 目前處於產品測試與功能驗證階段，為確保服務品質、資料安全、測試環境穩定與使用者權益，本服務採人工審核制。使用者完成註冊或申請，並不代表帳號已正式開通；BookAI 保留依內部審核標準准許、拒絕、限制、暫停或終止帳號使用權限之權利。</p>
         <p>使用者理解並同意，測試期間之功能、介面、資料結構、服務範圍與系統穩定性可能因產品開發、維護、安全或營運需求而調整、中斷、暫停或變更。BookAI 將盡合理努力維持服務可用性，但不保證測試期間服務完全不中斷、無錯誤或符合所有特定商業目的。</p>
         <p>使用者應確保其提交之申請資料、聯絡資訊、公司或品牌資料、營運資料及其他輸入內容為真實、合法且已取得必要授權。若使用者尚未成立公司或行號，得以品牌名稱、團隊名稱、工作室名稱或創業狀態進行申請，BookAI 將透過官方客服與人工審核程序確認使用需求。</p>
-        <p>BookAI 封閉測試期間不收取測試費用。免費測試資格僅限 BookAI 核准之測試期間與測試範圍內使用，不代表永久免費使用權、正式商用授權或未來付費方案承諾。BookAI 保留未來調整服務內容、功能範圍、測試資格、測試期限、正式方案與收費方式之權利。</p>
+        <p>BookAI 試營運期間不收取試營運費用。免費試營運資格僅限 BookAI 核准之試營運期間與範圍內使用，不代表永久免費使用權、正式商用授權或未來付費方案承諾。BookAI 保留未來調整服務內容、功能範圍、試營運資格、試營運期限、正式方案與收費方式之權利。</p>
         <p>使用者不得進行未授權測試、壓力測試、爬蟲、掃描、逆向工程、繞過權限、濫用 API、建立大量帳號、干擾服務運作或其他可能影響系統安全與服務穩定之行為。</p>
         <p>BookAI 所提供之 AI 分析、營運建議、報表摘要、稅務提示、會計分類、工程評估、標案判斷或其他輔助資訊，均僅作為一般參考，不構成法律、稅務、會計、財務、工程、投資或其他專業意見。</p>
         <p>測試期間，使用者應避免將不可替代、高度敏感或唯一正式營運資料作為測試資料輸入系統，並應自行保留重要資料備份。BookAI 將採取合理安全措施維護服務與資料安全，但不承諾任何資料永久不遺失、不中斷或完全無風險。</p>
@@ -953,6 +972,7 @@ function FounderEditionSwitcher({ edition, loading, saving, error, success, coll
         aria-label="測試版本"
       >
         <option value="commerce">電商版</option>
+        <option value="restaurant">餐飲版</option>
         <option value="engineering">工程版</option>
         <option value="all">全功能測試</option>
       </select>
@@ -966,7 +986,7 @@ function BetaStatusNotice({ officialLineUrl, onFeedback }) {
   return (
     <div className="beta-status-notice" role="status">
       <div>
-        <strong>BookAI 封測版本</strong>
+        <strong>BookAI 試營運版本</strong>
         <span>功能仍可能依測試回饋調整。若遇到問題，請透過產品回饋或官方 LINE 回報。</span>
       </div>
       <div className="beta-status-actions">
@@ -1001,7 +1021,8 @@ function Shell({ onLogout }) {
     api('/me')
       .then((d) => {
         setMe(d);
-        setCompanyId(d.companies[0]?.id);
+        const companies = Array.isArray(d?.companies) ? d.companies : [];
+        setCompanyId(companies[0]?.id || null);
       })
       .catch(onLogout);
   }, [onLogout]);
@@ -1065,22 +1086,32 @@ function Shell({ onLogout }) {
   const editionSourceNav = userIsFounder
     ? getFounderEditionNav(websiteNav, testEdition)
     : websiteNav;
-  const editionCompanyNav = userIsFounder
+  const editionCompanyNavRaw = userIsFounder
     ? editionSourceNav
     : editionSourceNav.filter(([id]) => hasCompanyFeature(company, id));
-  const commerceIntegrationNav = isCommerceIndustry(company?.industry) && !isConstructionIndustry(company?.industry) && !editionCompanyNav.some(([id]) => id === 'integrations')
+  const editionCompanyNav = !userIsFounder && (isConstructionIndustry(company?.industry) || isFoodIndustry(company?.industry))
+    ? editionCompanyNavRaw.filter(([id]) => id !== 'integrations')
+    : editionCompanyNavRaw;
+  const commerceIntegrationNav = !userIsFounder && isCommerceIndustry(company?.industry) && !isFoodIndustry(company?.industry) && !isConstructionIndustry(company?.industry) && !editionCompanyNav.some(([id]) => id === 'integrations')
     ? [
         ...editionCompanyNav.slice(0, Math.max(1, editionCompanyNav.length - 1)),
         ['integrations', '平台串接', PlugZap],
         ...editionCompanyNav.slice(Math.max(1, editionCompanyNav.length - 1))
       ]
     : editionCompanyNav;
-  const aiDraftNav = commerceIntegrationNav.some(([id]) => id === 'ai_draft')
-    ? commerceIntegrationNav
-    : [
+  const restaurantIntegrationNav = !userIsFounder && isFoodIndustry(company?.industry) && !commerceIntegrationNav.some(([id]) => id === 'pos_integrations')
+    ? [
         ...commerceIntegrationNav.slice(0, Math.max(1, commerceIntegrationNav.length - 1)),
-        ['ai_draft', 'AI 草稿助手 Beta', Sparkles],
+        ['pos_integrations', 'POS 串接', PlugZap],
         ...commerceIntegrationNav.slice(Math.max(1, commerceIntegrationNav.length - 1))
+      ]
+    : commerceIntegrationNav;
+  const aiDraftNav = restaurantIntegrationNav.some(([id]) => id === 'ai_draft')
+    ? restaurantIntegrationNav
+    : [
+        ...restaurantIntegrationNav.slice(0, Math.max(1, restaurantIntegrationNav.length - 1)),
+        ['ai_draft', 'AI 草稿助手 Beta', Sparkles],
+        ...restaurantIntegrationNav.slice(Math.max(1, restaurantIntegrationNav.length - 1))
       ];
   const visibleNav = userIsAdmin
     ? [...aiDraftNav, ['admin', 'BookAI 營運後台', ShieldCheck]]
@@ -1159,8 +1190,8 @@ function Shell({ onLogout }) {
     }
   }, [me, userIsAdmin, userIsFounder, page, company, needsReview, activeNav]);
 
-if (!me || !company) {
-    return <div className="loading">載入中...</div>;
+  if (!me || !company) {
+    return <div className="loading">載入中…</div>;
   }
 
   const lockedFeature = getPageFeatureKey(page);
@@ -1210,7 +1241,7 @@ if (!me || !company) {
               setMobileNavOpen(false);
             }}
           >
-            {me.companies.map((c) => (
+            {(Array.isArray(me.companies) ? me.companies : []).map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
@@ -1306,6 +1337,16 @@ if (!me || !company) {
             company={company}
             onSync={() => setRefresh((x) => x + 1)}
             onNavigate={setPage}
+            editionMode={userIsFounder && testEdition === 'all' ? 'all' : userIsFounder ? testEdition : betaEdition}
+          />
+        )}
+        {!needsReview && page === 'pos_integrations' && (
+          <Integrations
+            companyId={companyId}
+            company={company}
+            onSync={() => setRefresh((x) => x + 1)}
+            onNavigate={setPage}
+            editionMode={userIsFounder && testEdition === 'all' ? 'all' : 'restaurant'}
           />
         )}
         {!needsReview && page === 'invoices' && <Invoices companyId={companyId} />}
@@ -1429,7 +1470,7 @@ function PlatformRevenueChart({ rows = [] }) {
 
 const betaGuideConfigs = {
   engineering: {
-    title: '工程版封測快速開始',
+    title: '工程版試營運快速開始',
     description: '建議依序測試案場、估價、複製與工程決策流程。',
     steps: [
       { label: '建立第一個案場', page: 'jobsites' },
@@ -1440,7 +1481,7 @@ const betaGuideConfigs = {
     ]
   },
   commerce: {
-    title: '電商 / 官網版封測快速開始',
+    title: '電商 / 官網版試營運快速開始',
     description: '建議先建立基礎資料，再檢查品牌官網內容與公開呈現。',
     steps: [
       { label: '建立商品 / 材料資料', page: 'inventory' },
@@ -1451,7 +1492,7 @@ const betaGuideConfigs = {
     ]
   },
   all: {
-    title: '全功能封測快速開始',
+    title: '全功能試營運快速開始',
     description: '依序檢查跨版本核心流程，完成後請留下測試結果。',
     steps: [
       { label: '切換工程版與電商版', page: 'dashboard' },
@@ -1495,7 +1536,7 @@ const onboardingGuideConfigs = {
       {
         id: 'feedback',
         label: '填寫產品回饋',
-        desc: '封測期間請回報卡住的地方與希望新增的功能。',
+        desc: '試營運期間請回報卡住的地方與希望新增的功能。',
         cta: '填寫回饋',
         page: 'feedbacks'
       }
@@ -1538,7 +1579,7 @@ const onboardingGuideConfigs = {
       {
         id: 'feedback',
         label: '填寫產品回饋',
-        desc: '封測期間請回報卡住的地方與希望新增的功能。',
+        desc: '試營運期間請回報卡住的地方與希望新增的功能。',
         cta: '填寫回饋',
         page: 'feedbacks'
       }
@@ -1583,7 +1624,7 @@ const onboardingGuideConfigs = {
       },
       {
         id: 'feedback',
-        label: '封測回饋',
+        label: '試營運回饋',
         desc: '記錄測試時發現的阻塞與版本隔離問題。',
         cta: '填寫回饋',
         page: 'feedbacks'
@@ -2406,12 +2447,12 @@ function FeedbackCenter({ companyId, officialLineUrl }) {
 
   return (
     <section>
-      <Title title="產品回饋" desc="提交封測問題、實際結果與改善建議。你只能看到自己公司的回饋紀錄。" />
+      <Title title="產品回饋" desc="提交試營運問題、實際結果與改善建議。你只能看到自己公司的回饋紀錄。" />
       <div className="feedback-support-panel">
         <div>
           <MessageCircle size={22} aria-hidden="true" />
           <div>
-            <strong>封測期間需要協助？</strong>
+            <strong>試營運期間需要協助？</strong>
             <p>可透過產品回饋或 BookAI 官方 LINE 回報。請附上頁面名稱、操作步驟與截圖，方便我們協助排查。</p>
           </div>
         </div>
@@ -3140,121 +3181,240 @@ function Transactions({ companyId }) {
   );
 }
 
-function Integrations({ companyId, company, onSync, onNavigate }) {
-  const [rows, setRows] = useState([]);
+const commerceIntegrationSections = [
+  {
+    edition: '電商版功能',
+    title: '社群與客服來源',
+    description: '把社群詢問整理成顧客資料、客服紀錄、訂單線索與常見問題。',
+    items: [
+      ['LINE 官方帳號', '規劃中'],
+      ['Facebook 粉專', '規劃中'],
+      ['Instagram', '規劃中'],
+      ['TikTok', '規劃中'],
+      ['Threads', '規劃中']
+    ]
+  },
+  {
+    edition: '電商版功能',
+    title: '電商平台訂單',
+    description: '把平台訂單、商品、庫存、平台費用與銷售資料整理回 BookAI。',
+    items: [
+      ['蝦皮購物 Shopee', '規劃中'],
+      ['momo 購物網', '資料匯入規劃中'],
+      ['PChome 24h 購物', '資料匯入規劃中'],
+      ['酷澎 Coupang', '資料匯入規劃中']
+    ]
+  },
+  {
+    edition: '電商版功能',
+    title: '金流與收款',
+    description: '協助未來整理付款狀態、收款紀錄、退款紀錄與手續費對帳。',
+    items: [
+      ['綠界 ECPay', '規劃中'],
+      ['藍新 NewebPay', '規劃中'],
+      ['LINE Pay', '規劃中'],
+      ['街口支付', '規劃中'],
+      ['信用卡收款', '規劃中'],
+      ['ATM / 虛擬帳號', '規劃中'],
+      ['超商代碼 / 條碼繳費', '規劃中']
+    ]
+  },
+  {
+    edition: '電商版功能',
+    title: '物流與出貨',
+    description: '協助未來整理出貨狀態、物流單號、運費、退貨與未出貨訂單。',
+    items: [
+      ['黑貓宅急便', '規劃中'],
+      ['新竹物流', '規劃中'],
+      ['7-11 店到店', '規劃中'],
+      ['全家店到店', '規劃中'],
+      ['郵局', '規劃中'],
+      ['自送 / 面交', '可手動記錄規劃中']
+    ]
+  },
+  {
+    edition: '電商版功能',
+    title: '內容發布助手',
+    description: '將 AI 草稿、商品文案、社群文案與官網內容整理成可人工發布的素材。',
+    items: [
+      ['Facebook 貼文草稿', '規劃中'],
+      ['Instagram 貼文草稿', '規劃中'],
+      ['TikTok 影片文案', '規劃中'],
+      ['Threads 貼文草稿', '規劃中'],
+      ['LINE 圖文訊息草稿', '規劃中'],
+      ['官網文章草稿', '已由官網後台支援部分流程']
+    ]
+  },
+  {
+    edition: '電商版功能',
+    title: '平台資料匯入',
+    description: '在正式 API 串接完成前，先支援 CSV / Excel 匯入平台訂單、商品、庫存與付款資料。',
+    items: [
+      ['訂單 CSV 匯入', '規劃中'],
+      ['商品 CSV 匯入', '規劃中'],
+      ['客戶資料匯入', '規劃中'],
+      ['庫存資料匯入', '規劃中'],
+      ['平台對帳報表匯入', '規劃中']
+    ]
+  }
+];
+
+const restaurantIntegrationSections = [
+  {
+    edition: '餐飲版功能',
+    title: 'POS 系統',
+    description: '匯入每日營收、品項銷售、付款方式、折扣、退單與班別資料。',
+    items: [
+      ['iCHEF', '規劃中'],
+      ['肚肚 dodo', '規劃中'],
+      ['inline POS', '規劃中'],
+      ['Weiby', '規劃中'],
+      ['點點全球', '規劃中'],
+      ['其他 POS', '可回報需求']
+    ]
+  },
+  {
+    edition: '餐飲版功能',
+    title: '外送平台',
+    description: '整理外送訂單、平台抽成、外送營收占比、退款與取消訂單。',
+    items: [
+      ['Uber Eats', '規劃中'],
+      ['foodpanda', '規劃中'],
+      ['Lalamove 外送', '規劃中'],
+      ['自有外送', '規劃中']
+    ]
+  },
+  {
+    edition: '餐飲版功能',
+    title: '訂位 / 排隊系統',
+    description: '整理訂位來源、來客數、尖峰時段、翻桌率與候位紀錄。',
+    items: [
+      ['inline', '規劃中'],
+      ['EZTABLE', '規劃中'],
+      ['Google 預訂', '規劃中'],
+      ['電話訂位', '可手動記錄規劃中'],
+      ['現場候位', '可手動記錄規劃中']
+    ]
+  },
+  {
+    edition: '餐飲版功能',
+    title: '支付對帳',
+    description: '整理付款方式、收款對帳、電子發票與每日結帳資料。',
+    items: [
+      ['LINE Pay', '規劃中'],
+      ['街口支付', '規劃中'],
+      ['信用卡', '規劃中'],
+      ['現金', '可手動記錄規劃中'],
+      ['電子發票', '規劃中']
+    ]
+  },
+  {
+    edition: '餐飲版功能',
+    title: '食材 / 庫存',
+    description: '整理供應商進貨、食材庫存、耗材庫存、盤點、報廢與食材成本。',
+    items: [
+      ['供應商進貨', 'ERP 已支援部分流程'],
+      ['食材庫存', '規劃中'],
+      ['耗材庫存', '規劃中'],
+      ['盤點', '規劃中'],
+      ['報廢紀錄', '規劃中']
+    ]
+  }
+];
+
+function Integrations({ company, onNavigate, editionMode = 'commerce' }) {
   const industry = company?.industry;
-  const commercePlanningOnly = isCommerceIndustry(industry) && !isConstructionIndustry(industry);
+  const mode = editionMode === 'all'
+    ? 'all'
+    : editionMode === 'restaurant' || isFoodIndustry(industry)
+      ? 'restaurant'
+      : 'commerce';
+  const sections = mode === 'all'
+    ? [...commerceIntegrationSections, ...restaurantIntegrationSections]
+    : mode === 'restaurant'
+      ? restaurantIntegrationSections
+      : commerceIntegrationSections;
+  const title = mode === 'restaurant' ? 'POS 串接 Beta' : mode === 'all' ? '整合中心 Beta' : '平台串接 Beta';
+  const desc = mode === 'restaurant'
+    ? 'BookAI 餐飲版未來將支援 POS、外送平台、訂位系統、支付對帳與食材庫存整合。試營運期間先以規劃與需求蒐集為主，不進行正式外部資料同步。'
+    : mode === 'all'
+      ? 'Founder 全功能測試模式會顯示多版本整合規劃。每個分類都標示適用版本，試營運期間不進行正式外部資料同步。'
+      : 'BookAI 平台串接中心將逐步支援社群、電商平台、金流、物流與資料匯入整合。試營運期間，部分平台會先以「手動匯入」或「設定規劃」方式提供，避免未經確認的資料同步造成錯誤。';
 
-  const load = () => api(`/companies/${companyId}/integrations`).then(setRows);
-
-  useEffect(() => {
-    if (commercePlanningOnly) {
-      setRows([]);
-      return;
-    }
-    load();
-  }, [companyId, commercePlanningOnly]);
-
-  if (commercePlanningOnly) {
+  if (isConstructionIndustry(industry) && editionMode !== 'all') {
     return (
       <section>
-        <Title
-          title="平台串接 Beta"
-          desc="此功能規劃用於集中管理未來的官方 LINE、社群賣場、電商平台、金流與物流資料。"
-        />
-
+        <Title title="整合中心未開放" desc="工程版目前不提供平台串接或 POS 串接入口。" />
         <div className="notice">
-          試營運期間暫不進行正式外部串接，避免誤寫入或同步錯誤資料。
-        </div>
-
-        <div className="grid">
-          <Card title="官方 LINE 串接" value="規劃中" sub="未啟用正式訊息同步或發送" />
-          <Card title="電商平台訂單同步" value="規劃中" sub="未串接 Shopee、Shopify 或其他正式平台" />
-          <Card title="金流 / 物流資料整合" value="規劃中" sub="未串接正式金流、物流或出貨流程" />
-          <Card title="社群銷售資料整理" value="規劃中" sub="試營運期間僅收集需求與流程回饋" />
-        </div>
-
-        <div className="row-actions" style={{ marginTop: 12 }}>
-          <button type="button" onClick={() => onNavigate?.('feedbacks')}>
-            回報串接需求
-          </button>
+          工程版定位為案場營運系統，核心功能會放在案場、報價、材料、工資、外包與未收款追蹤。本階段不顯示電商平台或餐飲 POS 串接內容。
         </div>
       </section>
     );
   }
 
-  const allowedCategories = getAllowedIntegrationCategories(industry);
-  const visibleRows = rows.filter((p) => allowedCategories.includes(p.category));
-
-  const groups = visibleRows.reduce((a, p) => {
-    if (!a[p.category]) a[p.category] = [];
-    a[p.category].push(p);
-    return a;
-  }, {});
-
-  async function connect(p) {
-    await api(`/companies/${companyId}/integrations/${p.platformKey}/connect`, {
-      method: 'POST'
-    });
-    load();
-  }
-
-  async function sync(p) {
-    await api(`/companies/${companyId}/integrations/${p.platformKey}/sync`, {
-      method: 'POST'
-    });
-    await load();
-    onSync?.();
-  }
-
   return (
     <section>
-      <Title title="平台串接" desc={getIntegrationDesc(industry)} />
+      <Title title={title} desc={desc} />
 
       <div className="notice">
-        目前行業別：{getIndustryName(industry)}。BookAI 會依照行業別優先顯示最相關的平台與工具。
+        此頁僅為 Beta 規劃與需求蒐集，不會連接外部平台、不會執行 OAuth、不會儲存 API Key / Secret / Token，也不會自動同步或寫入正式資料。
       </div>
 
-      {isConstructionIndustry(industry) && (
-        <div className="panel">
-          <h2>工程業提醒</h2>
-          <p>
-            工程行、油漆、水電、冷氣維修的核心通常不是大量平台訂單，而是案場報價、分期請款、
-            材料費、工班費、外包費與未收款。下一階段會以「案場工作台」作為工程業主功能。
-          </p>
-        </div>
-      )}
-
-      {Object.entries(groups).map(([cat, list]) => (
-        <div key={cat} className="panel">
-          <h2>{categoryLabel[cat] || cat}</h2>
+      {sections.map((section) => (
+        <div key={`${section.edition}-${section.title}`} className="panel">
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            <h2>{section.title}</h2>
+            <span className="status-badge">{section.edition} · 規劃中</span>
+          </div>
+          <p className="muted">{section.description}</p>
           <div className="platform-grid">
-            {list.map((p) => (
-              <div className="platform" key={p.platformKey}>
-                <b>{p.displayName}</b>
-                <span>
-                  {p.priority} · {p.connectionType} · {p.status}
-                </span>
+            {section.items.map(([name, status]) => (
+              <div className="platform" key={`${section.title}-${name}`}>
+                <b>{name}</b>
+                <span>{section.edition} · {status}</span>
                 <div>
-                  {p.account ? (
-                    <button onClick={() => sync(p)}>同步資料</button>
-                  ) : (
-                    <button onClick={() => connect(p)}>連接</button>
-                  )}
+                  <button type="button" onClick={() => onNavigate?.('feedbacks')}>
+                    {status.includes('匯入') ? '資料匯入規劃中' : '回報需求'}
+                  </button>
                 </div>
               </div>
             ))}
           </div>
         </div>
       ))}
-
-      {!visibleRows.length && (
-        <div className="notice">
-          目前沒有適合此行業的串接平台。未來可新增銀行收款、LINE 收款、工程案場請款與報價單模組。
-        </div>
-      )}
     </section>
   );
+}
+
+class AppErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error) {
+    console.error('[BookAI] UI render failed', error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="app-error-screen">
+          <div className="panel app-error-card">
+            <h1>頁面暫時無法顯示</h1>
+            <p>系統已保護目前操作，沒有寫入或同步任何外部資料。請重新整理頁面後再試，若持續發生請透過產品回饋或官方客服聯繫 BookAI。</p>
+            <button type="button" onClick={() => window.location.reload()}>重新整理</button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function Invoices({ companyId }) {
@@ -7228,7 +7388,7 @@ function Reports({ companyId, company }) {
       .sort((a, b) => a.profit / a.revenue - b.profit / b.revenue)[0] || null;
 
   const alerts = [
-    revenue === 0 ? '目前尚無營收資料，建議先到平台串接執行 Mock Sync。' : null,
+    revenue === 0 ? '目前尚無營收資料，建議先到平台串接查看資料匯入規劃。' : null,
     grossMarginRate < 30 && revenue > 0 ? '毛利率低於 30%，請檢查平台抽成、商品成本或折扣活動。' : null,
     fees > revenue * 0.18 && revenue > 0 ? '平台手續費占比偏高，外送或商城平台可能正在吃掉利潤。' : null,
     products.some((p) => Number(p.stock || 0) <= Number(p.safety_stock || 0)) ? '有商品低於安全庫存，請到商品庫存檢查。' : null,
@@ -7255,8 +7415,8 @@ function Reports({ companyId, company }) {
         <div className="panel">
           <h2>平台經營洞察</h2>
           <div className="grid">
-            <Card title="最賺平台" value={bestPlatform ? getPlatformName(bestPlatform.platform) : '尚無資料'} sub={bestPlatform ? `平台毛利 ${money(bestPlatform.profit)}` : '請先同步平台資料'} />
-            <Card title="最高風險平台" value={riskyPlatform ? getPlatformName(riskyPlatform.platform) : '尚無資料'} sub={riskyPlatform ? `毛利率 ${rate(riskyPlatform.profit, riskyPlatform.revenue)}` : '請先同步平台資料'} />
+            <Card title="最賺平台" value={bestPlatform ? getPlatformName(bestPlatform.platform) : '尚無資料'} sub={bestPlatform ? `平台毛利 ${money(bestPlatform.profit)}` : '尚無平台資料'} />
+            <Card title="最高風險平台" value={riskyPlatform ? getPlatformName(riskyPlatform.platform) : '尚無資料'} sub={riskyPlatform ? `毛利率 ${rate(riskyPlatform.profit, riskyPlatform.revenue)}` : '尚無平台資料'} />
             <Card title="平均平台抽成率" value={rate(fees, revenue)} sub="平台費 / 營收" />
             <Card title="平均商品成本率" value={rate(cogs, revenue)} sub="商品成本 / 營收" />
           </div>
@@ -8276,7 +8436,7 @@ function AdminConsole() {
                 <option value="approved">已通過</option>
                 <option value="rejected">已拒絕</option>
                 <option value="suspended">已暫停</option>
-                <option value="demo">Demo 測試</option>
+                <option value="demo">試營運展示</option>
                 <option value="all">全部</option>
               </select>
               <button type="button" onClick={loadAdmin}>重新整理</button>
@@ -8284,7 +8444,7 @@ function AdminConsole() {
           </div>
           <div className="admin-beta-summary">
             <div>
-              <span>BookAI 封閉測試</span>
+              <span>BookAI 試營運</span>
               <strong>{metrics.freeBetaApproved} 人</strong>
               <small>目前已通過測試者</small>
             </div>
@@ -8360,7 +8520,7 @@ function AdminConsole() {
                         value={memberPlanForm[row.id] || row.plan || 'trial'}
                         onChange={(e) => setMemberPlanForm({ ...memberPlanForm, [row.id]: e.target.value })}
                       >
-                        <option value="trial">封閉測試</option>
+                        <option value="trial">試營運</option>
                         <option value="starter">入門版</option>
                         <option value="pro">專業版</option>
                         <option value="enterprise">企業版</option>
@@ -8375,7 +8535,7 @@ function AdminConsole() {
                         <button type="button" onClick={() => reviewUser(row.id, 'reject', '未通過審核')}>拒絕申請</button>
                         <button type="button" onClick={() => reviewUser(row.id, 'suspend', '暫停使用')}>停權帳號</button>
                         <button type="button" onClick={() => reviewUser(row.id, 'restore')}>恢復帳號</button>
-                        <button type="button" onClick={() => reviewUser(row.id, 'demo')}>設為 Demo</button>
+                        <button type="button" onClick={() => reviewUser(row.id, 'demo')}>設為展示帳號</button>
                       </div>
                     </td>
                   </tr>
@@ -8504,7 +8664,7 @@ function AdminConsole() {
                     <p><span>行業別</span><strong>{getIndustryName(selected.industry)}</strong></p>
                     <p><span>產品線</span><strong>{productLineLabels[selected.product_line] || selected.product_line || '一般中小企業版'}</strong></p>
                     <p><span>測試狀態</span><strong>{getBetaStatusLabel(selected.beta_status)}</strong></p>
-                    <p><span>免費封閉測試</span><strong>{Number(selected.is_free_beta || 0) === 1 ? '是' : '否'}</strong></p>
+                    <p><span>免費試營運</span><strong>{Number(selected.is_free_beta || 0) === 1 ? '是' : '否'}</strong></p>
                     <p><span>測試群組</span><strong>{getReviewStatusLabel(selected.beta_group || 'closed_beta')}</strong></p>
                     <p><span>測試核准時間</span><strong>{selected.beta_approved_at || '未設定'}</strong></p>
                     <p><span>是否正式客戶</span><strong>{yesNoPaid(selected.is_paid_customer)}</strong></p>
@@ -8861,4 +9021,8 @@ function Table({ cols, rows }) {
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+createRoot(document.getElementById('root')).render(
+  <AppErrorBoundary>
+    <App />
+  </AppErrorBoundary>
+);

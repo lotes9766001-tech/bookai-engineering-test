@@ -31,9 +31,9 @@ function money(value) {
 }
 
 function formatDate(value) {
-  if (!value) return '';
+  if (!value) return '尚未設定';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
+  if (Number.isNaN(date.getTime())) return '尚未設定';
   return date.toLocaleDateString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit' });
 }
 
@@ -521,9 +521,9 @@ export default function PublicSitePage() {
             loading: false,
             error: '',
             site: data.site,
-            products: data.products || [],
-            posts: data.posts || [],
-            faqs: data.site?.faqs || data.faqs || [],
+            products: Array.isArray(data.products) ? data.products : [],
+            posts: Array.isArray(data.posts) ? data.posts : [],
+            faqs: Array.isArray(data.site?.faqs) ? data.site.faqs : Array.isArray(data.faqs) ? data.faqs : [],
             detail
           });
         }
