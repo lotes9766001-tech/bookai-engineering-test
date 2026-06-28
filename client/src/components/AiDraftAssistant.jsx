@@ -438,6 +438,20 @@ function providerStatusText(result) {
   return '';
 }
 
+function isAiDisabledResult(result) {
+  if (!result) return false;
+  const provider = String(result.provider || result.mode || '').toLowerCase();
+  const status = String(result.status || result.code || '').toLowerCase();
+  const draft = result.draft || {};
+  const warningText = Array.isArray(draft.warnings) ? draft.warnings.join(' ') : '';
+  return (
+    result.ok === false ||
+    provider === 'disabled' ||
+    status === 'disabled' ||
+    /AI_ENABLED\s*不是\s*true|AI_ENABLED/i.test(warningText)
+  );
+}
+
 function uniqueList(values, fallback = []) {
   const seen = new Set();
   return [...(Array.isArray(values) ? values : []), ...fallback]
@@ -746,6 +760,7 @@ export default function AiDraftAssistant({
   const guidedSuggestions = uniqueList(draft?.missingInfo || [], []);
   const engineeringBasicInfo = result?.useCase === 'engineering_estimate_draft' ? basicInfoEntries(draft?.basicInfo) : [];
   const providerText = providerStatusText(result);
+  const aiDisabled = isAiDisabledResult(result);
   const hasLowQualityFallback = !previewItems.length && /不足|補充|需要更多資訊/.test(draftTitle + draftSummary);
   const draftText = buildDraftText({
     title: draftTitle,
@@ -866,6 +881,33 @@ export default function AiDraftAssistant({
           <div className="ai-empty-state ai-result-empty">
             請先輸入需求並產生 AI 草稿。
           </div>
+        ) : aiDisabled ? (
+          <article className="ai-simple-draft ai-disabled-card">
+            <div className="ai-result-safety">
+              AI 不會直接寫入正式資料，也不會新增、修改、刪除或發布任何業務資料。
+            </div>
+            <div className="ai-result-head">
+              <div>
+                <span>服務狀態</span>
+                <h2>AI 草稿功能尚未啟用</h2>
+              </div>
+              {result.createdAt && <time>{new Date(result.createdAt).toLocaleString('zh-TW')}</time>}
+            </div>
+            <section>
+              <h3>目前狀態</h3>
+              <p>目前環境尚未啟用 AI 草稿服務，因此不會產生商品文案、官網文案或社群草稿。</p>
+            </section>
+            <section>
+              <h3>下一步</h3>
+              <ul>
+                <li>請系統管理者設定 AI_ENABLED=true。</li>
+                <li>雲端測試環境請使用 AI_PROVIDER=mock。</li>
+              </ul>
+            </section>
+            <div className="notice">
+              此畫面只顯示服務狀態，不會產生正式草稿，也不會呼叫任何正式資料寫入 API。
+            </div>
+          </article>
         ) : (
           <article className="ai-simple-draft">
             <div className="ai-result-safety">

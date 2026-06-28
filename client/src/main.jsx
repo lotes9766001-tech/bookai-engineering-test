@@ -1288,8 +1288,8 @@ if (!me || !company) {
         {!needsReview && page === 'transactions' && <Transactions companyId={companyId} />}
         {!needsReview && page === 'purchases' && <PurchasesManager companyId={companyId} onNavigate={setPage} />}
         {!needsReview && page === 'sales' && <SalesManager companyId={companyId} onNavigate={setPage} />}
-        {!needsReview && page === 'receivables' && <ReceivablesManager companyId={companyId} />}
-        {!needsReview && page === 'payables' && <PayablesManager companyId={companyId} />}
+        {!needsReview && page === 'receivables' && <ReceivablesManager companyId={companyId} onNavigate={setPage} />}
+        {!needsReview && page === 'payables' && <PayablesManager companyId={companyId} onNavigate={setPage} />}
         {!needsReview && page === 'suppliers' && <ContactsManager companyId={companyId} type="suppliers" />}
         {!needsReview && page === 'customers' && <ContactsManager companyId={companyId} type="customers" />}
         {!needsReview && page === 'feedbacks' && <FeedbackCenter companyId={companyId} officialLineUrl={betaSupport.officialLineUrl} />}
@@ -2471,7 +2471,7 @@ function FeedbackCenter({ companyId, officialLineUrl }) {
   );
 }
 
-function ReceivablesManager({ companyId }) {
+function ReceivablesManager({ companyId, onNavigate }) {
   const [rows, setRows] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [form, setForm] = useState({ amount: '', receiptDate: new Date().toISOString().slice(0, 10), method: '', note: '' });
@@ -2524,28 +2524,36 @@ function ReceivablesManager({ companyId }) {
           <button type="button" className="lead-soft-btn" onClick={() => setActiveId(null)}>取消</button>
         </form>
       )}
-      <Table
-        cols={['日期', '單號', '客戶', '總額', '已收', '未收', '狀態', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.date || '-',
-          row.documentNo || `#${row.id}`,
-          row.customerName || '-',
-          money(row.total),
-          money(row.receivedAmount),
-          money(row.remainingAmount),
-          row.collectionStatus,
-          row.note || '-',
-          <button type="button" className="lead-soft-btn" onClick={() => {
-            setActiveId(row.id);
-            setForm({ ...form, amount: row.remainingAmount || '', receiptDate: new Date().toISOString().slice(0, 10) });
-          }}>新增收款</button>
-        ])}
-      />
+      {rows.length === 0 ? (
+        <div className="empty-action-state">
+          <strong>目前尚無應收帳款。</strong>
+          <p>建立銷貨單並選擇「未收款」後，這裡會顯示待收款項。</p>
+          <button type="button" onClick={() => onNavigate?.('sales')}>前往銷貨管理</button>
+        </div>
+      ) : (
+        <Table
+          cols={['日期', '單號', '客戶', '總額', '已收', '未收', '狀態', '備註', '操作']}
+          rows={rows.map((row) => [
+            row.date || '-',
+            row.documentNo || `#${row.id}`,
+            row.customerName || '-',
+            money(row.total),
+            money(row.receivedAmount),
+            money(row.remainingAmount),
+            row.collectionStatus,
+            row.note || '-',
+            <button type="button" className="lead-soft-btn" onClick={() => {
+              setActiveId(row.id);
+              setForm({ ...form, amount: row.remainingAmount || '', receiptDate: new Date().toISOString().slice(0, 10) });
+            }}>新增收款</button>
+          ])}
+        />
+      )}
     </section>
   );
 }
 
-function PayablesManager({ companyId }) {
+function PayablesManager({ companyId, onNavigate }) {
   const [rows, setRows] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [form, setForm] = useState({ amount: '', paymentDate: new Date().toISOString().slice(0, 10), method: '', note: '' });
@@ -2598,23 +2606,31 @@ function PayablesManager({ companyId }) {
           <button type="button" className="lead-soft-btn" onClick={() => setActiveId(null)}>取消</button>
         </form>
       )}
-      <Table
-        cols={['日期', '單號', '供應商', '總額', '已付', '未付', '狀態', '備註', '操作']}
-        rows={rows.map((row) => [
-          row.date || '-',
-          row.documentNo || `#${row.id}`,
-          row.supplierName || '-',
-          money(row.total),
-          money(row.paidAmount),
-          money(row.remainingAmount),
-          row.paymentStatus,
-          row.note || '-',
-          <button type="button" className="lead-soft-btn" onClick={() => {
-            setActiveId(row.id);
-            setForm({ ...form, amount: row.remainingAmount || '', paymentDate: new Date().toISOString().slice(0, 10) });
-          }}>新增付款</button>
-        ])}
-      />
+      {rows.length === 0 ? (
+        <div className="empty-action-state">
+          <strong>目前尚無應付帳款。</strong>
+          <p>建立進貨單並選擇「未付款」後，這裡會顯示待付款項。</p>
+          <button type="button" onClick={() => onNavigate?.('purchases')}>前往進貨管理</button>
+        </div>
+      ) : (
+        <Table
+          cols={['日期', '單號', '供應商', '總額', '已付', '未付', '狀態', '備註', '操作']}
+          rows={rows.map((row) => [
+            row.date || '-',
+            row.documentNo || `#${row.id}`,
+            row.supplierName || '-',
+            money(row.total),
+            money(row.paidAmount),
+            money(row.remainingAmount),
+            row.paymentStatus,
+            row.note || '-',
+            <button type="button" className="lead-soft-btn" onClick={() => {
+              setActiveId(row.id);
+              setForm({ ...form, amount: row.remainingAmount || '', paymentDate: new Date().toISOString().slice(0, 10) });
+            }}>新增付款</button>
+          ])}
+        />
+      )}
     </section>
   );
 }
@@ -3287,6 +3303,39 @@ function Invoices({ companyId }) {
   );
 }
 
+function createInventoryForm(constructionMode) {
+  return {
+    name: '',
+    sku: '',
+    category: constructionMode ? '材料' : '一般商品',
+    unit: constructionMode ? '桶' : '個',
+    price: '',
+    cost: '',
+    stock: 0,
+    safetyStock: 0,
+    supplier: '',
+    storageLocation: '',
+    note: ''
+  };
+}
+
+const commerceProductCategories = [
+  '一般商品',
+  '成品',
+  '原物料',
+  '包材耗材',
+  '服飾配件',
+  '美妝保養',
+  '食品飲品',
+  '居家生活',
+  '寵物用品',
+  '3C 配件',
+  '贈品樣品',
+  '組合商品',
+  '服務項目',
+  '其他'
+];
+
 function Inventory({ companyId, company }) {
   const industry = company?.industry;
   const constructionMode = isConstructionIndustry(industry);
@@ -3296,19 +3345,7 @@ function Inventory({ companyId, company }) {
   const [inventoryError, setInventoryError] = useState('');
   const [inventorySuccess, setInventorySuccess] = useState('');
 
-  const [form, setForm] = useState({
-    name: constructionMode ? '乳膠漆 5 加侖' : '珍珠奶茶',
-    sku: constructionMode ? 'PAINT-001' : 'DRINK-001',
-    category: constructionMode ? '材料' : '商品',
-    unit: constructionMode ? '桶' : '個',
-    price: constructionMode ? 1800 : 65,
-    cost: constructionMode ? 1200 : 25,
-    stock: 30,
-    safetyStock: 10,
-    supplier: constructionMode ? '建材行 / 油漆材料商' : '供應商',
-    storageLocation: constructionMode ? '倉庫 A 區' : '門市',
-    note: ''
-  });
+  const [form, setForm] = useState(() => createInventoryForm(constructionMode));
 
   const [movementForm, setMovementForm] = useState({
     productId: '',
@@ -3334,20 +3371,21 @@ function Inventory({ companyId, company }) {
     load();
   }, [companyId]);
 
+  useEffect(() => {
+    setForm(createInventoryForm(constructionMode));
+  }, [constructionMode]);
+
   async function add(e) {
     e.preventDefault();
+    setInventoryError('');
+    setInventorySuccess('');
     await api(`/companies/${companyId}/products`, {
       method: 'POST',
       body: JSON.stringify(form)
     });
 
-    setForm((old) => ({
-      ...old,
-      name: '',
-      sku: '',
-      stock: 0,
-      note: ''
-    }));
+    setForm(createInventoryForm(constructionMode));
+    setInventorySuccess('商品已新增成功');
 
     load();
   }
@@ -3456,11 +3494,13 @@ function Inventory({ companyId, company }) {
 
       <div className="panel">
         <h2>{constructionMode ? '新增材料 / 工具' : '新增商品 / 材料'}</h2>
+        {inventoryError && <div className="error">{inventoryError}</div>}
+        {inventorySuccess && <div className="notice">{inventorySuccess}</div>}
         <Form onSubmit={add}>
           <label>
             <span>{constructionMode ? '材料 / 工具名稱' : fieldLabel(industry, 'productName')}</span>
             <input
-              placeholder={constructionMode ? '例：乳膠漆 5 加侖、電鑽、砂紙' : '例：珍珠奶茶'}
+              placeholder={constructionMode ? '例：乳膠漆 5 加侖、電鑽、砂紙' : '例：智能寵物飲水機'}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
@@ -3469,7 +3509,7 @@ function Inventory({ companyId, company }) {
           <label>
             <span>{constructionMode ? '編號' : fieldLabel(industry, 'sku')}</span>
             <input
-              placeholder={constructionMode ? '例：PAINT-001' : '例：DRINK-001'}
+              placeholder={constructionMode ? '例：PAINT-001' : '例：PET-001'}
               value={form.sku}
               onChange={(e) => setForm({ ...form, sku: e.target.value })}
             />
@@ -3488,10 +3528,9 @@ function Inventory({ companyId, company }) {
                 </>
               ) : (
                 <>
-                  <option value="商品">商品</option>
-                  <option value="原料">原料</option>
-                  <option value="包材">包材</option>
-                  <option value="其他">其他</option>
+                  {commerceProductCategories.map((category) => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
                 </>
               )}
             </select>
@@ -3500,7 +3539,7 @@ function Inventory({ companyId, company }) {
           <label>
             <span>單位</span>
             <input
-              placeholder={constructionMode ? '例：桶、包、支、台、組' : '例：個、杯、包'}
+              placeholder={constructionMode ? '例：桶、包、支、台、組' : '例：個、組、包'}
               value={form.unit}
               onChange={(e) => setForm({ ...form, unit: e.target.value })}
             />
@@ -3508,12 +3547,12 @@ function Inventory({ companyId, company }) {
 
           <label>
             <span>{fieldLabel(industry, 'price')}</span>
-            <input type="number" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+            <input type="number" placeholder={constructionMode ? '例：1800' : '例：1280'} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
           </label>
 
           <label>
             <span>{fieldLabel(industry, 'cost')}</span>
-            <input type="number" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
+            <input type="number" placeholder={constructionMode ? '例：1200' : '例：760'} value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
           </label>
 
           <label>
@@ -7188,7 +7227,7 @@ const emptyCommerceProduct = {
   description: '',
   isFeatured: '0',
   isVisible: '1',
-  sortOrder: 0
+  sortOrder: 1
 };
 
 const emptyCommercePromotion = {
@@ -7198,8 +7237,12 @@ const emptyCommercePromotion = {
   startDate: '',
   endDate: '',
   isActive: '1',
-  sortOrder: 0
+  sortOrder: 1
 };
+
+function nextCommerceSortOrder(items = []) {
+  return Math.max(0, ...items.map((item) => Number(item.sortOrder ?? item.sort_order ?? 0) || 0)) + 1;
+}
 
 function CommerceSiteManager({ companyId, company }) {
   const [settings, setSettings] = useState(null);
@@ -7224,8 +7267,12 @@ function CommerceSiteManager({ companyId, company }) {
         api(`/companies/${companyId}/commerce-site/promotions`)
       ]);
       setSettings(settingsRow);
-      setProducts(productRows || []);
-      setPromotions(promotionRows || []);
+      const nextProducts = Array.isArray(productRows) ? productRows : [];
+      const nextPromotions = Array.isArray(promotionRows) ? promotionRows : [];
+      setProducts(nextProducts);
+      setPromotions(nextPromotions);
+      if (!editingProductId) setProductForm({ ...emptyCommerceProduct, sortOrder: nextCommerceSortOrder(nextProducts) });
+      if (!editingPromotionId) setPromotionForm({ ...emptyCommercePromotion, sortOrder: nextCommerceSortOrder(nextPromotions) });
     } catch (err) {
       setError(err.message || '讀取官網後台資料失敗');
     } finally {
@@ -7289,7 +7336,7 @@ function CommerceSiteManager({ companyId, company }) {
       });
       setProducts((old) => editingProductId ? old.map((p) => (p.id === editingProductId ? saved : p)) : [saved, ...old]);
       setEditingProductId(null);
-      setProductForm(emptyCommerceProduct);
+      setProductForm({ ...emptyCommerceProduct, sortOrder: nextCommerceSortOrder([saved, ...products]) });
       setMessage('已儲存');
     } catch (err) {
       setError(err.message || '儲存商品失敗');
@@ -7325,7 +7372,7 @@ function CommerceSiteManager({ companyId, company }) {
       });
       setPromotions((old) => editingPromotionId ? old.map((p) => (p.id === editingPromotionId ? saved : p)) : [saved, ...old]);
       setEditingPromotionId(null);
-      setPromotionForm(emptyCommercePromotion);
+      setPromotionForm({ ...emptyCommercePromotion, sortOrder: nextCommerceSortOrder([saved, ...promotions]) });
       setMessage('已儲存');
     } catch (err) {
       setError(err.message || '儲存活動失敗');
@@ -7490,13 +7537,20 @@ function CommerceSiteManager({ companyId, company }) {
           <label><span>商品分類</span><input value={productForm.category} onChange={(e) => setProductForm({ ...productForm, category: e.target.value })} /></label>
           <label><span>商品價格</span><input type="number" value={productForm.price} onChange={(e) => setProductForm({ ...productForm, price: e.target.value })} /></label>
           <label><span>原價</span><input type="number" value={productForm.originalPrice} onChange={(e) => setProductForm({ ...productForm, originalPrice: e.target.value })} /></label>
-          <label><span>圖片網址</span><input value={productForm.imageUrl} onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })} /></label>
+          <label>
+            <span>圖片網址</span>
+            <input
+              value={productForm.imageUrl}
+              placeholder="請貼上完整圖片網址，包含 https:// 開頭"
+              onChange={(e) => setProductForm({ ...productForm, imageUrl: e.target.value })}
+            />
+          </label>
           <label><span>商品描述</span><input value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} /></label>
           <label><span>主打商品</span><select value={productForm.isFeatured} onChange={(e) => setProductForm({ ...productForm, isFeatured: e.target.value })}><option value="0">否</option><option value="1">是</option></select></label>
           <label><span>是否顯示</span><select value={productForm.isVisible} onChange={(e) => setProductForm({ ...productForm, isVisible: e.target.value })}><option value="1">顯示</option><option value="0">隱藏</option></select></label>
           <label><span>排序</span><input type="number" value={productForm.sortOrder} onChange={(e) => setProductForm({ ...productForm, sortOrder: e.target.value })} /></label>
           <button disabled={saving}>{editingProductId ? '儲存商品' : '新增商品'}</button>
-          {editingProductId && <button type="button" className="link" onClick={() => { setEditingProductId(null); setProductForm(emptyCommerceProduct); }}>取消編輯</button>}
+          {editingProductId && <button type="button" className="link" onClick={() => { setEditingProductId(null); setProductForm({ ...emptyCommerceProduct, sortOrder: nextCommerceSortOrder(products) }); }}>取消編輯</button>}
         </form>
 
         <Table
@@ -7530,7 +7584,7 @@ function CommerceSiteManager({ companyId, company }) {
           <label><span>是否啟用</span><select value={promotionForm.isActive} onChange={(e) => setPromotionForm({ ...promotionForm, isActive: e.target.value })}><option value="1">啟用</option><option value="0">停用</option></select></label>
           <label><span>排序</span><input type="number" value={promotionForm.sortOrder} onChange={(e) => setPromotionForm({ ...promotionForm, sortOrder: e.target.value })} /></label>
           <button disabled={saving}>{editingPromotionId ? '儲存活動' : '新增活動'}</button>
-          {editingPromotionId && <button type="button" className="link" onClick={() => { setEditingPromotionId(null); setPromotionForm(emptyCommercePromotion); }}>取消編輯</button>}
+          {editingPromotionId && <button type="button" className="link" onClick={() => { setEditingPromotionId(null); setPromotionForm({ ...emptyCommercePromotion, sortOrder: nextCommerceSortOrder(promotions) }); }}>取消編輯</button>}
         </form>
 
         <Table

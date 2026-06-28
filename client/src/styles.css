@@ -4441,6 +4441,8 @@ button.lead-danger-btn {
   color: var(--muted);
   font-size: 13px;
   font-weight: 800;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
 }
 
 .commerce-cms-status-card strong {
@@ -4449,7 +4451,8 @@ button.lead-danger-btn {
   color: var(--text);
   font-size: 30px;
   line-height: 1.05;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .commerce-cms-head {
@@ -5538,6 +5541,29 @@ tr:hover td {
   border: 1px solid var(--border);
   border-radius: 16px;
   background: #f8fafc;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.website-metric-card strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.website-metric-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.website-metric-details small {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .website-next-steps {
@@ -5696,13 +5722,47 @@ tr:hover td {
 }
 
 .website-table-wrap table {
-  min-width: 920px;
+  min-width: 760px;
+  table-layout: fixed;
+}
+
+.website-table-wrap th,
+.website-table-wrap td {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+
+.website-table-wrap th:last-child,
+.website-table-wrap td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  width: 160px;
+  background: #ffffff;
 }
 
 .website-table-wrap small {
   display: block;
   margin-top: 4px;
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.website-sort-line {
+  display: block;
+  color: var(--text);
+  font-weight: 900;
+}
+
+.website-row-actions {
+  justify-content: flex-end;
+}
+
+.website-row-actions button {
+  min-height: 34px;
+  padding: 8px 10px;
+  white-space: normal;
 }
 
 .website-chip {
@@ -5828,6 +5888,35 @@ tr:hover td {
   text-align: center;
 }
 
+.empty-action-state {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: #f8fafc;
+  color: var(--muted);
+}
+
+.empty-action-state strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.empty-action-state p {
+  margin: 0;
+}
+
+.empty-action-state button {
+  width: fit-content;
+  margin-top: 4px;
+}
+
+.ai-disabled-card {
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
 .public-site {
   min-height: 100vh;
   background: #ffffff;
@@ -5894,6 +5983,15 @@ tr:hover td {
   background: linear-gradient(145deg, #eff6ff, #ffffff);
   color: #2563eb;
   font-weight: 900;
+}
+
+.public-site-image-placeholder small {
+  max-width: 90%;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+  overflow-wrap: anywhere;
 }
 
 .public-site-nav {

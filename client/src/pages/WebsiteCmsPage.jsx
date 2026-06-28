@@ -35,6 +35,14 @@ const resourceLabels = {
 
 const statusOptions = ['draft', 'published', 'hidden'];
 const sectionTypes = ['hero', 'brand_story', 'feature', 'promotion', 'product_highlight', 'custom'];
+const sectionTypeLabels = {
+  hero: '主視覺',
+  brand_story: '品牌故事',
+  feature: '精選特色',
+  promotion: '活動資訊',
+  product_highlight: '商品亮點',
+  custom: '品牌亮點'
+};
 const inquiryStatuses = ['new', 'read', 'replied', 'archived'];
 const assetModules = ['logo', 'favicon', 'banner', 'home_section', 'product', 'post', 'general'];
 const moduleLabels = {
@@ -56,13 +64,18 @@ const resourceEmptyText = {
   assets: '目前尚無素材。可先新增圖片 URL，再套用到 Logo、Banner、商品或文章封面。'
 };
 
-function emptyForm(resource) {
-  const base = { sortOrder: 0, isActive: true };
+function nextSortOrder(items = []) {
+  const max = Math.max(0, ...items.map((item) => Number(item.sortOrder ?? item.sort_order ?? 0) || 0));
+  return max + 1;
+}
+
+function emptyForm(resource, items = []) {
+  const base = { sortOrder: nextSortOrder(items), isActive: true };
   if (resource === 'banners') return { ...base, title: '', subtitle: '', imageUrl: '', buttonText: '', buttonUrl: '' };
   if (resource === 'home-sections') return { ...base, sectionType: 'custom', title: '', subtitle: '', content: '', imageUrl: '', buttonText: '', buttonUrl: '' };
-  if (resource === 'products') return { name: '', slug: '', description: '', shortDescription: '', price: 0, compareAtPrice: 0, imageUrl: '', category: '', status: 'draft', sortOrder: 0, isFeatured: false };
+  if (resource === 'products') return { name: '', slug: '', description: '', shortDescription: '', price: 0, compareAtPrice: 0, imageUrl: '', category: '', status: 'draft', sortOrder: nextSortOrder(items), isFeatured: false };
   if (resource === 'posts') return { title: '', slug: '', summary: '', content: '', coverImageUrl: '', category: '', status: 'draft', publishedAt: '' };
-  if (resource === 'faqs') return { question: '', answer: '', category: '', sortOrder: 0, isActive: true };
+  if (resource === 'faqs') return { question: '', answer: '', category: '', sortOrder: nextSortOrder(items), isActive: true };
   return {};
 }
 
@@ -75,6 +88,15 @@ function formatDate(value) {
 
 function normalizeForm(resource, item) {
   return { ...emptyForm(resource), ...item };
+}
+
+function sortWebsiteItems(items = []) {
+  return [...(Array.isArray(items) ? items : [])].sort((a, b) => {
+    const sortA = Number(a.sortOrder ?? a.sort_order ?? 0) || 0;
+    const sortB = Number(b.sortOrder ?? b.sort_order ?? 0) || 0;
+    if (sortA !== sortB) return sortA - sortB;
+    return Number(a.id || 0) - Number(b.id || 0);
+  });
 }
 
 function getStatusBadgeClass(status) {
@@ -92,9 +114,27 @@ function getStatusLabel(status) {
     draft: '草稿',
     hidden: '隱藏',
     active: '啟用',
-    inactive: '停用'
+    inactive: '停用',
+    enabled: '啟用',
+    disabled: '停用',
+    new: '新詢問',
+    read: '已讀',
+    replied: '已回覆',
+    archived: '已封存'
   };
   return labels[status] || status;
+}
+
+function getOptionValue(option) {
+  if (Array.isArray(option)) return option[0];
+  if (option && typeof option === 'object') return option.value;
+  return option;
+}
+
+function getOptionLabel(option) {
+  if (Array.isArray(option)) return option[1];
+  if (option && typeof option === 'object') return option.label;
+  return getStatusLabel(option);
 }
 
 function TextField({ label, value, onChange, type = 'text', textarea = false, placeholder = '', hint = '' }) {
@@ -112,11 +152,15 @@ function TextField({ label, value, onChange, type = 'text', textarea = false, pl
 }
 
 function SelectField({ label, value, onChange, options }) {
+  const firstValue = getOptionValue(options[0]);
   return (
     <label className="website-field">
       <span>{label}</span>
-      <select value={value || options[0]} onChange={(e) => onChange(e.target.value)}>
-        {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      <select value={value || firstValue} onChange={(e) => onChange(e.target.value)}>
+        {options.map((option) => {
+          const optionValue = getOptionValue(option);
+          return <option key={optionValue} value={optionValue}>{getOptionLabel(option)}</option>;
+        })}
       </select>
     </label>
   );
@@ -151,6 +195,7 @@ function ImageUrlField({ label, value, onChange, assets = [], module = 'general'
       <label className="website-field">
         <span>{label}</span>
         <input value={value || ''} placeholder="https://example.com/image.jpg" onChange={(e) => onChange(e.target.value)} />
+        <small>請貼上完整圖片網址，包含 https:// 開頭；若網址有 ?text= 等參數也會完整保存。</small>
       </label>
       <div className="website-image-tools">
         <select
@@ -196,11 +241,11 @@ export default function WebsiteCmsPage() {
       ]);
       setSettings(nextSettings);
       setResources({
-        banners: Array.isArray(banners) ? banners : [],
-        'home-sections': Array.isArray(sections) ? sections : [],
-        products: Array.isArray(products) ? products : [],
-        posts: Array.isArray(posts) ? posts : [],
-        faqs: Array.isArray(faqs) ? faqs : [],
+        banners: sortWebsiteItems(banners),
+        'home-sections': sortWebsiteItems(sections),
+        products: sortWebsiteItems(products),
+        posts: sortWebsiteItems(posts),
+        faqs: sortWebsiteItems(faqs),
         inquiries: Array.isArray(inquiries) ? inquiries : [],
         assets: Array.isArray(assets) ? assets : []
       });
@@ -313,8 +358,8 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
     ['公開網址', publicUrl ? publicUrl : '(請先設定 site_slug)'],
     ['Banner 數量', overview.banners],
     ['首頁區塊數量', overview.sections],
-    ['商品數量', `${overview.products} 總數 / ${overview.productsPublished} 已發布 / ${overview.productsDraft} 草稿 / ${overview.productsHidden} 隱藏`],
-    ['文章數量', `${overview.posts} 總數 / ${overview.postsPublished} 已發布 / ${overview.postsDraft} 草稿 / ${overview.postsHidden} 隱藏`],
+    ['商品數量', overview.products, [`已發布 ${overview.productsPublished}`, `草稿 ${overview.productsDraft}`, `隱藏 ${overview.productsHidden}`]],
+    ['文章數量', overview.posts, [`已發布 ${overview.postsPublished}`, `草稿 ${overview.postsDraft}`, `隱藏 ${overview.postsHidden}`]],
     ['FAQ 數量', overview.faqs],
     ['新聯絡詢問', overview.newInquiries]
   ];
@@ -345,10 +390,15 @@ function WebsiteOverview({ settings, overview, onNavigate }) {
         </div>
       </div>
       <div className="website-metric-grid">
-        {cards.map(([label, value]) => (
+        {cards.map(([label, value, details]) => (
           <div key={label} className="website-metric-card">
             <span>{label}</span>
             <strong>{value}</strong>
+            {Array.isArray(details) && (
+              <div className="website-metric-details">
+                {details.map((item) => <small key={item}>{item}</small>)}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -405,14 +455,14 @@ function SettingsPanel({ settings, setSettings, assets, saving, onSave }) {
 }
 
 function ResourcePanel({ resource, items, assets, saving, onCreate, onUpdate, onDelete }) {
-  const [form, setForm] = useState(emptyForm(resource));
+  const [form, setForm] = useState(() => emptyForm(resource, items));
   const [editingId, setEditingId] = useState(null);
   const label = resourceLabels[resource];
 
   useEffect(() => {
-    setForm(emptyForm(resource));
+    setForm(emptyForm(resource, items));
     setEditingId(null);
-  }, [resource]);
+  }, [resource, items]);
 
   function edit(item) {
     setEditingId(item.id);
@@ -424,7 +474,7 @@ function ResourcePanel({ resource, items, assets, saving, onCreate, onUpdate, on
     if (editingId) await onUpdate(editingId, form);
     else await onCreate(form);
     setEditingId(null);
-    setForm(emptyForm(resource));
+    setForm(emptyForm(resource, items));
   }
 
   function remove(id) {
@@ -444,7 +494,7 @@ function ResourcePanel({ resource, items, assets, saving, onCreate, onUpdate, on
         <ResourceFields resource={resource} form={form} setForm={setForm} assets={assets} />
         <div className="website-editor-actions">
           <button type="submit" disabled={saving}>{saving ? '處理中...' : editingId ? '儲存修改' : `新增${label}`}</button>
-          {editingId && <button type="button" className="website-secondary-btn" onClick={() => { setEditingId(null); setForm(emptyForm(resource)); }}>取消編輯</button>}
+          {editingId && <button type="button" className="website-secondary-btn" onClick={() => { setEditingId(null); setForm(emptyForm(resource, items)); }}>取消編輯</button>}
         </div>
       </form>
       <ResourceTable resource={resource} items={items} onEdit={edit} onDelete={remove} />
@@ -470,7 +520,12 @@ function ResourceFields({ resource, form, setForm, assets }) {
   if (resource === 'home-sections') {
     return (
       <div className="website-form-grid">
-        <SelectField label="區塊類型" value={form.sectionType} onChange={(v) => update('sectionType', v)} options={sectionTypes} />
+        <SelectField
+          label="區塊類型"
+          value={form.sectionType}
+          onChange={(v) => update('sectionType', v)}
+          options={sectionTypes.map((type) => [type, sectionTypeLabels[type] || type])}
+        />
         <TextField label="標題" value={form.title} onChange={(v) => update('title', v)} />
         <TextField label="副標" value={form.subtitle} onChange={(v) => update('subtitle', v)} />
         <TextField label="內容" value={form.content} onChange={(v) => update('content', v)} textarea />
@@ -550,7 +605,11 @@ function ResourceTable({ resource, items, onEdit, onDelete }) {
                   {getStatusLabel(item.status || (item.isActive ? 'active' : 'inactive'))}
                 </span>
               </td>
-              <td>{item.sortOrder ?? '-'} {item.category ? ` / ${item.category}` : ''} {resource === 'home-sections' && item.sectionType ? ` / ${item.sectionType}` : ''}</td>
+              <td>
+                <span className="website-sort-line">{item.sortOrder ?? '-'}</span>
+                {item.category && <small>{item.category}</small>}
+                {resource === 'home-sections' && item.sectionType && <small>{sectionTypeLabels[item.sectionType] || item.sectionType}</small>}
+              </td>
               <td>{formatDate(item.updatedAt || item.createdAt)}</td>
               <td>
                 <div className="website-row-actions">
@@ -715,7 +774,7 @@ function InquiriesPanel({ items, saving, onStatus }) {
                   <td>{item.sourcePage || '-'}</td>
                   <td>
                     <select value={item.status || 'new'} disabled={saving} onChange={(e) => onStatus(item.id, e.target.value)}>
-                      {inquiryStatuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                      {inquiryStatuses.map((status) => <option key={status} value={status}>{getStatusLabel(status)}</option>)}
                     </select>
                   </td>
                   <td>{formatDate(item.createdAt)}</td>

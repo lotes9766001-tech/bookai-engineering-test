@@ -93,6 +93,7 @@ function PublicImage({ src, alt, className = '' }) {
     return (
       <div className={`public-site-image-placeholder ${className}`} aria-hidden="true">
         <span>{alt?.slice(0, 1) || 'B'}</span>
+        {alt && <small>{alt}</small>}
       </div>
     );
   }
@@ -249,7 +250,6 @@ function PublicHome({ slug, site, products, posts, preview }) {
               <article key={section.id || section.title} className="public-site-feature">
                 <PublicImage src={section.imageUrl} alt={section.title} />
                 <div>
-                  <span>{section.sectionType || 'feature'}</span>
                   <h3>{section.title}</h3>
                   <p>{section.subtitle || section.content}</p>
                   {section.buttonUrl && <a className="public-site-link" href={section.buttonUrl}>{section.buttonText || '了解更多'}</a>}
