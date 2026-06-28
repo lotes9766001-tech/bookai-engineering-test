@@ -4424,6 +4424,7 @@ function JobSites({ companyId, company }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [editingOriginalForm, setEditingOriginalForm] = useState(null);
   const [openActionSiteId, setOpenActionSiteId] = useState(null);
   const [error, setError] = useState('');
   const [manualCopy, setManualCopy] = useState(null);
@@ -4537,6 +4538,63 @@ function JobSites({ companyId, company }) {
   function numberValue(value) {
     const n = Number(value || 0);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  function hydrateJobSiteForm(site = {}) {
+    return {
+      siteName: site.siteName || site.name || '',
+      clientName: site.clientName || site.client_name || '',
+      clientPhone: site.clientPhone || site.client_phone || '',
+      address: site.address || '',
+      projectType: site.projectType || site.project_type || '油漆工程',
+      quoteAmount: numberValue(site.quoteAmount ?? site.quote_amount),
+      taxMode: site.taxMode || site.tax_mode || 'not_taxed',
+      taxRate: numberValue(site.taxRate ?? site.tax_rate ?? 0.05),
+      subtotalAmount: numberValue(site.subtotalAmount ?? site.subtotal_amount ?? site.quoteAmount ?? site.quote_amount),
+      taxAmount: numberValue(site.taxAmount ?? site.tax_amount),
+      totalAmount: numberValue(site.totalAmount ?? site.total_amount ?? site.quoteAmount ?? site.quote_amount),
+      receivedAmount: numberValue(site.receivedAmount ?? site.received_amount),
+      materialCost: numberValue(site.materialCost ?? site.material_cost),
+      laborCost: numberValue(site.laborCost ?? site.labor_cost),
+      outsourcedCost: numberValue(site.outsourcedCost ?? site.outsourced_cost),
+      miscCost: numberValue(site.miscCost ?? site.misc_cost),
+      foodCost: numberValue(site.foodCost ?? site.food_cost),
+      status: site.status || '已報價',
+      note: site.note || '',
+      paintWorkers: '',
+      paintWorkDays: '',
+      paintDailyWage: ''
+    };
+  }
+
+  function buildJobSiteUpdatePayload(data, original) {
+    if (!original) return null;
+
+    const payload = {};
+    const textFields = ['siteName', 'clientName', 'clientPhone', 'address', 'projectType', 'taxMode', 'status', 'note'];
+    const numberFields = ['taxRate', 'receivedAmount', 'materialCost', 'outsourcedCost', 'miscCost', 'foodCost'];
+
+    for (const field of textFields) {
+      if (!Object.prototype.hasOwnProperty.call(data, field)) continue;
+      const value = String(data[field] ?? '').trim();
+      const oldValue = String(original[field] ?? '').trim();
+      if (field === 'siteName' && !value) {
+        return { error: '請輸入案場名稱' };
+      }
+      if (value !== oldValue) payload[field] = value;
+    }
+
+    for (const field of numberFields) {
+      if (!Object.prototype.hasOwnProperty.call(data, field)) continue;
+      const rawValue = data[field];
+      if (rawValue === undefined || rawValue === null || rawValue === '') continue;
+      const value = Number(rawValue);
+      const oldValue = Number(original[field] || 0);
+      if (!Number.isFinite(value)) continue;
+      if (value !== oldValue) payload[field] = value;
+    }
+
+    return payload;
   }
 
   function updateEstimateItem(uid, key, value) {
@@ -4824,9 +4882,14 @@ function JobSites({ companyId, company }) {
       setError('');
 
       if (editingId) {
+        const editPayload = normalizeJobSiteEditPayload(form);
+        if (!editPayload || editPayload.error || !Object.keys(editPayload).length) {
+          setError(editPayload?.error || '沒有偵測到案場資料變更。');
+          return;
+        }
         await jobSiteRequest(`/companies/${companyId}/jobsites/${editingId}`, {
           method: 'PATCH',
-          body: JSON.stringify(payload)
+          body: JSON.stringify(editPayload)
         });
       } else {
         await jobSiteRequest(`/companies/${companyId}/jobsites`, {
@@ -4877,27 +4940,7 @@ function JobSites({ companyId, company }) {
   }
 
   function normalizeJobSiteEditPayload(data) {
-    return {
-      siteName: data.siteName || '',
-      clientName: data.clientName || '',
-      clientPhone: data.clientPhone || '',
-      address: data.address || '',
-      projectType: data.projectType || '',
-      quoteAmount: numberValue(data.quoteAmount ?? data.totalAmount),
-      taxMode: data.taxMode ?? 'not_taxed',
-      taxRate: numberValue(data.taxRate ?? 0.05),
-      subtotalAmount: numberValue(data.subtotalAmount ?? data.quoteAmount ?? data.totalAmount),
-      taxAmount: numberValue(data.taxAmount ?? 0),
-      totalAmount: numberValue(data.totalAmount ?? data.quoteAmount),
-      receivedAmount: numberValue(data.receivedAmount),
-      materialCost: numberValue(data.materialCost),
-      laborCost: numberValue(data.laborCost),
-      outsourcedCost: numberValue(data.outsourcedCost),
-      miscCost: numberValue(data.miscCost),
-      foodCost: numberValue(data.foodCost),
-      status: data.status || '已報價',
-      note: data.note || ''
-    };
+    return buildJobSiteUpdatePayload(data, editingOriginalForm);
   }
 
   function calc(site) {
@@ -4995,6 +5038,18 @@ function JobSites({ companyId, company }) {
 
       if (editingId) {
         const payload = normalizeJobSiteEditPayload(form);
+        if (!payload) {
+          setError('案場資料尚未載入完成，請重新整理後再試。');
+          return;
+        }
+        if (payload.error) {
+          setError(payload.error);
+          return;
+        }
+        if (!Object.keys(payload).length) {
+          setError('沒有偵測到案場資料變更。');
+          return;
+        }
         const updated = await jobSiteRequest(`/companies/${companyId}/jobsites/${editingId}`, {
           method: 'PATCH',
           body: JSON.stringify(payload)
@@ -5007,6 +5062,7 @@ function JobSites({ companyId, company }) {
         }
 
         setEditingId(null);
+        setEditingOriginalForm(null);
       } else {
         const summary = getEstimateSummary();
         const payload = normalizePayload({
@@ -5059,27 +5115,9 @@ function JobSites({ companyId, company }) {
     setEditingId(site.id);
     setError('');
 
-    setForm({
-      siteName: site.siteName || site.name || '',
-      clientName: site.clientName || '',
-      clientPhone: site.clientPhone || '',
-      address: site.address || '',
-      projectType: site.projectType || '油漆工程',
-      quoteAmount: numberValue(site.quoteAmount),
-      taxMode: site.taxMode || site.tax_mode || 'not_taxed',
-      taxRate: numberValue(site.taxRate ?? site.tax_rate ?? 0.05),
-      subtotalAmount: numberValue(site.subtotalAmount ?? site.subtotal_amount ?? site.quoteAmount),
-      taxAmount: numberValue(site.taxAmount ?? site.tax_amount),
-      totalAmount: numberValue(site.totalAmount ?? site.total_amount ?? site.quoteAmount),
-      receivedAmount: numberValue(site.receivedAmount),
-      materialCost: numberValue(site.materialCost),
-      laborCost: numberValue(site.laborCost),
-      outsourcedCost: numberValue(site.outsourcedCost),
-      miscCost: numberValue(site.miscCost),
-      foodCost: numberValue(site.foodCost ?? site.food_cost),
-      status: site.status || '已報價',
-      note: site.note || ''
-    });
+    const hydrated = hydrateJobSiteForm(site);
+    setForm(hydrated);
+    setEditingOriginalForm(hydrated);
     setEstimateItems([]);
     setEstimateDraft(emptyEstimateDraft());
 
@@ -5091,6 +5129,7 @@ function JobSites({ companyId, company }) {
 
   function cancelEdit() {
     setEditingId(null);
+    setEditingOriginalForm(null);
     setError('');
     setForm(emptyForm);
     setEstimateItems([]);

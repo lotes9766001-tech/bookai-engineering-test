@@ -8555,14 +8555,35 @@ const JOBSITE_UPDATE_FIELDS = [
   ['note', 'note', (value) => String(value || '')]
 ];
 
+const JOBSITE_NUMERIC_COLUMNS = new Set([
+  'area_pings',
+  'price_per_ping',
+  'food_cost',
+  'quote_amount',
+  'tax_rate',
+  'subtotal_amount',
+  'tax_amount',
+  'total_amount',
+  'received_amount',
+  'material_cost',
+  'labor_cost',
+  'outsourced_cost',
+  'misc_cost'
+]);
+
 function buildJobSitePatch(body = {}) {
   const updates = new Map();
 
   for (const [inputKey, column, normalize] of JOBSITE_UPDATE_FIELDS) {
     if (!Object.prototype.hasOwnProperty.call(body, inputKey)) continue;
     const rawValue = body[inputKey];
-    if (rawValue === undefined) continue;
-    updates.set(column, normalize(rawValue));
+    if (rawValue === undefined || rawValue === null) continue;
+    if (JOBSITE_NUMERIC_COLUMNS.has(column) && rawValue === '') continue;
+    if ((inputKey === 'taxMode' || inputKey === 'status') && String(rawValue || '').trim() === '') continue;
+
+    const normalized = normalize(rawValue);
+    if (JOBSITE_NUMERIC_COLUMNS.has(column) && !Number.isFinite(normalized)) continue;
+    updates.set(column, normalized);
   }
 
   if (updates.has('name') || updates.has('site_name')) {
