@@ -7,6 +7,17 @@ server/node_modules/
 client/dist/
 dist/
 
+# Render/local generated media and uploads
+server/uploads/
+uploads/
+video/
+*.mp4
+*.mov
+
+# root npm install artifact; package locks are tracked per app package
+/package-lock.json
+/client/package-lock.json
+
 # env / secrets
 .env
 .env.local

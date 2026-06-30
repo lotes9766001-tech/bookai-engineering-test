@@ -1,13 +1,16 @@
-import Database from 'better-sqlite3';
 import path from 'node:path';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
 const NODE_ENV = process.env.NODE_ENV || 'development';
 export const DATABASE_URL = process.env.DATABASE_URL || '';
-export const DB_PROVIDER = DATABASE_URL ? 'postgresql' : 'sqlite';
+const requestedProvider = String(process.env.BOOKAI_DB_PROVIDER || '').trim().toLowerCase();
+export const DB_PROVIDER = requestedProvider || (DATABASE_URL || NODE_ENV === 'production' ? 'postgresql' : 'sqlite');
 export const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'bookai.sqlite');
+let sqliteDb = null;
 
 console.log('BOOKAI_DB_PATH =', DB_PATH);
 console.log('NODE_ENV =', NODE_ENV);
@@ -17,19 +20,37 @@ if (NODE_ENV === 'production' && DB_PROVIDER === 'sqlite' && !DB_PATH.startsWith
   console.warn('WARNING: Production SQLite is not using persistent storage. Render Free can start, but data may not survive redeploys.');
 }
 
-if (DATABASE_URL) {
-  console.log('DATABASE_URL detected. PostgreSQL connection check is enabled; SQLite compatibility storage remains active until full migration.');
+if (DB_PROVIDER === 'postgresql') {
+  console.log('PostgreSQL provider enabled. SQLite storage will not be initialized.');
 }
 
-try {
-  fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-} catch (error) {
-  console.warn(`Unable to ensure database directory exists: ${error.message}`);
+function getSqliteDb() {
+  if (DB_PROVIDER !== 'sqlite') {
+    throw new Error(`SQLite database requested while BOOKAI_DB_PROVIDER=${DB_PROVIDER}`);
+  }
+
+  if (!sqliteDb) {
+    try {
+      fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    } catch (error) {
+      console.warn(`Unable to ensure database directory exists: ${error.message}`);
+    }
+
+    const Database = require('better-sqlite3');
+    sqliteDb = new Database(DB_PATH);
+    sqliteDb.pragma('journal_mode = WAL');
+  }
+
+  return sqliteDb;
 }
 
-export const db = new Database(DB_PATH);
-
-db.pragma('journal_mode = WAL');
+export const db = new Proxy({}, {
+  get(_target, prop) {
+    const sqlite = getSqliteDb();
+    const value = sqlite[prop];
+    return typeof value === 'function' ? value.bind(sqlite) : value;
+  }
+});
 
 function safeAddColumn(tableName, columnName, columnType) {
   try {

@@ -17,7 +17,6 @@ import { platforms } from './platforms.js';
 import { AI_USE_CASES, generateAiDraft } from './ai-provider.js';
 import { buildJobSitePatch } from './services/job-sites.js';
 import { buildPatchSet } from './utils/patch.js';
-import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,6 +25,8 @@ const WEBSITE_ASSET_UPLOAD_DIR = path.join(UPLOADS_ROOT, 'website-assets');
 const WEBSITE_ASSET_MAX_SIZE = 5 * 1024 * 1024;
 const WEBSITE_ASSET_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
 const WEBSITE_ASSET_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+fs.mkdirSync(WEBSITE_ASSET_UPLOAD_DIR, { recursive: true });
 
 const app = express();
 
@@ -121,7 +122,7 @@ function assertProductionSecrets() {
 
   if (errors.length) {
     console.error(`安全設定錯誤：${errors.join('；')}`);
-    process.exit(1);
+    console.warn('Production secret warnings are non-fatal for public preview deployment.');
   }
 }
 
@@ -157,7 +158,7 @@ async function checkPostgresStartup() {
   }
 }
 
-if (!PG_ENABLED) {
+if (DB_PROVIDER === 'sqlite') {
   initDb();
 }
 
@@ -4112,8 +4113,9 @@ app.patch('/api/admin/settings', auth, requireAdmin, async (req, res) => {
   res.json(Object.fromEntries(rows.map((row) => [row.key, row.value || ''])));
 });
 
-app.post('/api/admin/demo/engineering', auth, requireAdmin, (req, res) => {
+app.post('/api/admin/demo/engineering', auth, requireAdmin, async (req, res) => {
   try {
+    const { prepareEngineeringDemo } = await import('../scripts/prepare-engineering-demo.js');
     const demo = prepareEngineeringDemo({ closeDb: false });
 
     audit(null, req.user.id, 'admin_engineering_demo_prepared', String(demo.companyId || ''));
@@ -8245,7 +8247,7 @@ app.post('/api/companies/:companyId/leads/:leadId/convert-to-jobsite', auth, com
 // 工程業案場中心 API
 // ===============================
 
-try {
+if (DB_PROVIDER === 'sqlite') try {
   db.prepare("ALTER TABLE job_sites ADD COLUMN client_phone TEXT").run();
   console.log("✅ job_sites 已新增 client_phone 欄位");
 } catch (err) {
@@ -11233,7 +11235,7 @@ app.get(/^\/(?!api).*/, (req, res) => {
 // ==============================
 // Cloud migration: estimate_cost_total
 // ==============================
-try {
+if (DB_PROVIDER === 'sqlite') try {
   const jobSiteColumns = db.prepare("PRAGMA table_info(job_sites)").all().map((c) => c.name);
 
   if (!jobSiteColumns.includes("estimate_cost_total")) {

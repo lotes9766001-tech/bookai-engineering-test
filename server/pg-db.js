@@ -1,10 +1,16 @@
-export const PG_ENABLED = Boolean(process.env.DATABASE_URL);
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const requestedProvider = String(process.env.BOOKAI_DB_PROVIDER || '').trim().toLowerCase();
+export const PG_ENABLED = requestedProvider === 'postgresql' || Boolean(process.env.DATABASE_URL) || (NODE_ENV === 'production' && requestedProvider !== 'sqlite');
 
 export let pool = null;
 
 export async function getPool() {
   if (!PG_ENABLED) {
     throw new Error('DATABASE_URL is not configured');
+  }
+
+  if (!process.env.DATABASE_URL) {
+    throw new Error('BOOKAI_DB_PROVIDER=postgresql requires DATABASE_URL');
   }
 
   if (!pool) {
