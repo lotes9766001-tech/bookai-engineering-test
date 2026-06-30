@@ -12,6 +12,7 @@ import {
   getWebsiteSettings,
   listWebsiteResource
 } from '../lib/websiteApi';
+import { resolveAssetUrl } from '../lib/assetUrl';
 
 function parsePublicSitePath(pathname) {
   const parts = pathname.split('/').filter(Boolean);
@@ -84,12 +85,13 @@ async function getPreviewData() {
 
 function PublicImage({ src, alt, className = '' }) {
   const [failed, setFailed] = useState(false);
+  const resolvedSrc = resolveAssetUrl(src);
 
   useEffect(() => {
     setFailed(false);
   }, [src]);
 
-  if (!src || failed) {
+  if (!resolvedSrc || failed) {
     return (
       <div className={`public-site-image-placeholder ${className}`} aria-hidden="true">
         <span>{alt?.slice(0, 1) || 'B'}</span>
@@ -98,18 +100,19 @@ function PublicImage({ src, alt, className = '' }) {
     );
   }
 
-  return <img className={className} src={src} alt={alt || ''} loading="lazy" onError={() => setFailed(true)} />;
+  return <img className={className} src={resolvedSrc} alt={alt || ''} loading="lazy" onError={() => setFailed(true)} />;
 }
 
 function PublicLogo({ src, brandName }) {
   const [failed, setFailed] = useState(false);
+  const resolvedSrc = resolveAssetUrl(src);
 
   useEffect(() => {
     setFailed(false);
   }, [src]);
 
-  if (!src || failed) return <span>{brandName.slice(0, 1)}</span>;
-  return <img src={src} alt={brandName} onError={() => setFailed(true)} />;
+  if (!resolvedSrc || failed) return <span>{brandName.slice(0, 1)}</span>;
+  return <img src={resolvedSrc} alt={brandName} onError={() => setFailed(true)} />;
 }
 
 function PublicSiteShell({ slug, site, preview, children }) {

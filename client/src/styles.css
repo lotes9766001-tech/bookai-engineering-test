@@ -5762,10 +5762,40 @@ tr:hover td {
   min-width: 0;
 }
 
+.website-image-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.website-file-input {
+  display: none;
+}
+
+.website-image-tools button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  padding: 8px 12px;
+  white-space: nowrap;
+}
+
 .website-image-tools select {
+  flex: 1 1 160px;
   margin: 0;
   min-height: 38px;
   font-size: 13px;
+}
+
+.website-upload-error {
+  padding: 8px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .website-image-preview,
@@ -6577,6 +6607,16 @@ tr:hover td {
   .website-metric-grid,
   .website-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .website-image-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .website-image-tools button,
+  .website-image-tools select {
+    width: 100%;
   }
 
   .website-tabs {

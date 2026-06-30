@@ -1,6 +1,8 @@
 ﻿import { cleanApiError } from './sanitize';
 
-const API = '/api';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
+export const API_ASSET_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5050/api' : API_BASE_URL);
+const API = API_BASE_URL.replace(/\/$/, '');
 const TOKEN_KEY = 'bookai_token';
 
 function readableErrorMessage(status, code, fallback) {
@@ -41,9 +43,10 @@ export function clearToken() {
 
 export async function api(path, options = {}) {
   const token = getToken();
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
 
   const headers = {
-    'Content-Type': 'application/json',
+    ...(!isFormData ? { 'Content-Type': 'application/json' } : {}),
     ...(options.headers || {})
   };
 

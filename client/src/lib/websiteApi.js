@@ -66,3 +66,12 @@ export async function deleteWebsiteAsset(id) {
     method: 'DELETE'
   }));
 }
+
+export async function uploadWebsiteAssetImage(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  return unwrap(await api('/website-assets/upload', {
+    method: 'POST',
+    body: formData
+  }));
+}

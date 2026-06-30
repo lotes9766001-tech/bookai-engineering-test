@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createWebsiteResource,
   createWebsiteAsset,
@@ -9,9 +9,11 @@ import {
   listWebsiteInquiries,
   listWebsiteResource,
   saveWebsiteSettings,
+  uploadWebsiteAssetImage,
   updateWebsiteInquiryStatus,
   updateWebsiteResource
 } from '../lib/websiteApi';
+import { resolveAssetUrl } from '../lib/assetUrl';
 
 const tabs = [
   ['overview', '官網總覽'],
@@ -190,27 +192,82 @@ function SwitchField({ label, checked, onChange }) {
 
 function ImagePreview({ src }) {
   const [failed, setFailed] = useState(false);
+  const resolvedSrc = resolveAssetUrl(src);
 
   useEffect(() => {
     setFailed(false);
   }, [src]);
 
-  if (!src) return <div className="website-image-empty">尚未輸入圖片 URL</div>;
+  if (!resolvedSrc) return <div className="website-image-empty">尚未輸入圖片 URL</div>;
   if (failed) return <div className="website-image-empty">圖片無法載入，請確認網址是否完整</div>;
-  return <img className="website-image-preview" src={src} alt="" onError={() => setFailed(true)} />;
+  return <img className="website-image-preview" src={resolvedSrc} alt="" onError={() => setFailed(true)} />;
 }
 
-function ImageUrlField({ label, value, onChange, assets = [], module = 'general' }) {
+function formatFileSize(bytes) {
+  const size = Number(bytes) || 0;
+  if (!size) return '';
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function ImageUploadField({ label, value, onChange, assets = [], module = 'general', onUploaded }) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const filteredAssets = assets.filter((asset) => !module || asset.module === module || asset.module === 'general');
+  const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+  async function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    setUploadError('');
+    if (!file) return;
+    if (!allowedTypes.has(file.type)) {
+      setUploadError('\u50c5\u5141\u8a31\u4e0a\u50b3 JPG\u3001JPEG\u3001PNG \u6216 WEBP \u5716\u7247\u3002');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setUploadError('\u5716\u7247\u6a94\u6848\u4e0d\u53ef\u8d85\u904e 5MB\u3002');
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const result = await uploadWebsiteAssetImage(file);
+      if (!result?.url) throw new Error('\u4e0a\u50b3\u5b8c\u6210\u4f46\u672a\u53d6\u5f97\u5716\u7247 URL\u3002');
+      onChange(result.url);
+      onUploaded?.(file, result);
+    } catch (err) {
+      setUploadError(err.message || '\u5716\u7247\u4e0a\u50b3\u5931\u6557\uff0c\u8acb\u7a0d\u5f8c\u518d\u8a66\u3002');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   return (
     <div className="website-image-field">
       <label className="website-field">
         <span>{label}</span>
         <input value={value || ''} placeholder="https://example.com/image.jpg" onChange={(e) => onChange(e.target.value)} />
-        <small>請貼上完整圖片網址，包含 https:// 開頭；若網址包含 ?text= 這類參數也會完整保存。</small>
+        <small>{'\u53ef\u624b\u52d5\u8cbc\u4e0a\u5716\u7247 URL\uff0c\u6216\u4f7f\u7528\u4e0b\u65b9\u6309\u9215\u4e0a\u50b3\u672c\u6a5f\u5716\u7247\u5f8c\u81ea\u52d5\u586b\u5165\u3002'}</small>
       </label>
       <div className="website-image-tools">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
+          className="website-file-input"
+          onChange={handleFileChange}
+        />
+        <button
+          type="button"
+          className="secondary"
+          disabled={uploading}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? '\u4e0a\u50b3\u4e2d...' : '\u4e0a\u50b3\u5716\u7247'}
+        </button>
         <select
           value=""
           disabled={!filteredAssets.length}
@@ -218,12 +275,13 @@ function ImageUrlField({ label, value, onChange, assets = [], module = 'general'
             if (e.target.value) onChange(e.target.value);
           }}
         >
-          <option value="">{filteredAssets.length ? '從素材管理選擇圖片網址' : '目前沒有可選素材'}</option>
+          <option value="">{filteredAssets.length ? '\u5f9e\u7d20\u6750\u7ba1\u7406\u9078\u64c7\u5716\u7247\u7db2\u5740' : '\u76ee\u524d\u6c92\u6709\u53ef\u9078\u7d20\u6750'}</option>
           {filteredAssets.map((asset) => (
             <option key={asset.id} value={asset.fileUrl}>{asset.fileName || asset.fileUrl}</option>
           ))}
         </select>
       </div>
+      {uploadError && <div className="website-upload-error">{uploadError}</div>}
       <ImagePreview src={value} />
     </div>
   );
@@ -323,6 +381,7 @@ export default function WebsiteCmsPage() {
           {activeTab === 'settings' && (
             <SettingsPanel
               settings={settings}
+              assets={resources.assets}
               saving={saving}
               onSave={(payload) => run(() => saveWebsiteSettings(payload), '網站設定已儲存。')}
             />
@@ -427,7 +486,7 @@ function WebsiteOverview({ settings, resources }) {
   );
 }
 
-function SettingsPanel({ settings, saving, onSave }) {
+function SettingsPanel({ settings, assets = [], saving, onSave }) {
   const [form, setForm] = useState(settings || {});
 
   useEffect(() => {
@@ -453,8 +512,8 @@ function SettingsPanel({ settings, saving, onSave }) {
         <TextField label="公開網址代號" value={form.siteSlug} onChange={(value) => update('siteSlug', value)} placeholder="mori-pet-life" hint="公開網址會使用 /site/site_slug，建議使用英文、數字或短橫線。" />
         <TextField label="網站名稱" value={form.siteName} onChange={(value) => update('siteName', value)} placeholder="Mori Pet Life 官方網站" />
         <TextField label="品牌名稱" value={form.brandName} onChange={(value) => update('brandName', value)} placeholder="Mori Pet Life" />
-        <ImageUrlField label="Logo 圖片網址" value={form.logoUrl} onChange={(value) => update('logoUrl', value)} module="logo" />
-        <ImageUrlField label="網站小圖示網址" value={form.faviconUrl} onChange={(value) => update('faviconUrl', value)} module="favicon" />
+        <ImageUploadField label="Logo 圖片網址" value={form.logoUrl} onChange={(value) => update('logoUrl', value)} assets={assets} module="logo" />
+        <ImageUploadField label="網站小圖示網址" value={form.faviconUrl} onChange={(value) => update('faviconUrl', value)} assets={assets} module="favicon" />
         <TextField label="主色" value={form.primaryColor} onChange={(value) => update('primaryColor', value)} placeholder="#1f6f5b" />
         <TextField label="輔色" value={form.secondaryColor} onChange={(value) => update('secondaryColor', value)} placeholder="#f4efe6" />
         <TextField label="聯絡 Email" value={form.contactEmail} onChange={(value) => update('contactEmail', value)} placeholder="hello@example.com" />
@@ -538,7 +597,7 @@ function ResourceFields({ resource, form, setForm, assets }) {
       <div className="website-form-grid">
         <TextField label="標題" value={form.title} onChange={(value) => update('title', value)} placeholder="陪牠一起過更好的日常" />
         <TextField label="副標" value={form.subtitle} onChange={(value) => update('subtitle', value)} textarea placeholder="用一句話說明品牌主張或本期活動。" />
-        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="banner" />
+        <ImageUploadField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="banner" />
         <TextField label="按鈕文字" value={form.buttonText} onChange={(value) => update('buttonText', value)} placeholder="查看商品" />
         <TextField label="按鈕連結" value={form.buttonUrl} onChange={(value) => update('buttonUrl', value)} placeholder="/products" />
         <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
@@ -554,7 +613,7 @@ function ResourceFields({ resource, form, setForm, assets }) {
         <TextField label="標題" value={form.title} onChange={(value) => update('title', value)} placeholder="品牌亮點" />
         <TextField label="副標" value={form.subtitle} onChange={(value) => update('subtitle', value)} placeholder="讓顧客快速理解你的特色。" />
         <TextField label="內容" value={form.content} onChange={(value) => update('content', value)} textarea placeholder="可輸入品牌故事、活動說明、服務特色或商品介紹。" />
-        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="home_section" />
+        <ImageUploadField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="home_section" />
         <TextField label="按鈕文字" value={form.buttonText} onChange={(value) => update('buttonText', value)} placeholder="了解更多" />
         <TextField label="按鈕連結" value={form.buttonUrl} onChange={(value) => update('buttonUrl', value)} placeholder="/products" />
         <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
@@ -572,7 +631,7 @@ function ResourceFields({ resource, form, setForm, assets }) {
         <TextField label="完整描述" value={form.description} onChange={(value) => update('description', value)} textarea placeholder="補充商品特色、規格、使用情境與注意事項。" />
         <TextField label="價格" type="number" value={form.price} onChange={(value) => update('price', value)} />
         <TextField label="比較價" type="number" value={form.compareAtPrice} onChange={(value) => update('compareAtPrice', value)} />
-        <ImageUrlField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="product" />
+        <ImageUploadField label="圖片 URL" value={form.imageUrl} onChange={(value) => update('imageUrl', value)} assets={assets} module="product" />
         <TextField label="分類" value={form.category} onChange={(value) => update('category', value)} placeholder="一般商品" />
         <SelectField label="狀態" value={form.status} onChange={(value) => update('status', value)} options={statusOptions} />
         <TextField label="排序" type="number" value={form.sortOrder} onChange={(value) => update('sortOrder', value)} />
@@ -588,7 +647,7 @@ function ResourceFields({ resource, form, setForm, assets }) {
         <TextField label="文章網址代號" value={form.slug} onChange={(value) => update('slug', value)} placeholder="new-arrival" hint="建議使用英文、數字或短橫線，方便形成文章網址。" />
         <TextField label="摘要" value={form.summary} onChange={(value) => update('summary', value)} textarea placeholder="顯示在最新消息列表的一段摘要。" />
         <TextField label="內容" value={form.content} onChange={(value) => update('content', value)} textarea placeholder="輸入品牌消息、選物指南或活動公告內容。" />
-        <ImageUrlField label="封面圖片 URL" value={form.coverImageUrl} onChange={(value) => update('coverImageUrl', value)} assets={assets} module="post" />
+        <ImageUploadField label="封面圖片 URL" value={form.coverImageUrl} onChange={(value) => update('coverImageUrl', value)} assets={assets} module="post" />
         <TextField label="分類" value={form.category} onChange={(value) => update('category', value)} placeholder="品牌消息" />
         <SelectField label="狀態" value={form.status} onChange={(value) => update('status', value)} options={statusOptions} />
         <TextField label="發布時間" type="datetime-local" value={form.publishedAt} onChange={(value) => update('publishedAt', value)} />
@@ -709,9 +768,23 @@ function AssetsPanel({ assets, saving, run }) {
         </div>
         <div className="website-form-grid">
           <TextField label="素材名稱" value={form.fileName} onChange={(value) => update('fileName', value)} placeholder="首頁主視覺圖片" />
-          <TextField label="素材 URL" value={form.fileUrl} onChange={(value) => update('fileUrl', value)} placeholder="https://example.com/image.jpg" hint="請貼上完整網址，包含 https:// 開頭。" />
+          <ImageUploadField
+            label="素材 URL"
+            value={form.fileUrl}
+            onChange={(value) => update('fileUrl', value)}
+            assets={assets}
+            module={form.module}
+            onUploaded={(file) => {
+              setForm((prev) => ({
+                ...prev,
+                fileName: prev.fileName || file.name,
+                fileType: 'image',
+                fileSize: file.size
+              }));
+            }}
+          />
           <TextField label="類型" value={form.fileType} onChange={(value) => update('fileType', value)} placeholder="image" />
-          <TextField label="檔案大小" value={form.fileSize} onChange={(value) => update('fileSize', value)} placeholder="120 KB" />
+          <TextField label="檔案大小" value={form.fileSize} onChange={(value) => update('fileSize', value)} placeholder={formatFileSize(120 * 1024)} />
           <SelectField label="用途" value={form.module} onChange={(value) => update('module', value)} options={assetModuleOptions} />
         </div>
       </form>

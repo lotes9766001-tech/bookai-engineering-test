@@ -6,6 +6,7 @@ import net from 'net';
 import tls from 'tls';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
+import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
@@ -20,6 +21,11 @@ import { prepareEngineeringDemo } from '../scripts/prepare-engineering-demo.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const UPLOADS_ROOT = path.join(__dirname, 'uploads');
+const WEBSITE_ASSET_UPLOAD_DIR = path.join(UPLOADS_ROOT, 'website-assets');
+const WEBSITE_ASSET_MAX_SIZE = 5 * 1024 * 1024;
+const WEBSITE_ASSET_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp']);
+const WEBSITE_ASSET_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 const app = express();
 
@@ -179,6 +185,10 @@ app.use(cors(corsOrigins.length ? {
 } : undefined));
 
 app.use(express.json({ limit: '1mb' }));
+app.use('/uploads', express.static(UPLOADS_ROOT, {
+  fallthrough: false,
+  maxAge: NODE_ENV === 'production' ? '7d' : 0
+}));
 
 app.use((err, req, res, next) => {
   if (err instanceof SyntaxError && 'body' in err) {
@@ -191,6 +201,57 @@ app.use((err, req, res, next) => {
 
   next(err);
 });
+
+function websiteAssetUploadError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function getWebsiteAssetExtension(file) {
+  const originalExt = path.extname(file.originalname || '').slice(1).toLowerCase();
+  if (WEBSITE_ASSET_EXTENSIONS.has(originalExt)) return originalExt;
+  if (file.mimetype === 'image/jpeg') return 'jpg';
+  if (file.mimetype === 'image/png') return 'png';
+  if (file.mimetype === 'image/webp') return 'webp';
+  return '';
+}
+
+const websiteAssetStorage = multer.diskStorage({
+  destination(req, file, callback) {
+    fs.mkdir(WEBSITE_ASSET_UPLOAD_DIR, { recursive: true }, (err) => callback(err, WEBSITE_ASSET_UPLOAD_DIR));
+  },
+  filename(req, file, callback) {
+    const ext = getWebsiteAssetExtension(file);
+    const random = nanoid(10);
+    callback(null, `website-asset-${Date.now()}-${random}.${ext}`);
+  }
+});
+
+const uploadWebsiteAssetFile = multer({
+  storage: websiteAssetStorage,
+  limits: { fileSize: WEBSITE_ASSET_MAX_SIZE, files: 1 },
+  fileFilter(req, file, callback) {
+    const ext = getWebsiteAssetExtension(file);
+    if (!ext || !WEBSITE_ASSET_MIME_TYPES.has(file.mimetype)) {
+      return callback(websiteAssetUploadError('僅允許上傳 JPG、JPEG、PNG 或 WEBP 圖片。'));
+    }
+    return callback(null, true);
+  }
+}).single('file');
+
+function handleWebsiteAssetUpload(req, res, next) {
+  uploadWebsiteAssetFile(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE') {
+      return jsonError(res, 413, '圖片檔案不可超過 5MB。');
+    }
+    if (err instanceof multer.MulterError) {
+      return jsonError(res, 400, '圖片上傳失敗，請確認檔案格式與大小。');
+    }
+    return jsonError(res, err.status || 500, err.message || '圖片上傳失敗，請稍後再試。');
+  });
+}
 
 const rateLimitBuckets = new Map();
 
@@ -3304,6 +3365,13 @@ app.get('/api/website/assets', auth, cmsCompany, async (req, res) => {
     console.error('[website assets list] failed', { userId: req.user?.id, code: err.code, message: err.message });
     return jsonError(res, 500, '素材資料讀取失敗');
   }
+});
+
+app.post('/api/website-assets/upload', auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), handleWebsiteAssetUpload, (req, res) => {
+  if (!req.file) return jsonError(res, 400, '請選擇要上傳的圖片。');
+  const url = `/uploads/website-assets/${req.file.filename}`;
+  audit(req.cmsCompany.id, req.user.id, 'website_asset_file_uploaded', req.file.filename);
+  return res.json({ url });
 });
 
 app.post('/api/website/assets', auth, cmsCompany, requireCmsRole('owner', 'admin', 'staff'), async (req, res) => {
