@@ -353,6 +353,8 @@ export async function initPostgresDb() {
       unit TEXT,
       unit_price REAL DEFAULT 0,
       subtotal REAL DEFAULT 0,
+      unit_cost_snapshot REAL DEFAULT 0,
+      cost_subtotal REAL DEFAULT 0,
       note TEXT,
       created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
     );
@@ -730,6 +732,8 @@ export async function initPostgresDb() {
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS industry_type TEXT;
     ALTER TABLE companies ADD COLUMN IF NOT EXISTS beta_approved_at TEXT;
     ALTER TABLE company_users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
+    ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS unit_cost_snapshot REAL DEFAULT 0;
+    ALTER TABLE sale_items ADD COLUMN IF NOT EXISTS cost_subtotal REAL DEFAULT 0;
     ALTER TABLE website_assets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP;
     ALTER TABLE tender_watch_keywords ADD COLUMN IF NOT EXISTS region TEXT;
     ALTER TABLE tender_watch_keywords ADD COLUMN IF NOT EXISTS category TEXT;

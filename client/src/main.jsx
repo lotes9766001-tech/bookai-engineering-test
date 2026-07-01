@@ -1,4 +1,4 @@
-﻿
+
 import React, { Component, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
@@ -45,6 +45,7 @@ import './styles.css';
 import AiDraftAssistant from './components/AiDraftAssistant.jsx';
 import IntegrationCenter from './components/IntegrationCenter.jsx';
 import LeadCenterMock from './components/LeadCenterMock.jsx';
+import BusinessBiPage from './pages/BusinessBiPage.jsx';
 import PublicSitePage from './pages/PublicSitePage.jsx';
 import WebsiteCmsPage from './pages/WebsiteCmsPage.jsx';
 
@@ -57,7 +58,8 @@ const planNames = {
 const featureByPage = {
   accounting: 'accounting_engine',
   tax: 'tax_center',
-  accountant: 'accountant_console'
+  accountant: 'accountant_console',
+  'business-bi': 'reports'
 };
 
 function getPageFeatureKey(page) {
@@ -178,6 +180,7 @@ const navs = {
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
     ['reports', '經營報表', BarChart3],
+    ['business-bi', 'BI 分析', BarChart3],
     ['feedbacks', '產品回饋', FileText],
     ['settings', '公司設定', Building2]
   ],
@@ -197,6 +200,7 @@ const navs = {
     ['inventory', '商品 / 材料庫存', Package],
     ['integrations', '平台串接', PlugZap],
     ['reports', '經營報表', BarChart3],
+    ['business-bi', 'BI 分析', BarChart3],
     ['feedbacks', '產品回饋', FileText],
     ['settings', '公司設定', Building2]
   ],
@@ -234,6 +238,7 @@ const commerceEditionNav = [
   ['commerce_site', '官網後台', Building2],
   ['website', '品牌官網', Building2],
   ['reports', '經營報表', BarChart3],
+  ['business-bi', 'BI 分析', BarChart3],
   ['feedbacks', '產品回饋', FileText],
   ['settings', '公司設定', Building2]
 ];
@@ -272,6 +277,7 @@ const restaurantEditionNav = [
   ['inventory', '商品 / 材料庫存', Package],
   ['pos_integrations', 'POS 串接', PlugZap],
   ['reports', '經營報表', BarChart3],
+  ['business-bi', 'BI 分析', BarChart3],
   ['feedbacks', '產品回饋', FileText],
   ['settings', '公司設定', Building2]
 ];
@@ -1033,6 +1039,7 @@ function Shell({ onLogout }) {
     ['inventory', '材料 / 工具庫存 ERP', Package],
     ['jobsites', '案場中心', Building2],
     ['reports', '經營報表', BarChart3],
+    ['business-bi', 'BI 分析', BarChart3],
     ['feedbacks', '產品回饋', FileText],
     ['settings', '公司設定', Building2]
   ];
@@ -1325,6 +1332,7 @@ function Shell({ onLogout }) {
         {!needsReview && page === 'tax' && <Tax companyId={companyId} />}
         {!needsReview && page === 'accountant' && <Accountant companyId={companyId} />}
         {!needsReview && page === 'reports' && <Reports companyId={companyId} company={company} />}
+        {!needsReview && page === 'business-bi' && <BusinessBiPage companyId={companyId} company={company} />}
         {!needsReview && page === 'ai_draft' && (
           <AiDraftAssistant
             companyId={companyId}
@@ -1604,11 +1612,18 @@ const onboardingGuideConfigs = {
 function TesterGuideCard({ edition, betaActive, officialLineUrl, onNavigate, onboardingState = {} }) {
   const guide = onboardingGuideConfigs[edition] || onboardingGuideConfigs.commerce;
   const storageKey = `bookai_onboarding_collapsed_${edition}`;
-  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(storageKey) === '1');
+  const shouldDefaultCollapse = Object.values(onboardingState.completed || {}).some(Boolean);
+  const [collapsed, setCollapsed] = useState(() => {
+    const stored = localStorage.getItem(storageKey);
+    if (stored === '1') return true;
+    if (stored === '0') return false;
+    return shouldDefaultCollapse;
+  });
 
   useEffect(() => {
-    setCollapsed(localStorage.getItem(storageKey) === '1');
-  }, [storageKey]);
+    const stored = localStorage.getItem(storageKey);
+    setCollapsed(stored === '1' || (stored !== '0' && shouldDefaultCollapse));
+  }, [storageKey, shouldDefaultCollapse]);
 
   function toggleCollapsed() {
     setCollapsed((value) => {
@@ -2062,7 +2077,7 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
   };
   const commerceOnboardingCompleted = {
     product: products.length > 0,
-    website: false,
+    website: Number(s.monthlySales || 0) > 0,
     ai: false,
     feedback: hasFeedback
   };
@@ -2222,7 +2237,7 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
             <button type="button" onClick={() => onNavigate?.('sales')}>新增銷貨</button>
             <button type="button" onClick={() => onNavigate?.('inventory')}>檢查庫存</button>
             <button type="button" onClick={() => onNavigate?.('invoices')}>處理發票</button>
-            <button type="button" onClick={() => onNavigate?.('reports')}>查看報表</button>
+            <button type="button" onClick={() => onNavigate?.('business-bi')}>BI 分析</button>
           </div>
         </div>
       </div>
@@ -2246,118 +2261,65 @@ function Dashboard({ companyId, refresh, company, engineeringMode = false, betaA
       )}
 
       <div className="command-metrics">
-        <Card title="本月銷貨總額" value={money(s.monthlySales || 0)} />
-        <Card title="本月進貨總額" value={money(s.monthlyPurchases || 0)} />
-        <Card title="應收未收總額" value={money(s.unpaidSales || 0)} />
-        <Card title="應付未付總額" value={money(s.unpaidPurchases || 0)} />
+        <Card title="本期銷貨" value={money(s.monthlySales || 0)} />
+        <Card title="本期進貨" value={money(s.monthlyPurchases || 0)} />
+        <Card title="商品成本" value={money(s.cogs || 0)} />
+        <Card title="毛利" value={money(s.grossProfit || 0)} />
+        <Card title="毛利率" value={`${Number(s.grossMarginRate || 0).toFixed(1)}%`} />
         <Card title="已收款金額" value={money(s.collectedSales || 0)} />
         <Card title="已付款金額" value={money(s.paidPurchases || 0)} />
-        <Card title="總營收" value={money(s.revenue)} />
-        <Card title="淨利" value={money(s.netProfit)} />
         <Card title="低庫存警示" value={s.lowStock} />
       </div>
 
-      <div className="panel-grid">
-        <div className="panel bi-panel">
-          <h2>平台營收分布</h2>
-          <p className="panel-subtitle">依平台營收高低排序，協助判斷主要收入來源與平台集中度。</p>
-          <PlatformRevenueChart rows={s.revenueByPlatform || []} />
-        </div>
-
+      <div className="overview-grid">
         <div className="panel">
           <h2>營運摘要</h2>
           <ul className="summary">
-          <li>本月銷貨總額：{money(s.monthlySales || 0)}</li>
-          <li>本月進貨總額：{money(s.monthlyPurchases || 0)}</li>
-          <li>本月毛利：{money(s.grossProfit || 0)}</li>
-          <li>毛利率：{Number(s.grossMarginRate || 0)}%</li>
-          <li>庫存成本：{money(s.inventoryValue || 0)}</li>
-          <li>應收未收總額：{money(s.unpaidSales || 0)}</li>
-          <li>應付未付總額：{money(s.unpaidPurchases || 0)}</li>
-          <li>已收款金額：{money(s.collectedSales || 0)}</li>
-          <li>已付款金額：{money(s.paidPurchases || 0)}</li>
-          {(s.unpaidSales || 0) > 0 && <li>現金流提醒：仍有應收帳款待追蹤。</li>}
-          {(s.unpaidPurchases || 0) > 0 && <li>現金流提醒：仍有應付帳款待安排付款。</li>}
-          <li>交易筆數：{s.txCount}</li>
-            <li>平台手續費：{money(s.fees)}</li>
-            <li>商品成本：{money(s.cogs)}</li>
-            <li>待處理發票：{s.invoicesPending}</li>
+            <li>本期銷貨總額：{money(s.monthlySales || 0)}</li>
+            <li>本期進貨總額：{money(s.monthlyPurchases || 0)}</li>
+            <li>本期毛利：{money(s.grossProfit || 0)}，毛利率 {Number(s.grossMarginRate || 0).toFixed(1)}%。</li>
+            <li>已收款 {money(s.collectedSales || 0)}，已付款 {money(s.paidPurchases || 0)}。</li>
+            <li>庫存成本：{money(s.inventoryValue || 0)}</li>
           </ul>
+          <button type="button" className="secondary-btn" onClick={() => onNavigate?.('business-bi')}>前往 BI 分析</button>
         </div>
-      </div>
 
-      <div className="panel-grid">
-        <div className="panel bi-panel">
-          <h2>現金流提醒</h2>
-          <p className="panel-subtitle">依應收、應付與毛利率整理今日需關注事項。</p>
+        <div className="panel">
+          <h2>低庫存 / 風險提醒</h2>
           <ul className="bi-alert-list">
+            {(s.lowStockItems || []).slice(0, 5).map((item) => (
+              <li key={item.id || item.sku || item.name}>{item.name || '未命名商品'}：目前庫存 {item.stock || 0}，安全庫存 {item.safety_stock ?? item.safetyStock ?? 0}</li>
+            ))}
             {(s.cashflowAlerts || []).map((item) => <li key={item}>{item}</li>)}
-            {!(s.cashflowAlerts || []).length && <li>目前沒有重大現金流提醒，請持續維持進貨、銷貨與收付款紀錄完整。</li>}
+            {!(s.lowStockItems || []).length && !(s.cashflowAlerts || []).length && <li>目前沒有重大庫存或現金流提醒。</li>}
           </ul>
-          <div className="bi-cashflow-grid">
-            <div><span>本週預估流入</span><strong>{money(s.unpaidSales || 0)}</strong></div>
-            <div><span>本週預估流出</span><strong>{money(s.unpaidPurchases || 0)}</strong></div>
-            <div><span>淨現金流提醒</span><strong>{money((s.unpaidSales || 0) - (s.unpaidPurchases || 0))}</strong></div>
-          </div>
-        </div>
-
-        <div className="panel bi-panel">
-          <h2>應收 / 應付趨勢</h2>
-          <p className="panel-subtitle">近 30 天未收與未付變化，資料不足時以最新紀錄呈現。</p>
-          <div className="bi-trend-list">
-            {(s.receivableTrend || []).slice(-6).map((row) => (
-              <div key={`r-${row.date}`}>
-                <span>{row.date}</span>
-                <strong>{money(row.value || 0)}</strong>
-                <i style={{ width: `${Math.min(100, Math.max(6, Number(row.value || 0) / Math.max(Number(s.unpaidSales || 1), 1) * 100))}%` }} />
-              </div>
-            ))}
-            {(s.receivableTrend || []).length === 0 && <p className="bi-empty">目前尚無應收趨勢資料。</p>}
-          </div>
-          <div className="bi-trend-list payable">
-            {(s.payableTrend || []).slice(-6).map((row) => (
-              <div key={`p-${row.date}`}>
-                <span>{row.date}</span>
-                <strong>{money(row.value || 0)}</strong>
-                <i style={{ width: `${Math.min(100, Math.max(6, Number(row.value || 0) / Math.max(Number(s.unpaidPurchases || 1), 1) * 100))}%` }} />
-              </div>
-            ))}
-            {(s.payableTrend || []).length === 0 && <p className="bi-empty">目前尚無應付趨勢資料。</p>}
-          </div>
         </div>
       </div>
 
-      <div className="panel-grid">
-        <div className="panel bi-panel">
-          <h2>低庫存排行</h2>
-          <p className="panel-subtitle">依目前庫存與安全庫存差距排序。</p>
+      <div className="overview-grid">
+        <div className="panel">
+          <h2>最近交易摘要</h2>
           <Table
-            cols={['商品 / 材料', '目前庫存', '安全庫存', '最近更新']}
-            rows={(s.lowStockItems || []).length
-              ? (s.lowStockItems || []).map((item) => [
-                  item.name || '未命名',
-                  `${item.stock || 0} ${item.unit || ''}`,
-                  `${item.safety_stock ?? item.safetyStock ?? 0} ${item.unit || ''}`,
-                  item.updated_at || item.updatedAt || '-'
-                ])
-              : [['目前尚無低庫存資料', '-', '-', '-']]}
+            cols={['項目', '金額', '狀態']}
+            rows={[
+              ['本期銷貨', money(s.monthlySales || 0), `${s.txCount || 0} 筆交易`],
+              ['應收未收', money(s.unpaidSales || 0), (s.unpaidSales || 0) > 0 ? '需追蹤收款' : '目前穩定'],
+              ['應付未付', money(s.unpaidPurchases || 0), (s.unpaidPurchases || 0) > 0 ? '需安排付款' : '目前穩定'],
+              ['待處理發票', s.invoicesPending || 0, '發票中心']
+            ]}
           />
         </div>
 
-        <div className="panel bi-panel">
-          <h2>平台費率比較</h2>
-          <p className="panel-subtitle">比較各平台營收、手續費與費率，協助判斷平台成本。</p>
-          <Table
-            cols={['平台', '平台營收', '平台費用', '費率']}
-            rows={(s.platformFeeComparison || []).length
-              ? (s.platformFeeComparison || []).map((row) => [
-                  getPlatformName(row.name),
-                  money(row.revenue || 0),
-                  money(row.fee || 0),
-                  `${Number(row.fee_rate ?? row.feeRate ?? 0)}%`
-                ])
-              : [['目前尚無平台費率資料', money(0), money(0), '0%']]}
-          />
+        <div className="panel">
+          <h2>待處理事項</h2>
+          <ul className="summary">
+            {(s.unpaidSales || 0) > 0 && <li>追蹤應收未收 {money(s.unpaidSales || 0)}。</li>}
+            {(s.unpaidPurchases || 0) > 0 && <li>安排應付未付 {money(s.unpaidPurchases || 0)}。</li>}
+            {(s.lowStock || 0) > 0 && <li>有 {s.lowStock} 個品項低於安全庫存。</li>}
+            {(s.grossMarginRate || 0) > 0 && (s.grossMarginRate || 0) < 25 && <li>毛利率偏低，建議前往 BI 分析檢查商品成本。</li>}
+            {!(s.unpaidSales || 0) && !(s.unpaidPurchases || 0) && !(s.lowStock || 0) && <li>目前沒有高優先待處理事項。</li>}
+          </ul>
+          <button type="button" className="secondary-btn" onClick={() => onNavigate?.('reports')}>查看完整報表</button>
         </div>
       </div>
     </section>

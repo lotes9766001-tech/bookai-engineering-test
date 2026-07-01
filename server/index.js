@@ -6481,14 +6481,32 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
       const sale = created.rows[0];
 
       for (const item of items) {
+        let product = null;
+        let unitCostSnapshot = 0;
+        if (item.productId) {
+          product = (await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.productId, req.company.id])).rows[0];
+          unitCostSnapshot = erpNumber(product?.cost, 0);
+        }
+        const costSubtotal = Math.round(item.quantity * unitCostSnapshot * 100) / 100;
         await client.query(`
           INSERT INTO sale_items (
-            company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, note
+            company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, unit_cost_snapshot, cost_subtotal, note
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        `, [req.company.id, sale.id, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note]);
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        `, [
+          req.company.id,
+          sale.id,
+          item.productId,
+          item.itemName,
+          item.quantity,
+          item.unit,
+          item.price,
+          item.subtotal,
+          unitCostSnapshot,
+          costSubtotal,
+          item.note
+        ]);
         if (item.productId) {
-          const product = (await client.query('SELECT * FROM products WHERE id = $1 AND company_id = $2 FOR UPDATE', [item.productId, req.company.id])).rows[0];
           const beforeStock = erpNumber(product.stock, 0);
           const nextStock = Math.round((erpNumber(product.stock, 0) - item.quantity) * 100) / 100;
           await client.query('UPDATE products SET stock = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND company_id = $3', [nextStock, item.productId, req.company.id]);
@@ -6563,9 +6581,9 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
 
       const itemStmt = db.prepare(`
         INSERT INTO sale_items (
-          company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, note
+          company_id, sale_id, product_id, item_name, quantity, unit, unit_price, subtotal, unit_cost_snapshot, cost_subtotal, note
         )
-        VALUES (?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
       `);
 
       const movementStmt = db.prepare(`
@@ -6576,9 +6594,23 @@ app.post('/api/sales/create', auth, company, requireRole('owner', 'admin', 'acco
       `);
 
       items.forEach((item) => {
-        itemStmt.run(req.company.id, sale.lastInsertRowid, item.productId, item.itemName, item.quantity, item.unit, item.price, item.subtotal, item.note);
+        const product = item.productId ? getProductForUpdate(req.company.id, item.productId) : null;
+        const unitCostSnapshot = erpNumber(product?.cost, 0);
+        const costSubtotal = Math.round(item.quantity * unitCostSnapshot * 100) / 100;
+        itemStmt.run(
+          req.company.id,
+          sale.lastInsertRowid,
+          item.productId,
+          item.itemName,
+          item.quantity,
+          item.unit,
+          item.price,
+          item.subtotal,
+          unitCostSnapshot,
+          costSubtotal,
+          item.note
+        );
         if (item.productId) {
-          const product = getProductForUpdate(req.company.id, item.productId);
           const beforeStock = erpNumber(product.stock, 0);
           const afterStock = Math.round((beforeStock - item.quantity) * 100) / 100;
           db.prepare('UPDATE products SET stock = ? WHERE id = ? AND company_id = ?').run(afterStock, item.productId, req.company.id);
@@ -7235,6 +7267,365 @@ app.get('/api/companies/:companyId/summary', auth, company, async (req, res) => 
     paidPurchases
   });
 });
+
+function dateText(value) {
+  return String(value || '').slice(0, 10);
+}
+
+function addDaysText(value, days) {
+  const date = new Date(`${dateText(value)}T00:00:00`);
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function daysBetweenInclusive(startDate, endDate) {
+  const start = new Date(`${dateText(startDate)}T00:00:00`);
+  const end = new Date(`${dateText(endDate)}T00:00:00`);
+  const diff = Math.round((end - start) / 86400000);
+  return Math.max(diff + 1, 1);
+}
+
+function monthKey(value) {
+  return dateText(value).slice(0, 7);
+}
+
+function classifySalesPlatform(note = '') {
+  const text = String(note || '').toLowerCase();
+  if (text.includes('官網')) return '官網';
+  if (text.includes('蝦皮')) return '蝦皮';
+  if (text.includes('momo')) return 'momo';
+  if (text.includes('line')) return 'LINE';
+  return '其他';
+}
+
+function changeRate(current, previous) {
+  const next = erpNumber(current, 0);
+  const prev = erpNumber(previous, 0);
+  if (!prev) return null;
+  return Math.round(((next - prev) / prev) * 1000) / 10;
+}
+
+function formatBiKpis(raw = {}) {
+  const salesTotal = erpNumber(raw.salesTotal, 0);
+  const purchaseTotal = erpNumber(raw.purchaseTotal, 0);
+  const productCost = erpNumber(raw.productCost, 0);
+  const grossProfit = salesTotal - productCost;
+  const transactionCount = erpNumber(raw.transactionCount, 0);
+  const receivedAmount = erpNumber(raw.receivedAmount, 0);
+  const paidAmount = erpNumber(raw.paidAmount, 0);
+  const inventoryCost = erpNumber(raw.inventoryCost, 0);
+
+  return {
+    salesTotal,
+    purchaseTotal,
+    productCost,
+    grossProfit,
+    grossMarginRate: salesTotal > 0 ? Math.round((grossProfit / salesTotal) * 1000) / 10 : 0,
+    transactionCount,
+    averageOrderValue: transactionCount > 0 ? Math.round((salesTotal / transactionCount) * 100) / 100 : 0,
+    receivedAmount,
+    paidAmount,
+    accountsReceivable: Math.max(Math.round((salesTotal - receivedAmount) * 100) / 100, 0),
+    accountsPayable: Math.max(Math.round((purchaseTotal - paidAmount) * 100) / 100, 0),
+    lowStockCount: erpNumber(raw.lowStockCount, 0),
+    inventoryCost
+  };
+}
+
+function buildBiComparison(current, previous) {
+  return {
+    salesTotalChangeRate: changeRate(current.salesTotal, previous.salesTotal),
+    purchaseTotalChangeRate: changeRate(current.purchaseTotal, previous.purchaseTotal),
+    grossProfitChangeRate: changeRate(current.grossProfit, previous.grossProfit),
+    grossMarginRateChange: Math.round((erpNumber(current.grossMarginRate, 0) - erpNumber(previous.grossMarginRate, 0)) * 10) / 10,
+    transactionCountChangeRate: changeRate(current.transactionCount, previous.transactionCount),
+    averageOrderValueChangeRate: changeRate(current.averageOrderValue, previous.averageOrderValue)
+  };
+}
+
+async function getBusinessBiPg(companyId, startDate, endDate) {
+  const params = [companyId, startDate, endDate];
+  const salesWhere = "company_id = $1 AND sale_date >= $2 AND sale_date <= $3 AND COALESCE(status, 'confirmed') != 'void'";
+  const purchaseWhere = "company_id = $1 AND purchase_date >= $2 AND purchase_date <= $3 AND COALESCE(status, 'confirmed') != 'void'";
+
+  const [sales, purchases, costs, inventory, topProducts, salesRows] = await Promise.all([
+    pgOne(`SELECT COALESCE(SUM(total),0) AS "salesTotal", COALESCE(SUM(received_amount),0) AS "receivedAmount", COUNT(*)::int AS "transactionCount" FROM sales WHERE ${salesWhere}`, params),
+    pgOne(`SELECT COALESCE(SUM(total),0) AS "purchaseTotal", COALESCE(SUM(paid_amount),0) AS "paidAmount" FROM purchases WHERE ${purchaseWhere}`, params),
+    pgOne(`
+      SELECT COALESCE(SUM(
+        CASE
+          WHEN COALESCE(si.cost_subtotal,0) > 0 THEN COALESCE(si.cost_subtotal,0)
+          WHEN COALESCE(si.unit_cost_snapshot,0) > 0 THEN COALESCE(si.quantity,0) * COALESCE(si.unit_cost_snapshot,0)
+          ELSE COALESCE(si.quantity,0) * COALESCE(p.cost,0)
+        END
+      ),0) AS "productCost"
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id AND s.company_id = si.company_id
+      LEFT JOIN products p ON p.id = si.product_id AND p.company_id = si.company_id
+      WHERE s.${salesWhere.replaceAll('$1', '$1').replace('company_id', 'company_id')}
+    `, params),
+    pgOne(`
+      SELECT
+        COUNT(*) FILTER (WHERE COALESCE(stock,0) <= COALESCE(safety_stock,0))::int AS "lowStockCount",
+        COALESCE(SUM(COALESCE(stock,0) * COALESCE(cost,0)),0) AS "inventoryCost"
+      FROM products
+      WHERE company_id = $1
+    `, [companyId]),
+    pgAll(`
+      SELECT
+        COALESCE(si.item_name, p.name, '未命名商品') AS name,
+        COALESCE(SUM(si.quantity),0) AS quantity,
+        COALESCE(SUM(si.subtotal),0) AS amount,
+        COALESCE(SUM(
+          CASE
+            WHEN COALESCE(si.cost_subtotal,0) > 0 THEN COALESCE(si.cost_subtotal,0)
+            WHEN COALESCE(si.unit_cost_snapshot,0) > 0 THEN COALESCE(si.quantity,0) * COALESCE(si.unit_cost_snapshot,0)
+            ELSE COALESCE(si.quantity,0) * COALESCE(p.cost,0)
+          END
+        ),0) AS cost
+      FROM sale_items si
+      JOIN sales s ON s.id = si.sale_id AND s.company_id = si.company_id
+      LEFT JOIN products p ON p.id = si.product_id AND p.company_id = si.company_id
+      WHERE s.company_id = $1 AND s.sale_date >= $2 AND s.sale_date <= $3 AND COALESCE(s.status, 'confirmed') != 'void'
+      GROUP BY COALESCE(si.item_name, p.name, '未命名商品')
+      ORDER BY amount DESC
+      LIMIT 5
+    `, params),
+    pgAll(`
+      SELECT
+        s.id,
+        s.sale_date AS date,
+        s.total,
+        s.received_amount AS "receivedAmount",
+        s.note,
+        COALESCE(SUM(
+          CASE
+            WHEN COALESCE(si.cost_subtotal,0) > 0 THEN COALESCE(si.cost_subtotal,0)
+            WHEN COALESCE(si.unit_cost_snapshot,0) > 0 THEN COALESCE(si.quantity,0) * COALESCE(si.unit_cost_snapshot,0)
+            ELSE COALESCE(si.quantity,0) * COALESCE(p.cost,0)
+          END
+        ),0) AS "productCost"
+      FROM sales s
+      LEFT JOIN sale_items si ON si.sale_id = s.id AND si.company_id = s.company_id
+      LEFT JOIN products p ON p.id = si.product_id AND p.company_id = si.company_id
+      WHERE s.company_id = $1 AND s.sale_date >= $2 AND s.sale_date <= $3 AND COALESCE(s.status, 'confirmed') != 'void'
+      GROUP BY s.id, s.sale_date, s.total, s.received_amount, s.note
+      ORDER BY s.sale_date ASC, s.id ASC
+    `, params)
+  ]);
+
+  return { sales, purchases, costs, inventory, topProducts, salesRows };
+}
+
+function getBusinessBiSqlite(companyId, startDate, endDate) {
+  const params = [companyId, startDate, endDate];
+  const sales = db.prepare(`
+    SELECT COALESCE(SUM(total),0) AS salesTotal, COALESCE(SUM(received_amount),0) AS receivedAmount, COUNT(*) AS transactionCount
+    FROM sales
+    WHERE company_id = ? AND date(sale_date) >= date(?) AND date(sale_date) <= date(?) AND COALESCE(status, 'confirmed') != 'void'
+  `).get(...params);
+  const purchases = db.prepare(`
+    SELECT COALESCE(SUM(total),0) AS purchaseTotal, COALESCE(SUM(paid_amount),0) AS paidAmount
+    FROM purchases
+    WHERE company_id = ? AND date(purchase_date) >= date(?) AND date(purchase_date) <= date(?) AND COALESCE(status, 'confirmed') != 'void'
+  `).get(...params);
+  const costs = db.prepare(`
+    SELECT COALESCE(SUM(
+      CASE
+        WHEN COALESCE(si.cost_subtotal,0) > 0 THEN COALESCE(si.cost_subtotal,0)
+        WHEN COALESCE(si.unit_cost_snapshot,0) > 0 THEN COALESCE(si.quantity,0) * COALESCE(si.unit_cost_snapshot,0)
+        ELSE COALESCE(si.quantity,0) * COALESCE(p.cost,0)
+      END
+    ),0) AS productCost
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id AND s.company_id = si.company_id
+    LEFT JOIN products p ON p.id = si.product_id AND p.company_id = si.company_id
+    WHERE s.company_id = ? AND date(s.sale_date) >= date(?) AND date(s.sale_date) <= date(?) AND COALESCE(s.status, 'confirmed') != 'void'
+  `).get(...params);
+  const inventory = db.prepare(`
+    SELECT
+      SUM(CASE WHEN COALESCE(stock,0) <= COALESCE(safety_stock,0) THEN 1 ELSE 0 END) AS lowStockCount,
+      COALESCE(SUM(COALESCE(stock,0) * COALESCE(cost,0)),0) AS inventoryCost
+    FROM products
+    WHERE company_id = ?
+  `).get(companyId);
+  const topProducts = db.prepare(`
+    SELECT
+      COALESCE(si.item_name, p.name, '未命名商品') AS name,
+      COALESCE(SUM(si.quantity),0) AS quantity,
+      COALESCE(SUM(si.subtotal),0) AS amount,
+      COALESCE(SUM(
+        CASE
+          WHEN COALESCE(si.cost_subtotal,0) > 0 THEN COALESCE(si.cost_subtotal,0)
+          WHEN COALESCE(si.unit_cost_snapshot,0) > 0 THEN COALESCE(si.quantity,0) * COALESCE(si.unit_cost_snapshot,0)
+          ELSE COALESCE(si.quantity,0) * COALESCE(p.cost,0)
+        END
+      ),0) AS cost
+    FROM sale_items si
+    JOIN sales s ON s.id = si.sale_id AND s.company_id = si.company_id
+    LEFT JOIN products p ON p.id = si.product_id AND p.company_id = si.company_id
+    WHERE s.company_id = ? AND date(s.sale_date) >= date(?) AND date(s.sale_date) <= date(?) AND COALESCE(s.status, 'confirmed') != 'void'
+    GROUP BY COALESCE(si.item_name, p.name, '未命名商品')
+    ORDER BY amount DESC
+    LIMIT 5
+  `).all(...params);
+  const salesRows = db.prepare(`
+    SELECT
+      s.id,
+      s.sale_date AS date,
+      s.total,
+      s.received_amount AS receivedAmount,
+      s.note,
+      COALESCE(SUM(
+        CASE
+          WHEN COALESCE(si.cost_subtotal,0) > 0 THEN COALESCE(si.cost_subtotal,0)
+          WHEN COALESCE(si.unit_cost_snapshot,0) > 0 THEN COALESCE(si.quantity,0) * COALESCE(si.unit_cost_snapshot,0)
+          ELSE COALESCE(si.quantity,0) * COALESCE(p.cost,0)
+        END
+      ),0) AS productCost
+    FROM sales s
+    LEFT JOIN sale_items si ON si.sale_id = s.id AND si.company_id = s.company_id
+    LEFT JOIN products p ON p.id = si.product_id AND p.company_id = si.company_id
+    WHERE s.company_id = ? AND date(s.sale_date) >= date(?) AND date(s.sale_date) <= date(?) AND COALESCE(s.status, 'confirmed') != 'void'
+    GROUP BY s.id, s.sale_date, s.total, s.received_amount, s.note
+    ORDER BY s.sale_date ASC, s.id ASC
+  `).all(...params);
+  return { sales, purchases, costs, inventory, topProducts, salesRows };
+}
+
+async function buildBusinessBi(companyId, startDate, endDate) {
+  const raw = PG_ENABLED
+    ? await getBusinessBiPg(companyId, startDate, endDate)
+    : getBusinessBiSqlite(companyId, startDate, endDate);
+
+  const kpis = formatBiKpis({
+    ...raw.sales,
+    ...raw.purchases,
+    ...raw.costs,
+    ...raw.inventory
+  });
+  const topProducts = (raw.topProducts || []).map((item) => ({
+    name: item.name,
+    quantity: erpNumber(item.quantity, 0),
+    amount: erpNumber(item.amount, 0),
+    cost: erpNumber(item.cost, 0),
+    grossProfit: erpNumber(item.amount, 0) - erpNumber(item.cost, 0)
+  }));
+
+  const salesRows = raw.salesRows || [];
+  const daily = new Map();
+  const byMonth = daysBetweenInclusive(startDate, endDate) > 92;
+  salesRows.forEach((row) => {
+    const key = byMonth ? monthKey(row.date) : dateText(row.date);
+    const current = daily.get(key) || { date: key, salesTotal: 0, productCost: 0, grossProfit: 0 };
+    current.salesTotal += erpNumber(row.total, 0);
+    current.productCost += erpNumber(row.productCost, 0);
+    daily.set(key, current);
+  });
+  topProducts.forEach(() => {});
+  const revenueTrend = [...daily.values()].map((item) => ({
+    date: item.date,
+    salesTotal: Math.round(item.salesTotal * 100) / 100
+  }));
+  const profitTrend = [...daily.values()].map((item) => {
+    const productCost = Math.round(item.productCost * 100) / 100;
+    return {
+      date: item.date,
+      salesTotal: Math.round(item.salesTotal * 100) / 100,
+      productCost,
+      grossProfit: Math.round((item.salesTotal - productCost) * 100) / 100
+    };
+  });
+
+  const platformTotals = new Map();
+  salesRows.forEach((row) => {
+    const platform = classifySalesPlatform(row.note);
+    const current = platformTotals.get(platform) || 0;
+    platformTotals.set(platform, current + erpNumber(row.total, 0));
+  });
+  const platformRevenue = [...platformTotals.entries()]
+    .map(([name, amount]) => ({
+      name,
+      amount: Math.round(amount * 100) / 100,
+      percentage: kpis.salesTotal > 0 ? Math.round((amount / kpis.salesTotal) * 1000) / 10 : 0
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  const inventoryRisk = PG_ENABLED
+    ? await pgAll(`
+        SELECT name, sku, unit, stock, safety_stock, cost, COALESCE(stock,0) * COALESCE(cost,0) AS "stockCost"
+        FROM products
+        WHERE company_id = $1 AND COALESCE(stock,0) <= COALESCE(safety_stock,0)
+        ORDER BY (COALESCE(stock,0) - COALESCE(safety_stock,0)) ASC, updated_at DESC NULLS LAST
+        LIMIT 5
+      `, [companyId])
+    : db.prepare(`
+        SELECT name, sku, unit, stock, safety_stock, cost, COALESCE(stock,0) * COALESCE(cost,0) AS stockCost
+        FROM products
+        WHERE company_id = ? AND COALESCE(stock,0) <= COALESCE(safety_stock,0)
+        ORDER BY (COALESCE(stock,0) - COALESCE(safety_stock,0)) ASC, updated_at DESC
+        LIMIT 5
+      `).all(companyId);
+
+  const summary = [
+    kpis.salesTotal > 0 ? `本期銷貨總額為 NT$${Math.round(kpis.salesTotal).toLocaleString('zh-TW')}。` : '目前此區間尚無銷貨資料。',
+    kpis.productCost > 0 ? `商品成本已納入毛利計算，毛利率為 ${kpis.grossMarginRate}%。` : '商品成本目前為 0，請確認商品成本欄位是否完整。',
+    kpis.transactionCount > 0 ? `本期共有 ${kpis.transactionCount} 筆銷貨單，平均客單價 NT$${Math.round(kpis.averageOrderValue).toLocaleString('zh-TW')}。` : '目前此區間交易筆數為 0。',
+    kpis.lowStockCount > 0 ? `有 ${kpis.lowStockCount} 個品項低於安全庫存。` : '目前沒有低庫存警示。'
+  ];
+
+  return {
+    kpis,
+    revenueTrend,
+    profitTrend,
+    topProducts,
+    platformRevenue,
+    inventoryRisk: inventoryRisk.map((item) => ({
+      name: item.name,
+      sku: item.sku || '',
+      unit: item.unit || '',
+      stock: erpNumber(item.stock, 0),
+      safetyStock: erpNumber(item.safety_stock ?? item.safetyStock, 0),
+      cost: erpNumber(item.cost, 0),
+      stockCost: erpNumber(item.stockCost ?? item.stock_cost, 0)
+    })),
+    summary
+  };
+}
+
+async function handleBusinessBiReport(req, res) {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const startDate = dateText(req.query.startDate) || today.slice(0, 8) + '01';
+    const endDate = dateText(req.query.endDate) || today;
+    const periodDays = daysBetweenInclusive(startDate, endDate);
+    const compareEndDate = dateText(req.query.compareEndDate) || addDaysText(startDate, -1);
+    const compareStartDate = dateText(req.query.compareStartDate) || addDaysText(compareEndDate, -periodDays + 1);
+
+    const [current, previous] = await Promise.all([
+      buildBusinessBi(req.company.id, startDate, endDate),
+      buildBusinessBi(req.company.id, compareStartDate, compareEndDate)
+    ]);
+
+    res.json({
+      range: { companyId: req.company.id, startDate, endDate, compareStartDate, compareEndDate },
+      kpis: current.kpis,
+      previousKpis: previous.kpis,
+      comparison: buildBiComparison(current.kpis, previous.kpis),
+      revenueTrend: current.revenueTrend,
+      profitTrend: current.profitTrend,
+      topProducts: current.topProducts,
+      platformRevenue: current.platformRevenue,
+      inventoryRisk: current.inventoryRisk,
+      summary: current.summary
+    });
+  } catch (err) {
+    return databaseError(res, req.path, req, err);
+  }
+}
+
+app.get('/api/companies/:companyId/reports/business-bi', auth, company, handleBusinessBiReport);
+app.get('/api/reports/business-bi', auth, company, handleBusinessBiReport);
 
 app.get('/api/tenders/stats', auth, async (req, res) => {
   try {

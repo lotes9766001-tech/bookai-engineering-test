@@ -873,6 +873,8 @@ export function initDb() {
     unit TEXT,
     unit_price REAL DEFAULT 0,
     subtotal REAL DEFAULT 0,
+    unit_cost_snapshot REAL DEFAULT 0,
+    cost_subtotal REAL DEFAULT 0,
     note TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(company_id) REFERENCES companies(id),
@@ -1072,6 +1074,8 @@ export function initDb() {
   safeAddColumn('purchases', 'updated_at', 'TEXT');
   safeAddColumn('sales', 'status', "TEXT DEFAULT 'confirmed'");
   safeAddColumn('sales', 'updated_at', 'TEXT');
+  safeAddColumn('sale_items', 'unit_cost_snapshot', 'REAL DEFAULT 0');
+  safeAddColumn('sale_items', 'cost_subtotal', 'REAL DEFAULT 0');
   safeAddColumn('suppliers', 'updated_at', 'TEXT');
   safeAddColumn('customers', 'updated_at', 'TEXT');
   safeAddColumn('platform_accounts', 'updated_at', 'TEXT');

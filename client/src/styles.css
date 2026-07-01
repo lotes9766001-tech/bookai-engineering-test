@@ -3364,6 +3364,198 @@ tr:hover td {
   border-radius: 8px;
 }
 
+/* Business BI v1 */
+.command-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.overview-grid,
+.bi-chart-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.business-bi-page {
+  display: grid;
+  gap: 18px;
+}
+
+.bi-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.bi-filter-bar button {
+  min-height: 42px;
+  border: 1px solid #dbe2ea;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #1e3a8a;
+  box-shadow: none;
+}
+
+.bi-filter-bar button.active {
+  border-color: #1e3a8a;
+  background: #1e3a8a;
+  color: #fff;
+}
+
+.bi-filter-bar label {
+  display: grid;
+  min-width: 160px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.bi-filter-bar input {
+  margin: 4px 0 0;
+  border-radius: 8px;
+}
+
+.bi-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.bi-metric-card {
+  min-height: 142px;
+  padding: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 10px 30px #0f172a0b;
+}
+
+.bi-metric-card span,
+.bi-metric-card small {
+  display: block;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.bi-metric-card strong {
+  display: block;
+  margin: 10px 0 8px;
+  color: #0f172a;
+  font-size: 25px;
+}
+
+.bi-metric-card em {
+  display: inline-block;
+  margin-top: 8px;
+  color: #15803d;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.bi-metric-card em.down {
+  color: #b91c1c;
+}
+
+.bi-metric-card em.neutral {
+  color: #64748b;
+}
+
+.bi-chart-card {
+  min-height: 380px;
+  border-radius: 8px;
+}
+
+.bi-chart-empty {
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  color: #64748b;
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  text-align: center;
+}
+
+.bi-platform-list {
+  display: grid;
+  gap: 14px;
+}
+
+.bi-platform-list div {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 12px;
+  align-items: center;
+  padding-bottom: 12px;
+}
+
+.bi-platform-list i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 6px;
+  border-radius: 999px;
+  background: #2563eb;
+}
+
+.bi-stock-summary,
+.bi-cashflow-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.bi-cashflow-grid div {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.bi-cashflow-grid span,
+.bi-cashflow-grid strong {
+  display: block;
+}
+
+.bi-cashflow-grid span {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.bi-cashflow-grid strong {
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 20px;
+}
+
+@media (max-width: 1100px) {
+  .command-metrics,
+  .bi-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-grid,
+  .bi-chart-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .command-metrics,
+  .bi-metric-grid,
+  .bi-stock-summary,
+  .bi-cashflow-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Keep first-use onboarding stable after legacy tester-guide overrides. */
 .tester-guide-card.onboarding-card {
   grid-template-columns: minmax(0, 1fr);
