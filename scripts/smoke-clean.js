@@ -1,11 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, '..');
+const requireFromServer = createRequire(path.join(rootDir, 'server', 'package.json'));
+const Database = requireFromServer('better-sqlite3');
 
 const dbPath = process.env.DB_PATH || path.join(rootDir, 'server', 'bookai.sqlite');
 

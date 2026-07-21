@@ -27,8 +27,10 @@ async function publicRequest(path, options = {}) {
   }
 
   if (!response.ok) {
-    const error = new Error(body?.error || '網站資料載入失敗。');
+    const error = new Error(body?.error?.message || body?.error || '網站資料載入失敗。');
     error.status = response.status;
+    error.code = body?.error?.code || body?.code || '';
+    error.requestId = body?.error?.requestId || '';
     throw error;
   }
 

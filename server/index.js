@@ -2,6 +2,7 @@ import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import net from 'net';
 import tls from 'tls';
 import { fileURLToPath } from 'url';
@@ -11,12 +12,20 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { db, initDb, audit as sqliteAudit, DB_PATH, DB_PROVIDER, DATABASE_URL } from './db.js';
-import { PG_ENABLED, initPostgresDb, getPool, pgAll, pgOne, pgQuery } from './pg-db.js';
+import { PG_ENABLED, initPostgresDb, getPool, closePostgresPool, pgAll, pgOne, pgQuery } from './pg-db.js';
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { AI_USE_CASES, generateAiDraft } from './ai-provider.js';
 import { buildJobSitePatch } from './services/job-sites.js';
 import { buildPatchSet } from './utils/patch.js';
+import { ENVIRONMENT_STATUS, NODE_ENV, getEnvironmentStatus, logEnvironmentStatus } from './env.js';
+import {
+  createBackgroundScheduler,
+  createShutdownCoordinator,
+  createTimerRegistry,
+  installProcessHandlers,
+  parseTenderSyncConfig
+} from './runtime-lifecycle.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,33 +39,19 @@ fs.mkdirSync(WEBSITE_ASSET_UPLOAD_DIR, { recursive: true });
 
 const app = express();
 
-
-// Lightweight health check for Render.
-// Do not check database here. This only proves the Express server is alive.
-app.get('/api/ping', (req, res) => {
-  res.status(200).json({
-    ok: true,
-    status: 'alive',
-    name: 'BookAI Commerce ERPHub',
-    environment: process.env.NODE_ENV || 'development',
-    timestamp: new Date().toISOString()
-  });
-});
-
-const PORT = process.env.PORT || 5050;
+const PORT = Number(process.env.PORT) || 5050;
 const HOST = '0.0.0.0';
-const NODE_ENV = process.env.NODE_ENV || 'development';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
 const DEFAULT_ADMIN_EMAIL = 'lotes.9766001@gmail.com';
-const ADMIN_EMAIL_CONFIG = process.env.ADMIN_EMAIL || DEFAULT_ADMIN_EMAIL;
+const ADMIN_EMAIL_CONFIG = process.env.ADMIN_EMAIL || (NODE_ENV === 'production' ? '' : DEFAULT_ADMIN_EMAIL);
 const ADMIN_EMAILS = new Set(
   ADMIN_EMAIL_CONFIG
     .split(',')
     .map((email) => email.trim().toLowerCase())
     .filter(Boolean)
 );
-const ADMIN_EMAIL = [...ADMIN_EMAILS][0] || DEFAULT_ADMIN_EMAIL;
-const FOUNDER_EMAIL = normalizeFounderEmail(process.env.FOUNDER_EMAIL || DEFAULT_ADMIN_EMAIL);
+const ADMIN_EMAIL = [...ADMIN_EMAILS][0] || '';
+const FOUNDER_EMAIL = normalizeFounderEmail(process.env.FOUNDER_EMAIL || (NODE_ENV === 'production' ? '' : DEFAULT_ADMIN_EMAIL));
 const FOUNDER_TEST_EDITIONS = new Set(['commerce', 'engineering', 'all']);
 const DEFAULT_FOUNDER_TEST_EDITION = 'commerce';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' ? '' : 'demo123456');
@@ -66,6 +61,11 @@ const ADMIN_COMPANY = 'BookAI 系統管理中心';
 let postgresReady = false;
 let postgresError = null;
 let postgresCheckedAt = null;
+const runtimeTimers = createTimerRegistry();
+let tenderScheduler = null;
+let tenderSyncEnabled = false;
+let lifecycle = null;
+let httpServer = null;
 
 function normalizeFounderEmail(email) {
   return String(email || '').trim().toLowerCase();
@@ -97,36 +97,7 @@ const FEATURE_CATALOG = [
 
 const FEATURE_KEYS = new Set(FEATURE_CATALOG.map((item) => item.key));
 
-function assertProductionSecrets() {
-  if (NODE_ENV !== 'production') return;
-
-  const errors = [];
-  if (!process.env.JWT_SECRET || JWT_SECRET === 'dev-secret-change-me') {
-    errors.push('production 環境必須設定高強度 JWT_SECRET');
-  }
-  if (!BOOTSTRAP_SECRET) {
-    errors.push('production 環境必須設定 BOOTSTRAP_SECRET');
-  }
-  if (BOOTSTRAP_SECRET === 'test-secret') {
-    errors.push('production 環境不可使用 test-secret 作為 BOOTSTRAP_SECRET');
-  }
-  if (!process.env.ADMIN_PASSWORD) {
-    errors.push('production 環境必須設定 ADMIN_PASSWORD');
-  }
-  if (ADMIN_PASSWORD === 'demo123456') {
-    errors.push('production 環境不可使用 demo123456 作為 ADMIN_PASSWORD');
-  }
-  if (!process.env.FOUNDER_EMAIL) {
-    console.warn('WARNING: production 環境建議設定 FOUNDER_EMAIL');
-  }
-
-  if (errors.length) {
-    console.error(`安全設定錯誤：${errors.join('；')}`);
-    console.warn('Production secret warnings are non-fatal for public preview deployment.');
-  }
-}
-
-assertProductionSecrets();
+logEnvironmentStatus();
 
 function recordPostgresError(error) {
   postgresReady = false;
@@ -139,6 +110,14 @@ function recordPostgresError(error) {
 
 async function checkPostgresStartup() {
   if (!PG_ENABLED) return;
+  const envStatus = getEnvironmentStatus();
+  if (!envStatus.runtimeReady) {
+    postgresReady = false;
+    postgresError = { code: 'CONFIGURATION_ERROR', message: 'Runtime configuration is incomplete' };
+    postgresCheckedAt = new Date().toISOString();
+    console.error('[postgres] initialization skipped: runtime configuration incomplete');
+    return;
+  }
 
   postgresCheckedAt = new Date().toISOString();
   console.log('POSTGRES_STARTUP: initializing');
@@ -166,6 +145,13 @@ app.disable('x-powered-by');
 app.set('trust proxy', 1);
 
 app.use((req, res, next) => {
+  const incomingId = String(req.headers['x-request-id'] || '');
+  req.requestId = /^[a-zA-Z0-9._-]{8,128}$/.test(incomingId) ? incomingId : crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.requestId);
+  next();
+});
+
+app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'same-origin');
@@ -175,15 +161,20 @@ app.use((req, res, next) => {
 
 const corsOrigins = String(process.env.CORS_ORIGIN || '')
   .split(',')
-  .map((origin) => origin.trim())
+  .map((origin) => origin.trim().replace(/\/$/, ''))
   .filter(Boolean);
 
-app.use(cors(corsOrigins.length ? {
-  origin(origin, callback) {
-    if (!origin || corsOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('不允許的跨網域請求'));
+const strictCors = NODE_ENV === 'production' || !ENVIRONMENT_STATUS.environmentValid;
+
+app.use(cors((req, callback) => {
+  const origin = String(req.headers.origin || '').replace(/\/$/, '');
+  const requestOrigin = `${req.protocol}://${req.get('host')}`.replace(/\/$/, '');
+  if (!origin || origin === requestOrigin || corsOrigins.includes(origin)) {
+    return callback(null, { origin: true });
   }
-} : undefined));
+  if (!strictCors && corsOrigins.length === 0) return callback(null, { origin: true });
+  return callback(new Error('不允許的跨網域請求'));
+}));
 
 app.use(express.json({ limit: '1mb' }));
 app.use('/uploads', express.static(UPLOADS_ROOT, {
@@ -201,6 +192,30 @@ app.use((err, req, res, next) => {
   }
 
   next(err);
+});
+
+// Liveness only: deliberately independent from database and authentication.
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'bookai-api',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime())
+  });
+});
+
+app.use('/api', (req, res, next) => {
+  if (req.path === '/health') return next();
+  const envStatus = getEnvironmentStatus();
+  if (envStatus.runtimeReady) return next();
+  return res.status(503).json({
+    ok: false,
+    error: {
+      code: 'CONFIGURATION_ERROR',
+      message: '服務設定尚未完成',
+      requestId: req.requestId
+    }
+  });
 });
 
 function websiteAssetUploadError(message, status = 400) {
@@ -583,7 +598,7 @@ function normalizeEmail(email) {
 }
 
 function isFounderEmail(email) {
-  return normalizeEmail(email) === FOUNDER_EMAIL;
+  return Boolean(FOUNDER_EMAIL) && normalizeEmail(email) === FOUNDER_EMAIL;
 }
 
 function normalizeFounderTestEdition(value) {
@@ -619,10 +634,22 @@ function isApprovedStatus(value) {
   return ['approved', 'founder', 'admin', 'demo'].includes(String(value || ''));
 }
 
+function approvalDenied(req, res, code, message) {
+  return res.status(403).json({
+    ok: false,
+    error: {
+      code,
+      message,
+      requestId: req.requestId
+    },
+    // Preserve the legacy top-level code while clients migrate to the structured error.
+    code
+  });
+}
+
 function bootstrapSecretFromRequest(req) {
   return String(
     req.headers['x-bootstrap-secret'] ||
-    req.query?.secret ||
     req.body?.secret ||
     ''
   );
@@ -651,16 +678,22 @@ async function getAuthUserFromRequest(req) {
 }
 
 async function hasFounderDebugAccess(req) {
-  const secret = bootstrapSecretFromRequest(req);
-  if (BOOTSTRAP_SECRET && secret && secret === BOOTSTRAP_SECRET) {
-    return true;
-  }
-
   const user = await getAuthUserFromRequest(req);
   return Boolean(user && isFounderEmail(user.email));
 }
 
+function privilegedIdentityUnavailable(res, identity) {
+  const status = getEnvironmentStatus();
+  const ready = identity === 'founder'
+    ? status.privilegedIdentity.founderReady
+    : status.privilegedIdentity.adminReady;
+  if (ready) return false;
+  jsonError(res, 503, '高權限身分尚未設定');
+  return true;
+}
+
 async function requireAdmin(req, res, next) {
+  if (privilegedIdentityUnavailable(res, 'admin')) return;
   const user = PG_ENABLED
     ? await pgOne(`SELECT email FROM users WHERE id = $1`, [req.user?.id])
     : db.prepare(`
@@ -677,6 +710,7 @@ async function requireAdmin(req, res, next) {
 }
 
 async function requireFounder(req, res, next) {
+  if (privilegedIdentityUnavailable(res, 'founder')) return;
   const user = PG_ENABLED
     ? await pgOne(`SELECT email FROM users WHERE id = $1`, [req.user?.id])
     : db.prepare(`
@@ -721,20 +755,23 @@ async function requireApproved(req, res, next) {
   const userStatus = user.approval_status || user.status || user.review_status || 'pending_review';
   const companyStatus = req.company?.approval_status || req.company?.review_status || '';
 
-  if (userStatus === 'rejected' || companyStatus === 'rejected') {
-    return res.status(403).json({ error: '帳號申請未通過，請聯繫 BookAI 官方客服', code: 'ACCOUNT_REJECTED' });
+  if (userStatus === 'rejected') {
+    return approvalDenied(req, res, 'ACCOUNT_REJECTED', '帳號申請未通過，請聯繫 BookAI 官方客服');
   }
 
-  if (userStatus === 'suspended' || companyStatus === 'suspended') {
-    return res.status(403).json({ error: '帳號已暫停使用，請聯繫 BookAI 官方客服', code: 'ACCOUNT_SUSPENDED' });
+  if (userStatus === 'suspended') {
+    return approvalDenied(req, res, 'ACCOUNT_SUSPENDED', '帳號已暫停使用，請聯繫 BookAI 官方客服');
   }
 
-  if (isApprovedStatus(userStatus) || companyStatus === 'approved') return next();
+  if (!isApprovedStatus(userStatus)) {
+    return approvalDenied(req, res, 'ACCOUNT_PENDING_REVIEW', '帳號審核中，請聯繫 BookAI 官方客服完成開通');
+  }
 
-  return res.status(403).json({
-    error: '帳號審核中，請聯繫 BookAI 官方客服完成開通',
-    code: 'ACCOUNT_PENDING_REVIEW'
-  });
+  if (companyStatus !== 'approved') {
+    return approvalDenied(req, res, 'COMPANY_NOT_ACTIVE', '公司尚未核准或目前無法使用');
+  }
+
+  return next();
 }
 
 async function company(req, res, next) {
@@ -1307,50 +1344,101 @@ async function ensureFounderBootstrapAccount() {
   };
 }
 
-app.get('/api/health', async (_, res) => {
+function withTimeout(promise, timeoutMs) {
+  let timeoutId;
+  const timeout = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      const error = new Error('Dependency check timed out');
+      error.code = 'HEALTH_CHECK_TIMEOUT';
+      reject(error);
+    }, timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+app.get('/api/health', async (req, res) => {
+  const envStatus = getEnvironmentStatus();
+  const provider = DB_PROVIDER;
+  const configChecks = {
+    runtimeEnv: envStatus.runtimeReady,
+    requiredEnv: envStatus.runtimeReady,
+    authentication: envStatus.authenticationReady,
+    environmentValid: envStatus.environmentValid,
+    productionEnvironment: envStatus.production,
+    privilegedIdentity: envStatus.privilegedIdentity.ready,
+    cors: envStatus.cors.ready
+  };
   const base = {
-    version: 'v5.4',
-    name: 'BookAI Commerce ERP Hub',
+    service: 'bookai-api',
     environment: NODE_ENV,
-    provider: PG_ENABLED ? 'postgresql' : 'sqlite',
-    storage: PG_ENABLED ? 'postgresql' : 'sqlite',
-    port: String(PORT),
-    databaseUrlDetected: Boolean(DATABASE_URL),
-    postgresReady,
-    postgresCheckedAt,
-    postgresErrorCode: postgresError?.code || '',
-    postgresErrorMessage: postgresError?.message || ''
+    environmentExplicit: envStatus.environmentExplicit,
+    provider,
+    postgresReady: false,
+    database: {
+      provider,
+      ready: false
+    },
+    checks: {
+      server: true,
+      database: false,
+      ...configChecks
+    },
+    capabilities: {
+      bootstrapAvailable: envStatus.bootstrap.available
+    },
+    timestamp: new Date().toISOString()
   };
 
-  try {
-    if (PG_ENABLED) {
-      if (!postgresReady) {
-        return res.status(NODE_ENV === 'production' ? 500 : 503).json({
-          ...base,
-          ok: false,
-          status: 'database_unhealthy'
-        });
-      }
-      await pgOne('SELECT 1 AS ok');
-    } else {
-      db.prepare('SELECT 1 AS ok').get();
-    }
-    res.json({
+  if (lifecycle?.isShuttingDown) {
+    return res.status(503).json({
       ...base,
-      ok: true,
-      status: 'healthy',
-      postgresReady: PG_ENABLED ? true : postgresReady
+      ok: false,
+      status: 'shutting_down',
+      checks: { ...base.checks, server: false },
+      errorCode: 'SERVER_SHUTTING_DOWN'
     });
-  } catch (err) {
-    if (PG_ENABLED) recordPostgresError(err);
-    res.status(500).json({
+  }
+
+  if (!envStatus.runtimeReady) {
+    return res.status(503).json({
       ...base,
       ok: false,
       status: 'unhealthy',
-      postgresReady,
-      postgresErrorCode: postgresError?.code || '',
-      postgresErrorMessage: postgresError?.message || '',
-      error: '資料庫健康檢查失敗'
+      errorCode: 'CONFIGURATION_ERROR'
+    });
+  }
+
+  try {
+    if (PG_ENABLED) {
+      await withTimeout(pgOne('SELECT 1 AS ok'), 5000);
+      if (!postgresReady) {
+        const error = new Error('PostgreSQL initialization is incomplete');
+        error.code = postgresError?.code || 'POSTGRES_INITIALIZATION_INCOMPLETE';
+        throw error;
+      }
+    } else {
+      db.prepare('SELECT 1 AS ok').get();
+    }
+    const degraded = !envStatus.privilegedIdentity.ready || !envStatus.cors.ready;
+    return res.status(200).json({
+      ...base,
+      ok: true,
+      status: degraded ? 'degraded' : 'healthy',
+      postgresReady: provider === 'postgresql',
+      database: { provider, ready: true },
+      checks: { server: true, database: true, ...configChecks },
+    });
+  } catch (err) {
+    if (PG_ENABLED) recordPostgresError(err);
+    console.error('[health] database check failed', {
+      requestId: req.requestId,
+      code: err?.code || 'DATABASE_UNAVAILABLE'
+    });
+    return res.status(503).json({
+      ...base,
+      ok: false,
+      status: 'unhealthy',
+      errorCode: 'DATABASE_UNAVAILABLE'
     });
   }
 });
@@ -1418,23 +1506,30 @@ app.post('/api/track/visit', rateLimit({ windowMs: 60 * 1000, max: 120 }), async
   }
 });
 
+function safeSecretEquals(received, expected) {
+  if (!received || !expected) return false;
+  const receivedDigest = crypto.createHash('sha256').update(String(received)).digest();
+  const expectedDigest = crypto.createHash('sha256').update(String(expected)).digest();
+  return crypto.timingSafeEqual(receivedDigest, expectedDigest);
+}
+
+function bootstrapRouteAvailable(identity) {
+  const status = getEnvironmentStatus();
+  const identityReady = identity === 'founder'
+    ? status.privilegedIdentity.founderReady
+    : status.privilegedIdentity.adminReady;
+  return status.bootstrap.ready && identityReady;
+}
+
+function bootstrapRouteUnavailable(res) {
+  return jsonError(res, 404, '找不到指定資源');
+}
+
 app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), async (req, res) => {
-  const { secret } = req.body || {};
-
-  if (!BOOTSTRAP_SECRET) {
-    return res.status(403).json({ error: 'Bootstrap 尚未啟用' });
-  }
-
-  if (NODE_ENV === 'production' && BOOTSTRAP_SECRET === 'test-secret') {
-    return res.status(403).json({ error: '正式環境不可使用測試 Bootstrap secret' });
-  }
-
-  if (NODE_ENV === 'production' && (!ADMIN_PASSWORD || ADMIN_PASSWORD === 'demo123456')) {
-    return res.status(403).json({ error: '正式環境尚未設定安全的 ADMIN_PASSWORD' });
-  }
-
-  if (!secret || secret !== BOOTSTRAP_SECRET) {
-    return res.status(403).json({ error: 'Bootstrap secret 不正確' });
+  if (!bootstrapRouteAvailable('admin')) return bootstrapRouteUnavailable(res);
+  const secret = bootstrapSecretFromRequest(req);
+  if (!safeSecretEquals(secret, BOOTSTRAP_SECRET)) {
+    return jsonError(res, 403, 'Bootstrap 授權失敗');
   }
 
   try {
@@ -1446,26 +1541,16 @@ app.post('/api/bootstrap/admin', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }
       message: 'Admin 已建立或重設'
     });
   } catch (err) {
-    res.status(500).json({
-      error: 'Admin 建立或重設失敗',
-      detail: err.message
-    });
+    console.error('[bootstrap admin] failed', { requestId: req.requestId, code: err?.code || 'BOOTSTRAP_FAILED' });
+    return jsonError(res, 500, 'Admin 建立或重設失敗');
   }
 });
 
 app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10 }), async (req, res) => {
+  if (!bootstrapRouteAvailable('founder')) return bootstrapRouteUnavailable(res);
   const secret = bootstrapSecretFromRequest(req);
-
-  if (!BOOTSTRAP_SECRET) {
-    return res.status(403).json({ error: 'Bootstrap 尚未啟用' });
-  }
-
-  if (!secret || secret !== BOOTSTRAP_SECRET) {
-    return res.status(403).json({ error: 'Bootstrap secret 不正確' });
-  }
-
-  if (NODE_ENV === 'production' && (!ADMIN_PASSWORD || ADMIN_PASSWORD === 'demo123456')) {
-    return res.status(403).json({ error: '正式環境尚未設定安全的 ADMIN_PASSWORD' });
+  if (!safeSecretEquals(secret, BOOTSTRAP_SECRET)) {
+    return jsonError(res, 403, 'Bootstrap 授權失敗');
   }
 
   try {
@@ -1478,15 +1563,15 @@ app.post('/api/bootstrap/founder', rateLimit({ windowMs: 15 * 60 * 1000, max: 10
       message: 'Founder 已建立或重設'
     });
   } catch (err) {
-    res.status(500).json({
-      error: 'Founder 建立或重設失敗'
-    });
+    console.error('[bootstrap founder] failed', { requestId: req.requestId, code: err?.code || 'BOOTSTRAP_FAILED' });
+    return jsonError(res, 500, 'Founder 建立或重設失敗');
   }
 });
 
 app.get('/api/debug/auth-shape', async (req, res) => {
+  if (NODE_ENV === 'production') return jsonError(res, 404, '找不到指定資源');
   if (!(await hasFounderDebugAccess(req))) {
-    return res.status(403).json({ error: '沒有 Founder Dashboard 權限' });
+    return jsonError(res, 403, '沒有 Founder Dashboard 權限');
   }
 
   res.json({
@@ -1496,8 +1581,7 @@ app.get('/api/debug/auth-shape', async (req, res) => {
     contentType: 'application/json',
     requiredFields: ['email', 'password'],
     acceptedTrackingFields: ['visitorId', 'page', 'referrer', 'utm_source', 'utm_medium', 'utm_campaign'],
-    founderEmailEnv: process.env.FOUNDER_EMAIL ? 'FOUNDER_EMAIL' : 'ADMIN_EMAIL fallback',
-    founderEmail: FOUNDER_EMAIL
+    founderIdentityConfigured: Boolean(FOUNDER_EMAIL)
   });
 });
 
@@ -2775,7 +2859,26 @@ function jsonOk(res, data = null, extra = {}) {
 }
 
 function jsonError(res, status, error) {
-  return res.status(status).json({ ok: false, error });
+  const codeByStatus = {
+    400: 'VALIDATION_ERROR',
+    401: 'UNAUTHORIZED',
+    403: 'FORBIDDEN',
+    404: 'NOT_FOUND',
+    409: 'CONFLICT',
+    429: 'RATE_LIMITED',
+    500: 'INTERNAL_SERVER_ERROR',
+    503: 'SERVICE_UNAVAILABLE'
+  };
+  const safeStatus = Number(status) || 500;
+  const message = safeStatus >= 500 ? '系統暫時無法處理此請求' : String(error || '請求無法處理');
+  return res.status(safeStatus).json({
+    ok: false,
+    error: {
+      code: codeByStatus[safeStatus] || 'REQUEST_ERROR',
+      message,
+      requestId: res.req?.requestId || ''
+    }
+  });
 }
 
 function cmsBool(value, fallback = 0) {
@@ -5537,6 +5640,12 @@ async function setTenderRadarSyncState(companyId, status, result = {}) {
 }
 
 async function runTenderSync({ source = 'all', triggeredBy = 'system' } = {}) {
+  if (!tenderSyncEnabled) {
+    return { ok: false, code: 'TENDER_SYNC_DISABLED', message: 'Tender sync is disabled' };
+  }
+  if (lifecycle?.isShuttingDown) {
+    return { ok: false, code: 'SERVER_SHUTTING_DOWN', message: 'Server is shutting down' };
+  }
   if (tenderSyncRunning) return { ok: false, code: 'TENDER_SYNC_RUNNING', message: '標案同步已在執行中' };
   tenderSyncRunning = true;
 
@@ -7753,6 +7862,9 @@ app.get('/api/companies/:companyId/tender-radar/status', auth, company, async (r
 });
 
 app.post('/api/companies/:companyId/tenders/refresh', auth, company, requireRole('owner', 'admin', 'staff'), async (req, res) => {
+  if (!tenderSyncEnabled) {
+    return res.status(503).json({ ok: false, code: 'TENDER_SYNC_DISABLED', error: '標案同步目前未啟用' });
+  }
   try {
     await setTenderRadarSyncState(req.company.id, 'syncing');
     const result = await runTenderSync({ source: req.body?.source || 'all', triggeredBy: req.user.email || req.user.id });
@@ -7997,6 +8109,9 @@ app.get('/api/tenders/:id', auth, async (req, res) => {
 });
 
 app.post('/api/admin/tenders/sync-now', auth, requireAdmin, async (req, res) => {
+  if (!tenderSyncEnabled) {
+    return res.status(503).json({ ok: false, code: 'TENDER_SYNC_DISABLED', error: '標案同步目前未啟用' });
+  }
   const result = await runTenderSync({ source: req.body?.source || 'all', triggeredBy: req.user.email || req.user.id });
   if (!result.ok && result.code === 'TENDER_SYNC_FAILED') {
     return res.status(503).json({ ok: false, error: '標案資料同步暫時失敗，系統已保留既有資料。', code: 'TENDER_SYNC_FAILED', detail: result.errorMessage || '' });
@@ -11616,10 +11731,45 @@ app.post('/api/companies/:companyId/ai/draft', auth, company, requireRole('owner
 // Production frontend static files
 // ==============================
 const clientDistPath = path.join(__dirname, "../client/dist");
+
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: {
+      code: 'NOT_FOUND',
+      message: '找不到指定資源',
+      requestId: req.requestId
+    }
+  });
+});
+
 app.use(express.static(clientDistPath));
 
 app.get(/^\/(?!api).*/, (req, res) => {
   res.sendFile(path.join(clientDistPath, "index.html"));
+});
+
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = Number(err?.status || err?.statusCode) || 500;
+  const safeStatus = status >= 400 && status < 600 ? status : 500;
+  const code = safeStatus >= 500 ? 'INTERNAL_SERVER_ERROR' : (err?.code || 'REQUEST_ERROR');
+  const message = safeStatus >= 500 ? '系統暫時無法處理此請求' : (err?.message || '請求無法處理');
+
+  console.error('[api error]', {
+    requestId: req.requestId,
+    method: req.method,
+    path: req.path,
+    status: safeStatus,
+    code,
+    message: safeStatus >= 500 ? 'Unhandled API error' : message
+  });
+
+  return res.status(safeStatus).json({
+    ok: false,
+    error: { code, message, requestId: req.requestId },
+    ...(NODE_ENV === 'development' && safeStatus >= 500 ? { debug: err?.message || 'Unknown error' } : {})
+  });
 });
 
 
@@ -11701,27 +11851,39 @@ if (DB_PROVIDER === 'sqlite') try {
 }
 
 
-app.listen(PORT, HOST, () => {
-  console.log(`BookAI API running on http://${HOST}:${PORT}`);
-  checkPostgresStartup();
-  setTimeout(() => {
-    shouldRunDailyTenderSync()
-      .then((shouldRun) => {
-        if (!shouldRun) return null;
-        return runTenderSync({ source: 'all', triggeredBy: 'startup_daily_check' });
-      })
-      .catch((err) => {
-        console.error('[tender sync startup] failed', { code: err.code || null, message: err.message || String(err) });
-      });
-  }, 30000);
-  setInterval(() => {
-    shouldRunDailyTenderSync()
-      .then((shouldRun) => {
-        if (!shouldRun) return null;
-        return runTenderSync({ source: 'all', triggeredBy: 'daily_schedule' });
-      })
-      .catch((err) => {
-        console.error('[tender sync schedule] failed', { code: err.code || null, message: err.message || String(err) });
-      });
-  }, Number(process.env.TENDER_SYNC_INTERVAL_MS || TENDER_DAILY_SYNC_MS));
+httpServer = app.listen(PORT, HOST, () => {
+  console.log('[server] started');
+  console.log(`[server] environment=${NODE_ENV}`);
+  console.log(`[server] port=${PORT}`);
+  console.log(`[server] databaseProvider=${DB_PROVIDER}`);
+  void checkPostgresStartup();
+  const tenderConfig = parseTenderSyncConfig(process.env, NODE_ENV);
+  tenderSyncEnabled = tenderConfig.enabled;
+  tenderScheduler = createBackgroundScheduler({
+    registry: runtimeTimers,
+    enabled: tenderConfig.enabled,
+    intervalMs: tenderConfig.intervalMs,
+    isShuttingDown: () => lifecycle?.isShuttingDown || false,
+    shouldRun: shouldRunDailyTenderSync,
+    runJob: (triggeredBy) => runTenderSync({ source: 'all', triggeredBy })
+  });
+  console.log(`[tender sync] enabled=${tenderConfig.enabled}`);
 });
+
+lifecycle = createShutdownCoordinator({
+  getServer: () => httpServer,
+  stopBackgroundWork: async () => {
+    tenderScheduler?.stop();
+  },
+  clearTimers: () => runtimeTimers.clearAll(),
+  waitForBackgroundWork: () => tenderScheduler?.waitForIdle(),
+  closePool: closePostgresPool
+});
+
+installProcessHandlers(lifecycle);
+
+if (NODE_ENV === 'test' && process.env.BOOKAI_LIFECYCLE_TEST_MODE === 'true' && typeof process.send === 'function') {
+  process.on('message', (message) => {
+    if (message?.type === 'BOOKAI_TEST_SHUTDOWN') void lifecycle.shutdown('test_ipc', 0);
+  });
+}

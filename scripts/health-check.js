@@ -1,11 +1,13 @@
 import fs from 'fs';
 import path from 'path';
+import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.join(__dirname, '..');
+const requireFromServer = createRequire(path.join(rootDir, 'server', 'package.json'));
+const Database = requireFromServer('better-sqlite3');
 
 const nodeEnv = process.env.NODE_ENV || 'development';
 const databaseUrl = process.env.DATABASE_URL || '';
@@ -54,8 +56,8 @@ if (
   fail('server/index.js 未明確使用 app.listen(PORT, 0.0.0.0)');
 }
 
-if (serverIndexSource.includes('postgresReady') && serverIndexSource.includes('postgresErrorCode') && serverIndexSource.includes('databaseUrlDetected')) {
-  ok('/api/health 包含 PostgreSQL 狀態欄位');
+if (serverIndexSource.includes("app.get('/api/health'") && serverIndexSource.includes('database: {') && serverIndexSource.includes('requiredEnv')) {
+  ok('/api/health 包含資料庫與必要環境狀態欄位');
 } else {
   hasError = true;
   fail('/api/health 缺少 PostgreSQL 診斷欄位');

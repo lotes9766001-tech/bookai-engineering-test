@@ -2,22 +2,26 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { ENVIRONMENT_STATUS, NODE_ENV } from './env.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const NODE_ENV = process.env.NODE_ENV || 'development';
 export const DATABASE_URL = process.env.DATABASE_URL || '';
 const requestedProvider = String(process.env.BOOKAI_DB_PROVIDER || '').trim().toLowerCase();
-export const DB_PROVIDER = requestedProvider || (DATABASE_URL || NODE_ENV === 'production' ? 'postgresql' : 'sqlite');
+export const DB_PROVIDER = !ENVIRONMENT_STATUS.environmentValid || NODE_ENV === 'production'
+  ? 'postgresql'
+  : requestedProvider || (DATABASE_URL ? 'postgresql' : 'sqlite');
 export const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'bookai.sqlite');
 let sqliteDb = null;
 
-console.log('BOOKAI_DB_PATH =', DB_PATH);
-console.log('NODE_ENV =', NODE_ENV);
-console.log('BOOKAI_DB_PROVIDER =', DB_PROVIDER);
+console.log(`[database] environment=${NODE_ENV}`);
+console.log(`[database] provider=${DB_PROVIDER}`);
 
-if (NODE_ENV === 'production' && DB_PROVIDER === 'sqlite' && !DB_PATH.startsWith('/data/')) {
-  console.warn('WARNING: Production SQLite is not using persistent storage. Render Free can start, but data may not survive redeploys.');
+if (NODE_ENV === 'production' && requestedProvider === 'sqlite') {
+  console.error('[database] configuration error: production cannot use SQLite; PostgreSQL is enforced');
+}
+if (NODE_ENV === 'production' && !DATABASE_URL) {
+  console.error('[database] configuration error: DATABASE_URL=missing');
 }
 
 if (DB_PROVIDER === 'postgresql') {

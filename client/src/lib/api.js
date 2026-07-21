@@ -79,13 +79,14 @@ export async function api(path, options = {}) {
   if (!res.ok) {
     const message = readableErrorMessage(
       res.status,
-      data?.code || '',
-      data?.error || data?.message || ''
+      data?.error?.code || data?.code || '',
+      data?.error?.message || data?.error || data?.message || ''
     );
 
     const error = new Error(message);
     error.status = res.status;
-    error.code = data?.code || '';
+    error.code = data?.error?.code || data?.code || '';
+    error.requestId = data?.error?.requestId || '';
     throw error;
   }
 

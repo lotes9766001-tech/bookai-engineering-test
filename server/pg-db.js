@@ -1,10 +1,19 @@
-const NODE_ENV = process.env.NODE_ENV || 'development';
+import { ENVIRONMENT_STATUS, NODE_ENV } from './env.js';
+
 const requestedProvider = String(process.env.BOOKAI_DB_PROVIDER || '').trim().toLowerCase();
-export const PG_ENABLED = requestedProvider === 'postgresql' || Boolean(process.env.DATABASE_URL) || (NODE_ENV === 'production' && requestedProvider !== 'sqlite');
+export const PG_ENABLED = !ENVIRONMENT_STATUS.environmentValid || NODE_ENV === 'production' || requestedProvider === 'postgresql' || Boolean(process.env.DATABASE_URL);
 
 export let pool = null;
+let poolClosed = false;
+let poolClosePromise = null;
+let poolCreationPromise = null;
 
 export async function getPool() {
+  if (poolClosed) {
+    const error = new Error('PostgreSQL pool is closed');
+    error.code = 'POSTGRES_POOL_CLOSED';
+    throw error;
+  }
   if (!PG_ENABLED) {
     throw new Error('DATABASE_URL is not configured');
   }
@@ -14,16 +23,67 @@ export async function getPool() {
   }
 
   if (!pool) {
-    const { Pool } = await import('pg');
-    pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
-      ssl: process.env.DATABASE_URL.includes('sslmode=disable')
-        ? false
-        : { rejectUnauthorized: false }
-    });
+    if (!poolCreationPromise) {
+      poolCreationPromise = (async () => {
+        const { Pool } = await import('pg');
+        if (poolClosed) {
+          const error = new Error('PostgreSQL pool is closed');
+          error.code = 'POSTGRES_POOL_CLOSED';
+          throw error;
+        }
+        const createdPool = new Pool({
+          connectionString: process.env.DATABASE_URL,
+          ssl: process.env.DATABASE_URL.includes('sslmode=disable')
+            ? false
+            : { rejectUnauthorized: false },
+          connectionTimeoutMillis: 5000,
+          idleTimeoutMillis: 30000,
+          max: 10
+        });
+        createdPool.on('error', (error) => {
+          console.error('[postgres] background pool error', {
+            code: error?.code || 'POOL_ERROR',
+            message: 'PostgreSQL idle connection failed'
+          });
+        });
+        pool = createdPool;
+        return createdPool;
+      })().finally(() => {
+        poolCreationPromise = null;
+      });
+    }
+    return poolCreationPromise;
   }
 
   return pool;
+}
+
+export async function closePostgresPool() {
+  if (poolClosePromise) return poolClosePromise;
+  poolClosed = true;
+  poolClosePromise = (async () => {
+    if (poolCreationPromise) {
+      try { await poolCreationPromise; } catch {}
+    }
+    if (!pool) return { closed: false, reason: 'not_created' };
+    const activePool = pool;
+    pool = null;
+    try {
+      await activePool.end();
+      return { closed: true };
+    } catch (error) {
+      console.error('[postgres] pool shutdown failed', {
+        code: error?.code || 'POOL_CLOSE_FAILED',
+        message: 'PostgreSQL pool could not close cleanly'
+      });
+      return { closed: false, reason: 'close_failed' };
+    }
+  })();
+  return poolClosePromise;
+}
+
+export function getPostgresPoolState() {
+  return { created: Boolean(pool), closed: poolClosed };
 }
 
 export async function pgQuery(text, params = []) {

@@ -20,6 +20,8 @@
     "health": "node scripts/health-check.js",
     "migrate:pg": "node scripts/migrate-sqlite-to-postgres.js",
     "smoke": "node scripts/smoke-test.js",
+    "smoke:package-a": "node scripts/package-a-smoke-test.js",
+    "smoke:package-a2": "node scripts/package-a2-smoke-test.js",
     "smoke:clean": "node scripts/smoke-clean.js",
     "rbac:smoke": "node scripts/rbac-smoke-test.js"
   },
