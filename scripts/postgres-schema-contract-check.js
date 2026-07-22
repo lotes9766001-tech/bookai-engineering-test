@@ -1,0 +1,13 @@
+import fs from 'node:fs/promises';
+import { schemaTables, tableDisposition, REQUIRED_SCHEMA_VERSION } from '../server/migrations/postgres/contract.js';
+import { listMigrations } from '../server/migrations/postgres-runner.js';
+const migrations = await listMigrations();
+const sql = migrations.map((m) => m.sql).join('\n');
+const missing = schemaTables.filter((table) => !new RegExp(`CREATE TABLE IF NOT EXISTS ${table}\\b`, 'i').test(sql));
+const unresolved = schemaTables.filter((table) => !['ACTIVE', 'LEGACY_EXCLUDED'].includes(tableDisposition[table].status));
+const duplicateIndexes = [...sql.matchAll(/CREATE INDEX IF NOT EXISTS (\w+)/gi)].map((m) => m[1]);
+const duplicateIndexNames = duplicateIndexes.filter((name, index) => duplicateIndexes.indexOf(name) !== index);
+const report = { requiredVersion: REQUIRED_SCHEMA_VERSION, expectedTableCount: schemaTables.length, migrations: migrations.map(({ sql: _sql, ...item }) => item), tables: tableDisposition, missing, unresolved, duplicateIndexNames, databaseCompared: false, status: missing.length || unresolved.length || duplicateIndexNames.length ? 'fail' : 'static_contract_only' };
+await fs.writeFile(process.env.SCHEMA_REPORT_PATH || 'postgres-schema-contract-report.json', JSON.stringify(report, null, 2));
+console.log(JSON.stringify({ requiredVersion: report.requiredVersion, expectedTableCount: report.expectedTableCount, missing: report.missing, unresolved: report.unresolved, duplicateIndexNames: report.duplicateIndexNames, databaseCompared: false, status: report.status }));
+process.exitCode = report.status === 'fail' ? 1 : 0;

@@ -316,3 +316,5 @@
 - 保留未驗證項目：Render 真實 SIGTERM、Supabase Pool end、正式 CORS、Tender 多 Instance、uploads 持久性。
 - 本次實際修改檔案：僅 QA 文件 `docs/PACKAGE_A_QA_CHECKLIST.md`；未修改任何程式碼。
 - 既有 Package A、Package A.2、Package A.2-Fix-1 Fail 歷史均保留；本簽核不代表正式環境或外部依賴已驗證。
+- Package B-Core-1 已建立靜態 migration/schema contract；本階段未執行 PostgreSQL migration 或 staging integration，Package B QA 尚未判定 Pass。
+- Package B-Core-2 已完成 canonical migration 靜態拆分與 49 表 manifest；未執行 PostgreSQL migration/staging，B-Core QA 尚未判定 Pass。

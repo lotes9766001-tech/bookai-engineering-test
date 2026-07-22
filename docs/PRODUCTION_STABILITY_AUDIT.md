@@ -125,3 +125,5 @@ Package A.1 已將 production 設定拆分：只有 `DATABASE_URL` 與 `JWT_SECR
 - Tender startup timeout 與 interval 納入 registry；只有 `TENDER_SYNC_ENABLED=true` 才啟用，缺少或非法設定均安全停用。
 - Tender interval 僅接受安全正整數範圍；同步錯誤不形成未處理 rejection。
 - 尚未驗證 Render signal timing、Supabase Pool end 或多 Instance 排程；不得標記 A.2 QA Pass 或直接部署。
+- Package B-Core-1：建立 migration runner、version/checksum contract 與 PostgreSQL schema parity 靜態 contract；未連線 PostgreSQL，runtime 不再呼叫 startup DDL。
+- Package B-Core-2：補齊 49 表 ACTIVE manifest、7 支 ordered canonical migration、欄位衝突 expand/contract 政策與 static drift gate；未連線 PostgreSQL，未執行 migration，尚未 QA Pass。

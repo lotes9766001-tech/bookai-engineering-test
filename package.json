@@ -19,11 +19,16 @@
     "demo:engineering": "node scripts/prepare-engineering-demo.js",
     "health": "node scripts/health-check.js",
     "migrate:pg": "node scripts/migrate-sqlite-to-postgres.js",
+    "db:pg:migrate:plan": "node scripts/postgres-migrate.js plan",
+    "db:pg:migrate:status": "node scripts/postgres-migrate.js status",
+    "db:pg:migrate": "node scripts/postgres-migrate.js migrate",
+    "schema:pg:check": "node scripts/postgres-schema-contract-check.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:package-a": "node scripts/package-a-smoke-test.js",
     "smoke:package-a2": "node scripts/package-a2-smoke-test.js",
     "smoke:clean": "node scripts/smoke-clean.js",
-    "rbac:smoke": "node scripts/rbac-smoke-test.js"
+    "rbac:smoke": "node scripts/rbac-smoke-test.js",
+    "smoke:package-b-core": "node scripts/package-b-core-smoke-test.js"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.2",

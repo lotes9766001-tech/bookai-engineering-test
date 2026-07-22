@@ -95,3 +95,5 @@
 - [ ] 確認 Tender failure 不影響 ping、health 與一般 API。
 - [ ] 多 Instance 開啟 Tender Sync 前完成營運風險接受；本包沒有分散式鎖。
 - [ ] 發生 force timeout、Pool close 持續失敗或重複 Tender Sync 時停止上線並回滾。
+- Package B-Core-1 前置：確認 `bookai_schema_migrations` 版本與 checksum，且 migration 只能由受控 CLI/DBA 流程執行；不得由 API startup 自動建立或修改 PostgreSQL schema。
+- B-Core-2：確認 required schema version 為 `007_schema_parity`；static contract 不是 staging parity 證據，未完成 staging 前不得部署。

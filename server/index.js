@@ -12,7 +12,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { nanoid } from 'nanoid';
 import { db, initDb, audit as sqliteAudit, DB_PATH, DB_PROVIDER, DATABASE_URL } from './db.js';
-import { PG_ENABLED, initPostgresDb, getPool, closePostgresPool, pgAll, pgOne, pgQuery } from './pg-db.js';
+import { PG_ENABLED, verifyPostgresSchema, getPool, closePostgresPool, pgAll, pgOne, pgQuery } from './pg-db.js';
 import { plans } from './plans.js';
 import { platforms } from './platforms.js';
 import { AI_USE_CASES, generateAiDraft } from './ai-provider.js';
@@ -123,7 +123,7 @@ async function checkPostgresStartup() {
   console.log('POSTGRES_STARTUP: initializing');
 
   try {
-    await initPostgresDb();
+    await verifyPostgresSchema();
     postgresReady = true;
     postgresError = null;
     postgresCheckedAt = new Date().toISOString();

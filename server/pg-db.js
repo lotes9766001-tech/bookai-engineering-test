@@ -101,7 +101,8 @@ export async function pgAll(text, params = []) {
   return result.rows;
 }
 
-export async function initPostgresDb() {
+// Retained for migration history only. Runtime startup must not execute DDL.
+async function legacyInitPostgresDb() {
   if (!PG_ENABLED) return;
 
   await pgQuery(`
@@ -862,4 +863,21 @@ export async function initPostgresDb() {
     CREATE INDEX IF NOT EXISTS idx_website_inquiries_company_id ON website_inquiries(company_id);
     CREATE INDEX IF NOT EXISTS idx_website_assets_company_id ON website_assets(company_id);
   `);
+}
+
+export const REQUIRED_SCHEMA_VERSION = '001_schema_contract';
+
+export async function verifyPostgresSchema() {
+  if (!PG_ENABLED) return { ready: true, version: null };
+  const result = await pgQuery(
+    'SELECT version FROM bookai_schema_migrations WHERE status = $1 ORDER BY version DESC LIMIT 1',
+    ['applied']
+  );
+  const version = result.rows[0]?.version || null;
+  if (version !== REQUIRED_SCHEMA_VERSION) {
+    const error = new Error('PostgreSQL schema version is not ready');
+    error.code = 'POSTGRES_SCHEMA_VERSION_MISMATCH';
+    throw error;
+  }
+  return { ready: true, version };
 }
