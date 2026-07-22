@@ -1,3 +1,5 @@
+import { createRequire } from 'node:module';
+
 export const REQUIRED_SCHEMA_VERSION = '007_schema_parity';
 export const schemaTables = [
   'users','companies','company_users','platform_accounts','transactions','invoices','products',
@@ -39,3 +41,31 @@ export const schemaManifest = {
     external_orders: ['company_id,source,external_id']
   }
 };
+
+// Read-only evidence loader used by local drift tooling. It never runs in the
+// API runtime and never opens a PostgreSQL connection.
+export function loadSqliteEvidence(dbPath = 'server/bookai.sqlite') {
+  try {
+    const requireLocal = createRequire(new URL('../../db.js', import.meta.url));
+    const Database = requireLocal('better-sqlite3');
+    const db = new Database(dbPath, { readonly: true });
+    const evidence = {};
+    for (const { name } of db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()) {
+      const columns = db.prepare(`PRAGMA table_info(${name})`).all().map((column) => ({
+        name: column.name,
+        type: column.type || 'TEXT',
+        nullable: column.notnull !== 1,
+        default: column.dflt_value,
+        primaryKey: column.pk === 1,
+        sourceEvidence: `SQLite PRAGMA table_info(${name})`
+      }));
+      const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${name})`).all().map((fk) => ({ from: fk.from, table: fk.table, to: fk.to, onDelete: fk.on_delete, onUpdate: fk.on_update }));
+      const indexes = db.prepare(`PRAGMA index_list(${name})`).all().map((index) => ({ name: index.name, unique: index.unique === 1, columns: db.prepare(`PRAGMA index_info(${index.name})`).all().map((item) => item.name) }));
+      evidence[name] = { table: name, status: 'ACTIVE', columns, foreignKeys, indexes, sourceEvidence: ['SQLite PRAGMA table_info', 'SQLite PRAGMA foreign_key_list', 'SQLite PRAGMA index_list', 'runtime SQL review'] };
+    }
+    db.close();
+    return evidence;
+  } catch (error) {
+    return { __error: { code: error?.code || 'SQLITE_EVIDENCE_FAILED', message: error?.message || 'SQLite evidence unavailable' } };
+  }
+}
