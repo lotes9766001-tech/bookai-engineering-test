@@ -1,12 +1,19 @@
-if (process.env.STAGING_ISOLATED !== 'true') {
-  console.error('STAGING_ISOLATED=true is required; migration not executed.');
-  process.exit(1);
-}
-if (process.env.NODE_ENV !== 'production' || process.env.TENDER_SYNC_ENABLED === 'true' || process.env.EXTERNAL_SIDE_EFFECTS_ENABLED === 'true') {
-  console.error('Unsafe staging configuration; migration not executed.');
-  process.exit(1);
-}
-const { runMigrations } = await import('../server/migrations/postgres-runner.js');
 const mode = process.argv[2] || 'plan';
-const result = await runMigrations({ mode, allowProduction: false });
-console.log(JSON.stringify(result));
+if (!['plan', 'status', 'migrate'].includes(mode)) {
+  console.error(JSON.stringify({ code: 'MIGRATION_MODE_INVALID', message: 'Staging migration command failed' }));
+  process.exitCode = 2;
+} else {
+  try {
+    const { assertIsolatedStagingAuthorization, runMigrations } = await import('../server/migrations/postgres-runner.js');
+    if (process.env.NODE_ENV !== 'production') {
+      throw Object.assign(new Error('Staging migration requires production runtime mode'), { code: 'STAGING_NODE_ENV_REQUIRED' });
+    }
+    assertIsolatedStagingAuthorization();
+    if (mode === 'migrate') console.log(JSON.stringify({ target: 'isolated-staging', operation: 'migrate' }));
+    const result = await runMigrations({ mode, allowProduction: false, allowIsolatedStaging: true });
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.error(JSON.stringify({ code: error?.code || 'MIGRATION_FAILED', message: 'Staging migration command failed' }));
+    process.exitCode = 1;
+  }
+}

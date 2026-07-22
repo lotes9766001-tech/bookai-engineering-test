@@ -7,6 +7,29 @@ import { getPool, REQUIRED_SCHEMA_VERSION } from '../pg-db.js';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const migrationDir = path.join(root, 'postgres');
 const safe = (error) => ({ code: error?.code || 'MIGRATION_FAILED', message: 'Migration operation failed' });
+const sideEffectFlags = [
+  'TENDER_SYNC_ENABLED',
+  'AI_ENABLED',
+  'EXTERNAL_SIDE_EFFECTS_ENABLED',
+  'EMAIL_SIDE_EFFECTS_ENABLED',
+  'LINE_SIDE_EFFECTS_ENABLED',
+  'PAYMENT_SIDE_EFFECTS_ENABLED'
+];
+
+const migrationError = (code, message) => Object.assign(new Error(message), { code });
+
+export function assertIsolatedStagingAuthorization(environment = process.env) {
+  if (environment.STAGING_ISOLATED !== 'true') {
+    throw migrationError('STAGING_ISOLATED_REQUIRED', 'Isolated staging marker is required');
+  }
+  const enabledFlag = sideEffectFlags.find((name) => environment[name] === 'true');
+  if (enabledFlag) {
+    throw migrationError('STAGING_SIDE_EFFECTS_ENABLED', 'Side effects must be disabled for isolated staging');
+  }
+  if (!environment.DATABASE_URL) {
+    throw migrationError('STAGING_DATABASE_URL_REQUIRED', 'Isolated staging database configuration is required');
+  }
+}
 
 export async function listMigrations() {
   const names = (await fs.readdir(migrationDir)).filter((name) => /^\d+_[a-z0-9_-]+\.sql$/i.test(name)).sort();
@@ -31,11 +54,42 @@ export async function ensureVersionTable(pool) {
   )`);
 }
 
-export async function runMigrations({ pool = null, mode = 'plan', allowProduction = false } = {}) {
+async function migrationStatus(pool, migrations) {
+  const migrationMetadata = migrations.map(({ sql, ...item }) => item);
+  const catalog = await pool.query("SELECT to_regclass('bookai_schema_migrations') AS version_table");
+  const versionTableExists = Boolean(catalog.rows[0]?.version_table);
+  const applied = versionTableExists
+    ? (await pool.query('SELECT version, checksum, status FROM bookai_schema_migrations ORDER BY version')).rows
+    : [];
+  return {
+    mode: 'status',
+    versionTableExists,
+    applied,
+    latestVersion: migrations.at(-1)?.version || null,
+    migrations: migrationMetadata
+  };
+}
+
+export async function runMigrations({ pool = null, mode = 'plan', allowProduction = false, allowIsolatedStaging = false } = {}) {
   const migrations = await listMigrations();
-  if (mode === 'plan' || mode === 'status') return { mode, migrations: migrations.map(({ sql, ...item }) => item) };
+  if (mode === 'plan') return { mode, migrations: migrations.map(({ sql, ...item }) => item) };
+  if (mode === 'status') {
+    if (!pool && !process.env.DATABASE_URL) {
+      return {
+        mode,
+        versionTableExists: false,
+        applied: [],
+        latestVersion: migrations.at(-1)?.version || null,
+        migrations: migrations.map(({ sql, ...item }) => item)
+      };
+    }
+    return migrationStatus(pool || await getPool(), migrations);
+  }
   if (mode !== 'migrate') throw Object.assign(new Error('Unsupported migration mode'), { code: 'MIGRATION_MODE_INVALID' });
-  if (process.env.NODE_ENV === 'production' && !allowProduction) throw Object.assign(new Error('Production migration requires explicit gate'), { code: 'PRODUCTION_MIGRATION_GATE_REQUIRED' });
+  if (process.env.NODE_ENV === 'production' && !allowProduction) {
+    if (!allowIsolatedStaging) throw migrationError('PRODUCTION_MIGRATION_GATE_REQUIRED', 'Production migration requires explicit gate');
+    assertIsolatedStagingAuthorization();
+  }
   const activePool = pool || await getPool();
   await ensureVersionTable(activePool);
   const applied = (await activePool.query('SELECT version, checksum, status FROM bookai_schema_migrations ORDER BY version')).rows;

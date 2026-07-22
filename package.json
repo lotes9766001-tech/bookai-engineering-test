@@ -22,6 +22,9 @@
     "db:pg:migrate:plan": "node scripts/postgres-migrate.js plan",
     "db:pg:migrate:status": "node scripts/postgres-migrate.js status",
     "db:pg:migrate": "node scripts/postgres-migrate.js migrate",
+    "db:pg:staging:plan": "node scripts/staging-migrate.js plan",
+    "db:pg:staging:status": "node scripts/staging-migrate.js status",
+    "db:pg:staging:migrate": "node scripts/staging-migrate.js migrate",
     "schema:pg:check": "node scripts/postgres-schema-contract-check.js",
     "smoke": "node scripts/smoke-test.js",
     "smoke:package-a": "node scripts/package-a-smoke-test.js",
@@ -29,6 +32,7 @@
     "smoke:clean": "node scripts/smoke-clean.js",
     "rbac:smoke": "node scripts/rbac-smoke-test.js",
     "smoke:package-b-core": "node scripts/package-b-core-smoke-test.js",
+    "smoke:staging-migration-gate": "node scripts/staging-migration-gate-smoke-test.js",
     "smoke:sqlite-isolation": "node scripts/sqlite-test-isolation-check.js"
   },
   "devDependencies": {
