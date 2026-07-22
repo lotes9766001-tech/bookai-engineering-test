@@ -1,6 +1,15 @@
 import { createRequire } from 'node:module';
 
 export const REQUIRED_SCHEMA_VERSION = '007_schema_parity';
+export const ORDERED_MIGRATION_VERSIONS = Object.freeze([
+  '001_core_identity',
+  '002_engineering_inventory',
+  '003_commerce_erp',
+  '004_cms',
+  '005_accounting',
+  '006_tender_audit',
+  REQUIRED_SCHEMA_VERSION
+]);
 export const schemaTables = [
   'users','companies','company_users','platform_accounts','transactions','invoices','products',
   'inventory_movements','job_sites','job_site_payments','job_site_estimate_items','vouchers',

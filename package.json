@@ -33,6 +33,7 @@
     "rbac:smoke": "node scripts/rbac-smoke-test.js",
     "smoke:package-b-core": "node scripts/package-b-core-smoke-test.js",
     "smoke:staging-migration-gate": "node scripts/staging-migration-gate-smoke-test.js",
+    "smoke:runtime-schema-version": "node scripts/runtime-schema-version-smoke-test.js",
     "smoke:sqlite-isolation": "node scripts/sqlite-test-isolation-check.js"
   },
   "devDependencies": {

@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { getPool, REQUIRED_SCHEMA_VERSION } from '../pg-db.js';
+import { getPool } from '../pg-db.js';
+import { REQUIRED_SCHEMA_VERSION } from './postgres/contract.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const migrationDir = path.join(root, 'postgres');

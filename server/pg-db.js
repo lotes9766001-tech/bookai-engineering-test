@@ -1,4 +1,5 @@
 import { ENVIRONMENT_STATUS, NODE_ENV } from './env.js';
+import { ORDERED_MIGRATION_VERSIONS, REQUIRED_SCHEMA_VERSION } from './migrations/postgres/contract.js';
 
 const requestedProvider = String(process.env.BOOKAI_DB_PROVIDER || '').trim().toLowerCase();
 export const PG_ENABLED = !ENVIRONMENT_STATUS.environmentValid || NODE_ENV === 'production' || requestedProvider === 'postgresql' || Boolean(process.env.DATABASE_URL);
@@ -865,19 +866,36 @@ async function legacyInitPostgresDb() {
   `);
 }
 
-export const REQUIRED_SCHEMA_VERSION = '001_schema_contract';
+export { REQUIRED_SCHEMA_VERSION };
 
-export async function verifyPostgresSchema() {
-  if (!PG_ENABLED) return { ready: true, version: null };
-  const result = await pgQuery(
-    'SELECT version FROM bookai_schema_migrations WHERE status = $1 ORDER BY version DESC LIMIT 1',
-    ['applied']
-  );
-  const version = result.rows[0]?.version || null;
-  if (version !== REQUIRED_SCHEMA_VERSION) {
-    const error = new Error('PostgreSQL schema version is not ready');
-    error.code = 'POSTGRES_SCHEMA_VERSION_MISMATCH';
-    throw error;
+function schemaNotReady(reason, actual = null) {
+  return Object.assign(new Error('PostgreSQL schema version is not ready'), {
+    code: 'POSTGRES_SCHEMA_VERSION_MISMATCH',
+    ready: false,
+    reason,
+    expected: REQUIRED_SCHEMA_VERSION,
+    actual
+  });
+}
+
+export async function verifyPostgresSchema({ query = pgQuery, enabled = PG_ENABLED } = {}) {
+  if (!enabled) return { ready: true, version: null };
+  let rows;
+  try {
+    ({ rows = [] } = await query('SELECT version, status FROM bookai_schema_migrations'));
+  } catch (error) {
+    if (error?.code === '42P01') throw schemaNotReady('version_table_missing');
+    throw schemaNotReady('history_unavailable');
   }
-  return { ready: true, version };
+
+  if (!rows.length) throw schemaNotReady('history_empty');
+  const history = new Map(rows.map((row) => [String(row.version), String(row.status)]));
+  const requiredIndex = ORDERED_MIGRATION_VERSIONS.indexOf(REQUIRED_SCHEMA_VERSION);
+  const requiredHistory = ORDERED_MIGRATION_VERSIONS.slice(0, requiredIndex + 1);
+  const latestApplied = requiredHistory.filter((version) => history.get(version) === 'applied').at(-1) || null;
+  const requiredStatus = history.get(REQUIRED_SCHEMA_VERSION);
+  if (requiredStatus && requiredStatus !== 'applied') throw schemaNotReady('migration_not_applied', latestApplied);
+  if (latestApplied !== REQUIRED_SCHEMA_VERSION) throw schemaNotReady('version_mismatch', latestApplied);
+
+  return { ready: true, version: REQUIRED_SCHEMA_VERSION };
 }
