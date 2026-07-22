@@ -37,6 +37,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# generated verification reports
+/postgres-schema-contract-report.json
+/docs/RC3_*EXECUTION*.jsonl
+/docs/RC3_*MASTER_PROMPT.txt
+
 # macOS
 .DS_Store
 
@@ -73,3 +78,6 @@ scripts/*.bak*
 # ngrok local binary/archive
 ngrok*
 *.zip
+/docs/RC3_PRECLOUD_INTEGRITY_PROMPT.txt
+/docs/RC3_PRECLOUD_INTEGRITY_FINAL.md
+/docs/RC3_STAGING_CONTINUE_FINAL.md

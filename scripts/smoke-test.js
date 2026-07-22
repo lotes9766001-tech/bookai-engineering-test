@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { createIsolatedTestDatabase } from './sqlite-test-db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,7 +10,14 @@ const rootDir = path.join(__dirname, '..');
 const requireFromServer = createRequire(path.join(rootDir, 'server', 'package.json'));
 const Database = requireFromServer('better-sqlite3');
 
-const dbPath = process.env.DB_PATH || path.join(rootDir, 'server', 'bookai.sqlite');
+let isolated;
+try {
+  isolated = createIsolatedTestDatabase('core-smoke');
+} catch (error) {
+  console.error(`Smoke test isolation gate failed: ${error.message}`);
+  process.exit(1);
+}
+const dbPath = isolated.dbPath;
 
 function ok(msg) {
   console.log(`✅ ${msg}`);
@@ -32,6 +40,10 @@ if (!fs.existsSync(dbPath)) {
 }
 
 const db = new Database(dbPath);
+process.once('exit', () => {
+  try { db.close(); } catch {}
+  try { isolated.cleanup(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+});
 
 section('BookAI v3.3 Smoke Test');
 

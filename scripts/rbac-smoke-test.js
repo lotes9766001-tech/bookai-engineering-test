@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+import { createIsolatedTestDatabase } from './sqlite-test-db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -9,7 +10,14 @@ const rootDir = path.join(__dirname, '..');
 const requireFromServer = createRequire(path.join(rootDir, 'server', 'package.json'));
 const Database = requireFromServer('better-sqlite3');
 
-const dbPath = process.env.DB_PATH || path.join(rootDir, 'server', 'bookai.sqlite');
+let isolated;
+try {
+  isolated = createIsolatedTestDatabase('rbac-smoke');
+} catch (error) {
+  console.error(`RBAC smoke isolation gate failed: ${error.message}`);
+  process.exit(1);
+}
+const dbPath = isolated.dbPath;
 
 function ok(msg) {
   console.log(`✅ ${msg}`);
@@ -38,6 +46,10 @@ if (!fs.existsSync(dbPath)) {
 }
 
 const db = new Database(dbPath);
+process.once('exit', () => {
+  try { db.close(); } catch {}
+  try { isolated.cleanup(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+});
 
 section('BookAI v3.5c RBAC Smoke Test');
 
@@ -53,7 +65,7 @@ if (!company) {
   process.exit(1);
 }
 
-ok(`使用公司：#${company.id} ${company.name}`);
+ok(`使用隔離公司資料：#${company.id}`);
 
 const owner = db.prepare(`
   SELECT
@@ -73,7 +85,7 @@ if (!owner) {
   process.exit(1);
 }
 
-ok(`找到 owner：user #${owner.id} ${owner.email}`);
+ok(`找到隔離 owner 資料：user #${owner.id}`);
 
 section('1. 角色規則測試');
 

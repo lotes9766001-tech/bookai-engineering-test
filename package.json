@@ -28,7 +28,8 @@
     "smoke:package-a2": "node scripts/package-a2-smoke-test.js",
     "smoke:clean": "node scripts/smoke-clean.js",
     "rbac:smoke": "node scripts/rbac-smoke-test.js",
-    "smoke:package-b-core": "node scripts/package-b-core-smoke-test.js"
+    "smoke:package-b-core": "node scripts/package-b-core-smoke-test.js",
+    "smoke:sqlite-isolation": "node scripts/sqlite-test-isolation-check.js"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.2",

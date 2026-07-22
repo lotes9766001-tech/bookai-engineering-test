@@ -12,6 +12,10 @@ export const DB_PROVIDER = !ENVIRONMENT_STATUS.environmentValid || NODE_ENV === 
   ? 'postgresql'
   : requestedProvider || (DATABASE_URL ? 'postgresql' : 'sqlite');
 export const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'bookai.sqlite');
+const defaultSqlitePath = path.resolve(__dirname, 'bookai.sqlite');
+if (NODE_ENV === 'test' && path.resolve(DB_PATH).toLowerCase() === defaultSqlitePath.toLowerCase()) {
+  throw new Error('Test environment must not use server/bookai.sqlite; set DB_PATH to an isolated SQLite file');
+}
 let sqliteDb = null;
 
 console.log(`[database] environment=${NODE_ENV}`);
