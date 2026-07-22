@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: bookai-rc3-staging
+    runtime: node
+    branch: release/bookai-rc1-staging
+    buildCommand: npm install && npm --prefix server install && npm --prefix client install && npm --prefix client run build
+    startCommand: npm --prefix server start
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TENDER_SYNC_ENABLED
+        value: "false"
+      - key: AI_ENABLED
+        value: "false"
+      - key: EXTERNAL_SIDE_EFFECTS_ENABLED
+        value: "false"
