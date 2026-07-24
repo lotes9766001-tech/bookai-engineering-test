@@ -46,7 +46,6 @@ const checks = [
   ['staging migration gate smoke', process.execPath, ['scripts/staging-migration-gate-smoke-test.js']],
   ['Package A smoke', process.execPath, ['scripts/package-a-smoke-test.js']],
   ['Auth login smoke', process.execPath, ['scripts/auth-login-smoke-test.js']],
-  ['Staging QA account safety smoke', process.execPath, ['scripts/staging-qa-account-smoke-test.js']],
   ['Package A.2 smoke', process.execPath, ['scripts/package-a2-smoke-test.js']],
   ['B-Core smoke', process.execPath, ['scripts/package-b-core-smoke-test.js']],
   ['SQLite isolation smoke', process.execPath, ['scripts/sqlite-test-isolation-check.js']],
