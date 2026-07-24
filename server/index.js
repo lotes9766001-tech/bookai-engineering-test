@@ -1962,7 +1962,65 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+// Hardened login handler is registered first so every login path has a bounded response.
 app.post('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), async (req, res) => {
+  const requestId = req.requestId;
+  try {
+    const { email, password } = req.body || {};
+    const normalizedEmail = normalizeEmail(email);
+    if (!normalizedEmail || !password) {
+      return res.status(400).json({ ok: false, error: { code: 'INVALID_LOGIN_INPUT', message: 'Email and password are required.', requestId } });
+    }
+    const user = PG_ENABLED
+      ? await pgOne('SELECT * FROM users WHERE email = $1', [normalizedEmail])
+      : db.prepare('SELECT * FROM users WHERE email = ?').get(normalizedEmail);
+    if (!user || !bcrypt.compareSync(password, user.password_hash)) {
+      return res.status(401).json({ ok: false, error: { code: 'INVALID_CREDENTIALS', message: 'Email or password is incorrect.', requestId } });
+    }
+    const memberships = PG_ENABLED
+      ? await pgAll(`SELECT c.approval_status AS company_approval_status, c.review_status AS company_review_status, c.is_active
+                     FROM company_users cu JOIN companies c ON c.id = cu.company_id WHERE cu.user_id = $1`, [user.id])
+      : db.prepare(`SELECT c.approval_status AS company_approval_status, c.review_status AS company_review_status, c.is_active
+                    FROM company_users cu JOIN companies c ON c.id = cu.company_id WHERE cu.user_id = ?`).all(user.id);
+    if (!memberships.length) return res.status(403).json({ ok: false, error: { code: 'MEMBERSHIP_NOT_AVAILABLE', message: 'No active membership is available.', requestId } });
+    const privileged = isPrivilegedEmail(user.email);
+    const userStatus = user.approval_status || user.review_status || user.status || 'pending_review';
+    if (!privileged && userStatus !== 'approved') {
+      const code = userStatus === 'rejected' ? 'USER_REJECTED' : userStatus === 'suspended' ? 'USER_SUSPENDED' : 'USER_PENDING_REVIEW';
+      return res.status(403).json({ ok: false, error: { code, message: 'Account is not approved for access.', requestId } });
+    }
+    if (!privileged && !memberships.some((item) => (item.company_approval_status || item.company_review_status) === 'approved')) {
+      const companyStates = memberships.map((item) => item.company_approval_status || item.company_review_status || '');
+      const inactive = memberships.every((item) => Number(item.is_active) === 0)
+        && !companyStates.includes('pending_review');
+      return res.status(403).json({ ok: false, error: { code: inactive ? 'COMPANY_INACTIVE' : 'COMPANY_NOT_APPROVED', message: 'Company is not approved for access.', requestId } });
+    }
+    try {
+      if (PG_ENABLED) {
+        await pgQuery('UPDATE users SET last_login_at = CURRENT_TIMESTAMP, login_count = COALESCE(login_count, 0) + 1 WHERE id = $1', [user.id]);
+        await pgQuery(`INSERT INTO user_login_logs (user_id,email,ip,user_agent,status) VALUES ($1,$2,$3,$4,$5)`, [user.id, user.email, requestIp(req), requestUserAgent(req), 'success']);
+      } else {
+        db.prepare('UPDATE users SET last_login_at = CURRENT_TIMESTAMP, login_count = COALESCE(login_count, 0) + 1 WHERE id = ?').run(user.id);
+        db.prepare('INSERT INTO user_login_logs (user_id,email,ip,user_agent,status) VALUES (?,?,?,?,?)').run(user.id, user.email, requestIp(req), requestUserAgent(req), 'success');
+      }
+    } catch (auditError) {
+      console.warn('[auth] login audit write failed', { requestId, errorCode: 'LOGIN_AUDIT_WRITE_FAILED' });
+    }
+    const safe = { id: user.id, name: user.name, email: user.email, isAdmin: isAdminEmail(user.email), isFounder: isFounderEmail(user.email) };
+    let token;
+    try { token = sign(safe); } catch (signError) {
+      console.error('[auth] token creation failed', { requestId, errorCode: 'LOGIN_FAILED', module: 'auth.login' });
+      return res.status(500).json({ ok: false, error: { code: 'LOGIN_FAILED', message: 'Login failed. Please try again later.', requestId } });
+    }
+    return res.json({ token, user: safe });
+  } catch (error) {
+    console.error('[auth] login failed', { requestId, errorCode: 'LOGIN_FAILED', module: 'auth.login' });
+    return res.status(error?.code === 'POSTGRES_SCHEMA_VERSION_MISMATCH' ? 503 : 500).json({ ok: false, error: { code: error?.code === 'POSTGRES_SCHEMA_VERSION_MISMATCH' ? 'SERVICE_NOT_READY' : 'LOGIN_FAILED', message: error?.code === 'POSTGRES_SCHEMA_VERSION_MISMATCH' ? 'Service is not ready.' : 'Login failed. Please try again later.', requestId } });
+  }
+});
+
+app.post('/api/auth/login-legacy', rateLimit({ windowMs: 15 * 60 * 1000, max: 30 }), async (req, res) => {
+  return res.status(404).json({ ok: false, error: { code: 'NOT_FOUND', message: 'Not found.', requestId: req.requestId } });
   const { email, password } = req.body || {};
   const normalizedEmail = normalizeEmail(email);
   const tracking = sanitizeTrackingBody(req.body || {});

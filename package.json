@@ -35,6 +35,7 @@
     "smoke:staging-migration-gate": "node scripts/staging-migration-gate-smoke-test.js",
     "smoke:runtime-schema-version": "node scripts/runtime-schema-version-smoke-test.js",
     "smoke:sqlite-isolation": "node scripts/sqlite-test-isolation-check.js",
+    "smoke:auth-login": "node scripts/auth-login-smoke-test.js",
     "gate:rc": "node scripts/rc-release-gate.js"
   },
   "devDependencies": {

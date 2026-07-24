@@ -55,17 +55,22 @@ export async function api(path, options = {}) {
   }
 
   let res;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 15000);
   try {
     res = await fetch(`${API}${path}`, {
       ...options,
-      headers
+      headers,
+      signal: options.signal || controller.signal
     });
   } catch {
+    clearTimeout(timeoutId);
     const error = new Error(readableErrorMessage(0, 'NETWORK_ERROR'));
     error.status = 0;
     error.code = 'NETWORK_ERROR';
     throw error;
   }
+  clearTimeout(timeoutId);
 
   const text = await res.text();
 

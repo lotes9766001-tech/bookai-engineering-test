@@ -644,6 +644,7 @@ function App() {
 function Auth({ onAuth }) {
   const [mode, setMode] = useState('login');
   const [err, setErr] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
     email: '',
@@ -661,7 +662,9 @@ function Auth({ onAuth }) {
 
   async function submit(e) {
     e.preventDefault();
+    if (submitting) return;
     setErr('');
+    setSubmitting(true);
 
     try {
       const payload = mode === 'register'
@@ -693,7 +696,9 @@ function Auth({ onAuth }) {
       setToken(data.token);
       onAuth();
     } catch (e) {
-      setErr(e.message);
+      setErr(e.status === 401 ? '電子信箱或密碼不正確。' : e.status === 403 ? '帳號或公司目前尚未核准使用。' : e.status === 503 ? '系統暫時維護中，請稍後再試。' : '登入暫時失敗，請稍後再試。');
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -856,7 +861,7 @@ function Auth({ onAuth }) {
 
           {err && <div className="error">{err}</div>}
 
-          <button>{mode === 'login' ? '登入 BookAI' : '建立帳號'}</button>
+          <button type="submit" disabled={submitting}>{submitting ? '處理中…' : mode === 'login' ? '登入 BookAI' : '建立帳號'}</button>
         </form>
 
         <button

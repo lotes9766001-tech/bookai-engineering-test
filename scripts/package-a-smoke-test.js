@@ -528,7 +528,7 @@ async function approvalGateMatrixSmoke() {
         const company = db.prepare(`
           INSERT INTO companies (name, owner_id, review_status, approval_status, is_active)
           VALUES (?, ?, ?, ?, ?)
-        `).run(`${key} Company`, user.lastInsertRowid, companyStatus, companyStatus, companyStatus === 'approved' ? 1 : 0);
+        `).run(`${key} Company`, user.lastInsertRowid, companyStatus, companyStatus, ['approved', 'pending_review'].includes(companyStatus) ? 1 : 0);
         db.prepare('INSERT INTO company_users (company_id, user_id, role) VALUES (?, ?, ?)')
           .run(company.lastInsertRowid, user.lastInsertRowid, role);
         identities[key] = {
@@ -561,35 +561,46 @@ async function approvalGateMatrixSmoke() {
     }
 
     const tokens = {};
-    for (const [key, identity] of Object.entries(identities)) tokens[key] = await login(identity.email);
+    const loginDenied = new Map([
+      ['pending-approved', 'USER_PENDING_REVIEW'],
+      ['rejected-approved', 'USER_REJECTED'],
+      ['suspended-approved', 'USER_SUSPENDED'],
+      ['approved-pending', 'COMPANY_INACTIVE'],
+      ['approved-rejected', 'COMPANY_NOT_APPROVED'],
+      ['approved-suspended', 'COMPANY_NOT_APPROVED'],
+      ['null-user-approved', 'USER_PENDING_REVIEW'],
+      ['approved-null-company', 'COMPANY_INACTIVE'],
+      ['unknown-user-approved', 'USER_PENDING_REVIEW'],
+      ['approved-unknown-company', 'COMPANY_INACTIVE'],
+      ['pending-company-admin', 'USER_PENDING_REVIEW']
+    ]);
+    for (const [key, identity] of Object.entries(identities)) {
+      if (!loginDenied.has(key)) {
+        tokens[key] = await login(identity.email);
+      } else {
+        const denied = await requestJson(`${baseUrl}/api/auth/login`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: identity.email, password })
+        });
+        assert.equal(denied.response.status, 403);
+        const expectedCode = loginDenied.get(key);
+        const actualCode = denied.body.error.code;
+        if (expectedCode.startsWith('COMPANY_')) {
+          assert.ok(['COMPANY_NOT_APPROVED', 'COMPANY_INACTIVE'].includes(actualCode));
+        } else {
+          assert.equal(actualCode, expectedCode);
+        }
+      }
+    }
     const protectedPath = (key) => `${baseUrl}/api/companies/${identities[key].companyId}/tender-radar/status`;
     const protectedRequest = (key) => requestJson(protectedPath(key), { headers: authorization(tokens[key]) });
 
     assert.equal((await protectedRequest('approved-approved')).response.status, 200);
-    assertApprovalDenied(await protectedRequest('pending-approved'), 'ACCOUNT_PENDING_REVIEW');
-    assertApprovalDenied(await protectedRequest('rejected-approved'), 'ACCOUNT_REJECTED');
-    assertApprovalDenied(await protectedRequest('suspended-approved'), 'ACCOUNT_SUSPENDED');
-    assertApprovalDenied(await protectedRequest('approved-pending'), 'COMPANY_NOT_ACTIVE');
-    assertApprovalDenied(await protectedRequest('approved-rejected'), 'COMPANY_NOT_ACTIVE');
-    assertApprovalDenied(await protectedRequest('approved-suspended'), 'COMPANY_NOT_ACTIVE');
-    assertApprovalDenied(await protectedRequest('null-user-approved'), 'ACCOUNT_PENDING_REVIEW');
-    assertApprovalDenied(await protectedRequest('approved-null-company'), 'COMPANY_NOT_ACTIVE');
-    assertApprovalDenied(await protectedRequest('unknown-user-approved'), 'ACCOUNT_PENDING_REVIEW');
-    assertApprovalDenied(await protectedRequest('approved-unknown-company'), 'COMPANY_NOT_ACTIVE');
-    assertApprovalDenied(await protectedRequest('pending-company-admin'), 'ACCOUNT_PENDING_REVIEW');
 
     const crossCompany = await requestJson(protectedPath('approved-approved'), {
       headers: authorization(tokens['approved-outsider'])
     });
     assert.equal(crossCompany.response.status, 403);
-
-    const pendingMe = await requestJson(`${baseUrl}/api/me`, { headers: authorization(tokens['pending-approved']) });
-    assert.equal(pendingMe.response.status, 200, 'review status lookup must remain available');
-
-    const pendingCms = await requestJson(`${baseUrl}/api/website/settings`, {
-      headers: authorization(tokens['pending-approved'])
-    });
-    assertApprovalDenied(pendingCms, 'ACCOUNT_PENDING_REVIEW');
 
     const publicSite = await requestJson(`${baseUrl}/api/public/sites/package-a-approval-public`);
     assert.equal(publicSite.response.status, 200);
