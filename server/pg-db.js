@@ -868,13 +868,42 @@ async function legacyInitPostgresDb() {
 
 export { REQUIRED_SCHEMA_VERSION };
 
-function schemaNotReady(reason, actual = null) {
+function schemaNotReady(reason, diagnostics = {}) {
   return Object.assign(new Error('PostgreSQL schema version is not ready'), {
-    code: 'POSTGRES_SCHEMA_VERSION_MISMATCH',
+    code: reason === 'migration_history_invalid'
+      ? 'POSTGRES_SCHEMA_HISTORY_INVALID'
+      : 'POSTGRES_SCHEMA_VERSION_MISMATCH',
     ready: false,
     reason,
     expected: REQUIRED_SCHEMA_VERSION,
-    actual
+    actual: diagnostics.latestAppliedVersion || null,
+    migrationCount: diagnostics.migrationCount || 0,
+    appliedVersions: diagnostics.appliedVersions || [],
+    missingVersions: diagnostics.missingVersions || [],
+    notAppliedVersions: diagnostics.notAppliedVersions || [],
+    latestAppliedVersion: diagnostics.latestAppliedVersion || null
+  });
+}
+
+function schemaHistoryUnavailable(error) {
+  const databaseCode = String(error?.code || 'DATABASE_ERROR').slice(0, 40);
+  const reason = databaseCode === '42501'
+    ? 'migration_history_permission_denied'
+    : databaseCode === '3F000'
+      ? 'migration_history_schema_unavailable'
+      : 'migration_history_unavailable';
+  return Object.assign(new Error('PostgreSQL migration history could not be read'), {
+    code: 'POSTGRES_SCHEMA_HISTORY_UNAVAILABLE',
+    databaseCode,
+    ready: false,
+    reason,
+    expected: REQUIRED_SCHEMA_VERSION,
+    actual: null,
+    migrationCount: 0,
+    appliedVersions: [],
+    missingVersions: [],
+    notAppliedVersions: [],
+    latestAppliedVersion: null
   });
 }
 
@@ -885,17 +914,46 @@ export async function verifyPostgresSchema({ query = pgQuery, enabled = PG_ENABL
     ({ rows = [] } = await query('SELECT version, status FROM bookai_schema_migrations'));
   } catch (error) {
     if (error?.code === '42P01') throw schemaNotReady('version_table_missing');
-    throw schemaNotReady('history_unavailable');
+    throw schemaHistoryUnavailable(error);
   }
 
   if (!rows.length) throw schemaNotReady('history_empty');
-  const history = new Map(rows.map((row) => [String(row.version), String(row.status)]));
+  const allowedStatuses = new Set(['applied', 'failed', 'running']);
+  const history = new Map();
+  for (const row of rows) {
+    const version = row?.version;
+    const status = row?.status;
+    if (typeof version !== 'string' || !ORDERED_MIGRATION_VERSIONS.includes(version)
+      || typeof status !== 'string' || !allowedStatuses.has(status)
+      || history.has(version)) {
+      throw schemaNotReady('migration_history_invalid', {
+        migrationCount: rows.length,
+        appliedVersions: [],
+        missingVersions: [],
+        notAppliedVersions: [],
+        latestAppliedVersion: null
+      });
+    }
+    history.set(version, status);
+  }
   const requiredIndex = ORDERED_MIGRATION_VERSIONS.indexOf(REQUIRED_SCHEMA_VERSION);
   const requiredHistory = ORDERED_MIGRATION_VERSIONS.slice(0, requiredIndex + 1);
-  const latestApplied = requiredHistory.filter((version) => history.get(version) === 'applied').at(-1) || null;
+  const appliedVersions = requiredHistory.filter((version) => history.get(version) === 'applied');
+  const missingVersions = requiredHistory.filter((version) => !history.has(version));
+  const notAppliedVersions = requiredHistory.filter((version) => history.has(version) && history.get(version) !== 'applied');
+  const latestAppliedVersion = appliedVersions.at(-1) || null;
+  const diagnostics = {
+    migrationCount: rows.length,
+    appliedVersions,
+    missingVersions,
+    notAppliedVersions,
+    latestAppliedVersion
+  };
   const requiredStatus = history.get(REQUIRED_SCHEMA_VERSION);
-  if (requiredStatus && requiredStatus !== 'applied') throw schemaNotReady('migration_not_applied', latestApplied);
-  if (latestApplied !== REQUIRED_SCHEMA_VERSION) throw schemaNotReady('version_mismatch', latestApplied);
+  if (requiredStatus && requiredStatus !== 'applied') throw schemaNotReady('migration_not_applied', diagnostics);
+  if (missingVersions.length) throw schemaNotReady('required_migrations_missing', diagnostics);
+  if (notAppliedVersions.length) throw schemaNotReady('migration_not_applied', diagnostics);
+  if (latestAppliedVersion !== REQUIRED_SCHEMA_VERSION) throw schemaNotReady('version_mismatch', diagnostics);
 
   return { ready: true, version: REQUIRED_SCHEMA_VERSION };
 }

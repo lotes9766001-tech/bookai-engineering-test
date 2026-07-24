@@ -104,7 +104,15 @@ function recordPostgresError(error) {
   postgresCheckedAt = new Date().toISOString();
   postgresError = {
     code: error?.code || '',
-    message: error?.message || String(error || 'Unknown PostgreSQL error')
+    message: error?.message || String(error || 'Unknown PostgreSQL error'),
+    reason: error?.reason || 'database_unavailable',
+    expected: error?.expected || null,
+    actual: error?.actual || null,
+    migrationCount: error?.migrationCount || 0,
+    appliedVersions: error?.appliedVersions || [],
+    missingVersions: error?.missingVersions || [],
+    notAppliedVersions: error?.notAppliedVersions || [],
+    latestAppliedVersion: error?.latestAppliedVersion || null
   };
 }
 
@@ -123,16 +131,30 @@ async function checkPostgresStartup() {
   console.log('POSTGRES_STARTUP: initializing');
 
   try {
-    await verifyPostgresSchema();
+    const schema = await verifyPostgresSchema();
+    console.log('POSTGRES_STARTUP: database connected');
+    console.log('POSTGRES_STARTUP: migration history read');
     postgresReady = true;
     postgresError = null;
     postgresCheckedAt = new Date().toISOString();
-    console.log('POSTGRES_STARTUP: ready');
+    console.log('POSTGRES_STARTUP: schema ready', { version: schema.version });
   } catch (error) {
     recordPostgresError(error);
+    if (error?.code === 'POSTGRES_SCHEMA_VERSION_MISMATCH') {
+      console.log('POSTGRES_STARTUP: database connected');
+      console.warn('POSTGRES_STARTUP: migration history not ready', { reason: postgresError.reason });
+    }
     console.error('POSTGRES_STARTUP_FAILED:', {
       code: postgresError.code,
-      message: postgresError.message
+      message: postgresError.message,
+      reason: postgresError.reason,
+      expected: postgresError.expected,
+      actual: postgresError.actual,
+      migrationCount: postgresError.migrationCount,
+      appliedVersions: postgresError.appliedVersions,
+      missingVersions: postgresError.missingVersions,
+      notAppliedVersions: postgresError.notAppliedVersions,
+      latestAppliedVersion: postgresError.latestAppliedVersion
     });
   }
 }
@@ -1381,6 +1403,10 @@ app.get('/api/health', async (req, res) => {
     checks: {
       server: true,
       database: false,
+      process: true,
+      databaseConnectivity: false,
+      schemaReady: !PG_ENABLED,
+      runtimeReady: false,
       ...configChecks
     },
     capabilities: {
@@ -1409,15 +1435,41 @@ app.get('/api/health', async (req, res) => {
   }
 
   try {
+    let databaseConnectivity = false;
     if (PG_ENABLED) {
       await withTimeout(pgOne('SELECT 1 AS ok'), 5000);
-      if (!postgresReady) {
-        const error = new Error('PostgreSQL initialization is incomplete');
-        error.code = postgresError?.code || 'POSTGRES_INITIALIZATION_INCOMPLETE';
-        throw error;
-      }
+      databaseConnectivity = true;
     } else {
       db.prepare('SELECT 1 AS ok').get();
+      databaseConnectivity = true;
+    }
+    const schemaReady = !PG_ENABLED || postgresReady;
+    const runtimeReady = envStatus.runtimeReady && databaseConnectivity && schemaReady;
+    if (!runtimeReady) {
+      return res.status(503).json({
+        ...base,
+        ok: false,
+        status: 'unhealthy',
+        errorCode: postgresError?.code || 'POSTGRES_INITIALIZATION_INCOMPLETE',
+        database: { provider, ready: databaseConnectivity && schemaReady },
+        checks: {
+          server: true,
+          database: databaseConnectivity,
+          process: true,
+          databaseConnectivity,
+          schemaReady,
+          runtimeReady,
+          ...configChecks
+        },
+        schema: PG_ENABLED ? {
+          ready: false,
+          reason: postgresError?.reason || 'startup_check_pending',
+          migrationCount: postgresError?.migrationCount || 0,
+          missingVersions: postgresError?.missingVersions || [],
+          notAppliedVersions: postgresError?.notAppliedVersions || [],
+          latestAppliedVersion: postgresError?.latestAppliedVersion || null
+        } : { ready: true }
+      });
     }
     const degraded = !envStatus.privilegedIdentity.ready || !envStatus.cors.ready;
     return res.status(200).json({
@@ -1426,7 +1478,16 @@ app.get('/api/health', async (req, res) => {
       status: degraded ? 'degraded' : 'healthy',
       postgresReady: provider === 'postgresql',
       database: { provider, ready: true },
-      checks: { server: true, database: true, ...configChecks },
+      checks: {
+        server: true,
+        database: true,
+        process: true,
+        databaseConnectivity: true,
+        schemaReady: true,
+        runtimeReady: true,
+        ...configChecks
+      },
+      schema: { ready: true },
     });
   } catch (err) {
     if (PG_ENABLED) recordPostgresError(err);

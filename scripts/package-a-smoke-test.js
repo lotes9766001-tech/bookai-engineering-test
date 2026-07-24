@@ -166,7 +166,12 @@ async function developmentSqliteSmoke() {
     assert.equal(health.body.status, 'healthy');
     assert.equal(health.body.database.provider, 'sqlite');
     assert.equal(health.body.checks.runtimeEnv, true);
+    assert.equal(health.body.checks.process, true);
+    assert.equal(health.body.checks.databaseConnectivity, true);
+    assert.equal(health.body.checks.schemaReady, true);
+    assert.equal(health.body.checks.runtimeReady, true);
     assert.equal(health.body.capabilities.bootstrapAvailable, false);
+    assert.equal(Object.prototype.hasOwnProperty.call(health.body.schema || {}, 'appliedVersions'), false);
 
     const missingApi = await requestJson(`${baseUrl}/api/package-a-missing`);
     assert.equal(missingApi.response.status, 404);
@@ -305,7 +310,12 @@ async function bootstrapOptionalSmoke() {
       assert.equal(response.response.status, 404);
     }
     const health = await requestJson(`${baseUrl}/api/health`);
+    assert.equal(health.response.status, 503);
     assert.equal(health.body.checks.runtimeEnv, true);
+    assert.equal(health.body.checks.process, true);
+    assert.equal(health.body.checks.databaseConnectivity, false);
+    assert.equal(health.body.checks.schemaReady, false);
+    assert.equal(health.body.checks.runtimeReady, false);
     assert.equal(health.body.capabilities.bootstrapAvailable, false);
   } finally {
     await stopServer(child);
