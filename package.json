@@ -36,6 +36,9 @@
     "smoke:runtime-schema-version": "node scripts/runtime-schema-version-smoke-test.js",
     "smoke:sqlite-isolation": "node scripts/sqlite-test-isolation-check.js",
     "smoke:auth-login": "node scripts/auth-login-smoke-test.js",
+    "staging:qa-account:check": "node scripts/staging-qa-account.js check",
+    "staging:qa-account:create": "node scripts/staging-qa-account.js create",
+    "smoke:staging-qa-account": "node scripts/staging-qa-account-smoke-test.js",
     "gate:rc": "node scripts/rc-release-gate.js"
   },
   "devDependencies": {
